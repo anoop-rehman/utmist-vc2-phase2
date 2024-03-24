@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 # Load the environment
-env = dm_soccer.load(team_size=2, time_limit=5.0, disable_walker_contacts=False,
+env = dm_soccer.load(team_size=2, time_limit=3.0, disable_walker_contacts=False,
                      enable_field_box=True, terminate_on_goal=False,
                      walker_type=dm_soccer.WalkerType.BOXHEAD)
 
@@ -51,6 +51,6 @@ num_frames = 200
 ani = FuncAnimation(fig, update, frames=range(num_frames), init_func=init, blit=False)
 
 # Save the animation
-ani.save('simulation.gif', writer='pillow', fps=20)
+ani.save('simulation.gif', writer='pillow', fps=5)
 
 plt.close(fig)  # Close the figure to prevent it from displaying after saving

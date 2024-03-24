@@ -49,10 +49,11 @@
 import numpy as np
 from dm_control.locomotion import soccer as dm_soccer
 from dm_control import viewer
-from tensorflow.keras import layers
+from keras import layers
 import tensorflow as tf
 from collections import deque
 import random
+from pprint import pprint
 
 
 # Instantiates a 2-vs-2 BOXHEAD soccer environment with episodes of 10 seconds
@@ -91,8 +92,19 @@ env = dm_soccer.load(team_size=2,
 # print('Action dimension:', action_dim)
 
 # Constants and Hyperparameters
-STATE_DIM = env.observation_space.shape  # To be adjusted according to your environment's state space
-ACTION_DIM = env.action_space.shape[0]  # To be adjusted according to your environment's action space
+observation_spec, action_spec = env.observation_spec(), env.action_spec()
+# pprint(f"Total obs = ", len(observation_spec))
+keys = observation_spec[0].keys()
+# pprint(keys)
+for obs in observation_spec:
+    for observation_name, spec in obs.items():
+        # Get the shape of the observation
+        observation_shape = spec.shape
+        # Print the observation name and its shape
+        print(f"Observation '{observation_name}' has shape: {observation_shape}")
+        
+STATE_DIM = observation_spec.shape  # To be adjusted according to your environment's state space
+ACTION_DIM = action_spec[next(iter(observation_spec))].shape  # To be adjusted according to your environment's action space
 ACTOR_LR = 1e-4
 CRITIC_LR = 2e-4
 GAMMA = 0.99

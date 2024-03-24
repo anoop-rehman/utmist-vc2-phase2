@@ -40,7 +40,7 @@ def update_plots(frame):
 def step_env():
  
     time_step = env.reset()
-    for i in range(200):  # Number of steps to simulate
+    for i in range(10):  # Number of steps to simulate
         actions = np.random.uniform(-1.0, 1.0, size=(4, env.action_spec()[0].shape[0]))  # Example random policy
         timestep = env.step(actions)
         print(f'Step {i}')
@@ -60,7 +60,8 @@ def step_env():
 step_env()
 
 # Create and save the animation of the plots
-ani = FuncAnimation(fig, update_plots, frames=np.arange(200), blit=False)
+# ani = FuncAnimation(fig, update_plots, frames=np.arange(200), blit=False)
+ani = FuncAnimation(fig, update_plots, frames=np.arange(10), blit=False)
 ani.save('simulation.gif', writer='pillow', fps=5)
 plt.close(fig)  # Close the figure
 

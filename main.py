@@ -68,4 +68,4 @@ plt.close(fig)  # Close the figure
 # Path to save the viewer output GIF
 viewer_output_gif_path = 'viewer_output.gif'
 # Save the viewer frames as a GIF after all frames have been collected
-imageio.mimsave(viewer_output_gif_path, viewer_frames, fps=5)
+imageio.mimsave(viewer_output_gif_path, viewer_frames, fps=1000 * 1/5.0)

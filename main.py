@@ -49,8 +49,8 @@ viewer.launch(env, policy=random_policy)
 
 collect_and_store_observations()
 
-# Plotting the statistics over time
-def plot_stats_over_time(stats_over_time):
+# Plotting all data over time
+def plot_all_data_over_time(stats_over_time):
     # Convert all lists to numpy arrays for easier manipulation.
     for key in stats_over_time:
         stats_over_time[key] = np.array(stats_over_time[key])
@@ -85,4 +85,41 @@ def plot_stats_over_time(stats_over_time):
     plt.tight_layout()
     plt.savefig('stats_over_time.pdf')
 
+def plot_stats_over_time(stats_over_time):
+    # Filter out only the statistics keys containing the word "stats"
+    stats_keys = [key for key in stats_over_time.keys() if 'stats' in key]
+
+    # Convert all lists to numpy arrays for easier manipulation.
+    for key in stats_keys:
+        stats_over_time[key] = np.array(stats_over_time[key])
+
+    # Determine the total number of plots needed.
+    total_plots = len(stats_keys)
+
+    # Choose a layout that fits all plots reasonably well.
+    num_columns = 2
+    num_rows = (total_plots + num_columns - 1) // num_columns  # Ceiling division
+
+    plt.figure(figsize=(15, num_rows * 3))  # Adjust figure size based on number of rows.
+    
+    plot_counter = 1  # Counter to track the subplot position.
+    for key in stats_keys:
+        values = stats_over_time[key]
+        plt.subplot(num_rows, num_columns, plot_counter)
+        plt.plot(values.squeeze())  # Squeeze in case of (N, 1) shape arrays.
+        plt.title(key)
+        plt.xlabel('Timestep')
+        plt.ylabel('Value')
+        plot_counter += 1
+
+    plt.tight_layout()
+    plt.savefig('stats_over_time.pdf')
+
 plot_stats_over_time(stats_over_time)
+
+for key, values in stats_over_time.items():
+    print(f"Statistic: {key}")
+    print(f"Number of observations: {len(values)}")
+    print(f"Shape of observations array: {values[0].shape}")
+    print(f"Sample observation: {values[0]}")
+    print("-------------------------")

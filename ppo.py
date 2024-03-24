@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from welford import Welford
 from dm_control import suite
-from dm_control import viewer
+from dm_control.locomotion import soccer as dm_soccer
 import glob
 import subprocess
 import matplotlib.pyplot as plt
@@ -96,8 +96,16 @@ class PPO:
         np.random.seed(self.arglist.seed)
         torch.manual_seed(self.arglist.seed)
         
+        # self.env = dm_soccer.load(team_size=2,
+        #              time_limit=10.0,
+        #              disable_walker_contacts=False,
+        #              enable_field_box=True,
+        #              terminate_on_goal=False,
+        #              walker_type=dm_soccer.WalkerType.ANT)
         self.env = suite.load(domain_name=self.arglist.domain, task_name=self.arglist.task, task_kwargs={'random': self.arglist.seed})
         obs_spec = self.env.observation_spec()
+        # print(obs_spec)
+
         action_spec = self.env.action_spec()
         self.obs_size = np.sum([math.prod(obs_spec[k].shape) for k in obs_spec])
         self.action_size = math.prod(action_spec.shape)

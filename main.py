@@ -4,7 +4,7 @@ from dm_control import viewer
 import matplotlib.pyplot as plt
 
 # Constants
-TEAM_SIZE = 4
+TEAM_SIZE = 2
 
 # Instantiates a 2-vs-2 BOXHEAD soccer environment with episodes of 10 seconds
 # each. Upon scoring, the environment reset player positions and the episode
@@ -48,15 +48,18 @@ if len(stats_over_time) % 2 != 0:
 # Collect observations and update plots in real-time
 action_specs = env.action_spec()
 timestep = env.reset()
+time = 0
 while not timestep.last():
     actions = np.random.uniform(-1.0, 1.0, size=(4, action_specs[0].shape[0]))  # Example random policy
     timestep = env.step(actions)
-    # Update stats_over_time with new observations
-    for key in stats_over_time.keys():
-        for i in range(len(action_specs)):
-                stats_over_time[key].append(timestep.observation[i][key])
-    # Update plots with new data
-    update_plots(fig, axes, stats_over_time)
+    if time % TEAM_SIZE == 0:
+        # Update stats_over_time with new observations
+        for key in stats_over_time.keys():
+            for i in range(len(action_specs)):
+                    stats_over_time[key].append(timestep.observation[i][key])
+        # Update plots with new data
+        update_plots(fig, axes, stats_over_time)
+    time += 1
 
 plt.ioff()  # Turn off interactive mode
 plt.show()

@@ -1,7 +1,7 @@
 import numpy as np
 from dm_control.locomotion import soccer as dm_soccer
 from dm_control import viewer
-
+import matplotlib.pyplot as plt
 
 # Instantiates a 2-vs-2 BOXHEAD soccer environment with episodes of 10 seconds
 # each. Upon scoring, the environment reset player positions and the episode
@@ -44,3 +44,15 @@ def random_policy(time_step):
 
 # Use the viewer to visualize the environment with the random policy.
 viewer.launch(env, policy=random_policy)
+
+vis_data = env.observation_spec()[0].keys()
+for key in vis_data:
+    print('key:', key, ', value:', env.observation_spec()[0][key].shape)
+    plt.plot(env.observation_spec()[0][key].shape)
+    plt.title(key)
+    plt.show()
+
+
+def visualize(env, policy):
+    # Use the viewer to visualize the environment with the random policy.
+    viewer.launch(env, policy=policy)

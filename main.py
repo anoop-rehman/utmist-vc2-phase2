@@ -1,51 +1,3 @@
-# import numpy as np
-# from dm_control.locomotion import soccer as dm_soccer
-# from dm_control import viewer
-
-
-# # Instantiates a 2-vs-2 BOXHEAD soccer environment with episodes of 10 seconds
-# # each. Upon scoring, the environment reset player positions and the episode
-# # continues. In this example, players can physically block each other and the
-# # ball is trapped within an invisible box encapsulating the field.
-# env = dm_soccer.load(team_size=2,
-#                      time_limit=10.0,
-#                      disable_walker_contacts=False,
-#                      enable_field_box=True,
-#                      terminate_on_goal=False,
-#                      walker_type=dm_soccer.WalkerType.ANT)
-
-# # # Retrieves action_specs for all 4 players.
-# # action_specs = env.action_spec()
-
-# # # Step through the environment for one episode with random actions.
-# # timestep = env.reset()
-# # while not timestep.last():
-# #   actions = []
-# #   for action_spec in action_specs:
-# #     action = np.random.uniform(
-# #         action_spec.minimum, action_spec.maximum, size=action_spec.shape)
-# #     actions.append(action)
-# #   timestep = env.step(actions)
-
-# #   for i in range(len(action_specs)):
-# #     print(
-# #         "Player {}: reward = {}, discount = {}, observations = {}.".format(
-# #             i, timestep.reward[i], timestep.discount, timestep.observation[i]))
-
-# # Function to generate random actions for all players.
-# def random_policy(time_step):
-#     actions = []
-#     action_specs = env.action_spec()
-#     for action_spec in action_specs:
-#         action = np.random.uniform(
-#             action_spec.minimum, action_spec.maximum, size=action_spec.shape)
-#         actions.append(action)
-#     return actions
-
-# # Use the viewer to visualize the environment with the random policy.
-# viewer.launch(env, policy=random_policy)
-
-
 import numpy as np
 from dm_control.locomotion import soccer as dm_soccer
 from dm_control import viewer
@@ -65,7 +17,7 @@ env = dm_soccer.load(team_size=2,
                      disable_walker_contacts=False,
                      enable_field_box=True,
                      terminate_on_goal=False,
-                     walker_type=dm_soccer.WalkerType.ANT)
+                     walker_type=dm_soccer.WalkerType.BOXHEAD)
 
 
 # # Assuming env has been correctly initialized
@@ -93,18 +45,27 @@ env = dm_soccer.load(team_size=2,
 
 # Constants and Hyperparameters
 observation_spec, action_spec = env.observation_spec(), env.action_spec()
-# pprint(f"Total obs = ", len(observation_spec))
+# print(type(observation_spec[0]))
 keys = observation_spec[0].keys()
-# pprint(keys)
-for obs in observation_spec:
-    for observation_name, spec in obs.items():
-        # Get the shape of the observation
-        observation_shape = spec.shape
-        # Print the observation name and its shape
-        print(f"Observation '{observation_name}' has shape: {observation_shape}")
+# print(keys)
+# print(type(observation_spec[0]['sensors_accelerometer']))
+# pprint(f"Total obs = ", len(observation_spec))
+# keys = observation_spec[0].keys()
+# for obs in observation_spec:
+#     for observation_name, spec in obs.items():
+#         # Get the shape of the observation
+#         observation_shape = spec.shape
+#         # Print the observation name and its shape
+#         print(f"Observation '{observation_name}' has shape: {observation_shape}")
+
+# print(action_spec)
+
+
         
-STATE_DIM = observation_spec.shape  # To be adjusted according to your environment's state space
-ACTION_DIM = action_spec[next(iter(observation_spec))].shape  # To be adjusted according to your environment's action space
+STATE_DIM = sum(np.prod(env.observation_spec()[0][key].shape) for key in env.observation_spec()[0].keys() if 'stats' not in key)
+print(STATE_DIM)
+# ACTION_DIM = action_spec[next(iter(observation_spec))].shape  # To be adjusted according to your environment's action space
+ACTION_DIM = action_spec[0].shape[0]
 ACTOR_LR = 1e-4
 CRITIC_LR = 2e-4
 GAMMA = 0.99
@@ -183,6 +144,34 @@ def random_policy(time_step):
         actions.append(action)
     return actions
 
+def constant_policy(time_step):
+    actions = []
+    action_specs = env.action_spec()
+    for action_spec in action_specs:
+        action = np.ones(action_spec.shape)
+        actions.append(action)
+    return actions
+
+
+counter = 0
+
+def custom_policy(time_step):
+    actions = []
+    action_specs = env.action_spec()
+
+    for action_spec in action_specs:
+        action = np.ones(action_spec.shape)
+        action[0] = 1.0
+        action[1] = 0.2
+        action[2] = 0.0
+        global counter
+        if counter < 3:
+            pprint(time_step)
+        counter += 1
+
+        actions.append(action)
+    return actions
+
 # Training function to replace random_policy
 def svg0_policy(time_step):
     if replay_buffer.size() < MIN_BUFFER_SIZE: 
@@ -222,4 +211,4 @@ def svg0_policy(time_step):
 #     print(f'Episode: {episode} Total Reward: {episode_reward}')
 
 # Use the viewer to visualize the environment
-viewer.launch(env, policy=random_policy)
+viewer.launch(env, policy=custom_policy)

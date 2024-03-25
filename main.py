@@ -19,52 +19,10 @@ env = dm_soccer.load(team_size=2,
                      terminate_on_goal=False,
                      walker_type=dm_soccer.WalkerType.BOXHEAD)
 
-
-# # Assuming env has been correctly initialized
-# observation_spec = env.observation_spec()
-# action_spec = env.action_spec()
-
-# # Observation spec is a list, let's handle it properly
-# def get_observation_dim(obs_spec):
-#     total_dims = 0
-#     for obs in obs_spec:
-#         # Each obs is an OrderedDict where each item has a shape attribute
-#         for key, spec in obs.items():
-#             total_dims += np.prod(spec.shape)
-#     return total_dims
-
-# # Calculate the total dimension of the observation space
-# observation_dim = get_observation_dim(observation_spec)
-
-# # Action spec gives us the shape directly
-# action_dim = action_spec.shape[0]
-
-# # Print the observation and action space dimensions
-# print('Observation dimension:', observation_dim)
-# print('Action dimension:', action_dim)
-
-# Constants and Hyperparameters
 observation_spec, action_spec = env.observation_spec(), env.action_spec()
-# print(type(observation_spec[0]))
 keys = observation_spec[0].keys()
-# print(keys)
-# print(type(observation_spec[0]['sensors_accelerometer']))
-# pprint(f"Total obs = ", len(observation_spec))
-# keys = observation_spec[0].keys()
-# for obs in observation_spec:
-#     for observation_name, spec in obs.items():
-#         # Get the shape of the observation
-#         observation_shape = spec.shape
-#         # Print the observation name and its shape
-#         print(f"Observation '{observation_name}' has shape: {observation_shape}")
-
-# print(action_spec)
-
-
         
 STATE_DIM = sum(np.prod(env.observation_spec()[0][key].shape) for key in env.observation_spec()[0].keys() if 'stats' not in key)
-print(STATE_DIM)
-# ACTION_DIM = action_spec[next(iter(observation_spec))].shape  # To be adjusted according to your environment's action space
 ACTION_DIM = action_spec[0].shape[0]
 ACTOR_LR = 1e-4
 CRITIC_LR = 2e-4

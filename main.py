@@ -13,7 +13,7 @@ from pprint import pprint
 # continues. In this example, players can physically block each other and the
 # ball is trapped within an invisible box encapsulating the field.
 env = dm_soccer.load(team_size=2,
-                     time_limit=10.0,
+                     time_limit=20.0,
                      disable_walker_contacts=False,
                      enable_field_box=True,
                      terminate_on_goal=False,
@@ -118,14 +118,20 @@ def custom_policy(time_step):
     action_specs = env.action_spec()
 
     for action_spec in action_specs:
+        # global counter
+        # counter += 1
+        # print(0.2 - counter / 50000)
+
         action = np.ones(action_spec.shape)
-        action[0] = 1.0
-        action[1] = 0.2
-        action[2] = 0.0
-        global counter
-        if counter < 3:
-            pprint(time_step)
-        counter += 1
+        action[0] = 1.0 # forward accel
+        action[1] = 0.0 # torque
+        action[2] = 0.0 # jump
+     
+        # if counter > 500:
+        #     action[1] = np.random.uniform(-0.3, -0.1) 
+        #     counter = 0
+        print(time_step.observation[1])
+
 
         actions.append(action)
     return actions

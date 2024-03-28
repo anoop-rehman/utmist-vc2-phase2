@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from welford import Welford
 from dm_control import suite
-from dm_control.locomotion import soccer as dm_soccer
+from dm_control.locomotion.examples import basic_cmu_2019
 import glob
 import subprocess
 import matplotlib.pyplot as plt
@@ -102,7 +102,8 @@ class PPO:
         #              enable_field_box=True,
         #              terminate_on_goal=False,
         #              walker_type=dm_soccer.WalkerType.ANT)
-        self.env = suite.load(domain_name=self.arglist.domain, task_name=self.arglist.task, task_kwargs={'random': self.arglist.seed})
+        self.env = basic_cmu_2019.cmu_humanoid_run_walls()
+        # self.env = suite.load(domain_name=self.arglist.domain, task_name=self.arglist.task, task_kwargs={'random': self.arglist.seed})
         obs_spec = self.env.observation_spec()
         # print(obs_spec)
 

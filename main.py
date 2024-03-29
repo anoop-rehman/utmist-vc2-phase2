@@ -1,178 +1,191 @@
+import yaml
+import argparse
+
+import torch
 import numpy as np
-from dm_control.locomotion import soccer as dm_soccer
-from dm_control import viewer
-from keras import layers
-import tensorflow as tf
-from collections import deque
-import random
-from pprint import pprint
+import gymnasium as gym
+from gymnasium.wrappers import RecordEpisodeStatistics
+
+from algos.svg_0.agent import SVG0
+from algos.svg_0_kl_prior.agent import SVG0 as SVG0_KL_prior
+from utils import make_gif, Logger, RolloutBuffer, DMControlWrapper
+
+from simple_svg_boxheads2 import BoxHeadSoccerEnv
+
+def main(config, agent_cls):
+    Logger.get().info(f"Start training, experiment name: {config['name']}")
+    Logger.get().info(f"Config: {config}")
+
+    if config["is_dm_control"]:
+        env = RecordEpisodeStatistics(BoxHeadSoccerEnv(
+            team_size=2,
+            time_limit=20.0,
+            disable_walker_contacts=False,
+            enable_field_box=True,
+            terminate_on_goal=False
+        ))
+
+        test_env = RecordEpisodeStatistics(BoxHeadSoccerEnv(
+            team_size=2,
+            time_limit=20.0,
+            disable_walker_contacts=False,
+            enable_field_box=True,
+            terminate_on_goal=False
+            # For rendering in test_env, you might need to handle rendering separately inside the BoxHeadSoccerEnv class
+        ))
+        # env = RecordEpisodeStatistics(
+        #     DMControlWrapper(config["domain"], config["task"])
+        # )
+        # test_env = RecordEpisodeStatistics(
+        #     DMControlWrapper(
+        #         config["domain"],
+        #         config["task"],
+        #         render_kwargs={"height": 480, "width": 640},
+        #     )
+        # )
 
 
-# Instantiates a 2-vs-2 BOXHEAD soccer environment with episodes of 10 seconds
-# each. Upon scoring, the environment reset player positions and the episode
-# continues. In this example, players can physically block each other and the
-# ball is trapped within an invisible box encapsulating the field.
-env = dm_soccer.load(team_size=2,
-                     time_limit=20.0,
-                     disable_walker_contacts=False,
-                     enable_field_box=True,
-                     terminate_on_goal=False,
-                     walker_type=dm_soccer.WalkerType.BOXHEAD)
 
-observation_spec, action_spec = env.observation_spec(), env.action_spec()
-keys = observation_spec[0].keys()
-        
-STATE_DIM = sum(np.prod(env.observation_spec()[0][key].shape) for key in env.observation_spec()[0].keys() if 'stats' not in key)
-ACTION_DIM = action_spec[0].shape[0]
-ACTOR_LR = 1e-4
-CRITIC_LR = 2e-4
-GAMMA = 0.99
-TAU = 0.005
-BUFFER_SIZE = 100000
-MIN_BUFFER_SIZE = 1000
-BATCH_SIZE = 64
-# NUM_EPISODES = 1000
-NUM_EPISODES = 3
+    else:
+        env = RecordEpisodeStatistics(gym.make(config["env"]))
+        test_env = RecordEpisodeStatistics(
+            gym.make(config["env"], render_mode="rgb_array")
+        )
 
-# Replay buffer to store transitions
-class ReplayBuffer:
-    def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)
-    
-    def add(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
-    
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        state, action, reward, next_state, done = map(np.stack, zip(*batch))
-        return state, action, reward, next_state, done
+    Logger.get().info(f"Env spaces: {env.observation_space, env.action_space}")
+    agent = agent_cls(
+        obs_dim=env.observation_space.shape[0],
+        action_dim=env.action_space.shape[0],
+        action_lim=0.8,
+        action_space=env.action_space,
+        device=config["device"],
+        **config["svg0"],
+    ).to(config["device"])
 
-# Actor Model (Policy)
-def create_actor(state_dim, action_dim):
-    inputs = layers.Input(shape=(state_dim,))
-    out = layers.Dense(256, activation="relu")(inputs)
-    out = layers.Dense(256, activation="relu")(out)
-    outputs = layers.Dense(action_dim, activation="tanh")(out)  # Assuming action space is [-1, 1]
-    
-    model = tf.keras.Model(inputs, outputs)
-    return model
+    buffer = RolloutBuffer(
+        config["svg0"]["buffer_steps"],
+        env.observation_space.shape[0],
+        env.action_space.shape[0],
+        config["device"],
+    )
 
-# Critic Model (Value Function)
-def create_critic(state_dim, action_dim):
-    state_input = layers.Input(shape=(state_dim,))
-    action_input = layers.Input(shape=(action_dim,))
-    concatenated = layers.Concatenate()([state_input, action_input])
-    
-    out = layers.Dense(256, activation="relu")(concatenated)
-    out = layers.Dense(256, activation="relu")(out)
-    outputs = layers.Dense(1, activation="linear")(out)
-    
-    model = tf.keras.Model([state_input, action_input], outputs)
-    return model
+    global_step = 0
+    for episode in range(1, config["epochs"]):
+        obs, _ = env.reset()
+        termination, truncated = False, False
 
+        while not (termination or truncated):
+            obs = torch.tensor(obs).to(config["device"])
 
-# The training step function
-def train_step(states, actions, rewards, next_states, dones):
-    # Compute target actions using actor_target
-    # Compute Q-values using critic_target
-    # Compute actor and critic losses
-    # Update critic using critic_loss
-    # Update actor using policy gradient
-    # Soft update target networks
-    pass  # This function needs to be fully implemented
+            if global_step < config["svg0"]["buffer_steps"]:
+                act = env.action_space.sample()
+            else:
+                act = agent.act(obs).cpu().numpy()
 
-# Initialize replay buffer
-replay_buffer = ReplayBuffer(BUFFER_SIZE)
+            next_obs, rew, termination, truncated, info = env.step(act)
 
-# Instantiate models and optimizers
-actor = create_actor(STATE_DIM, ACTION_DIM)
-critic = create_critic(STATE_DIM, ACTION_DIM)
-actor_target = create_actor(STATE_DIM, ACTION_DIM)
-critic_target = create_critic(STATE_DIM, ACTION_DIM)
-actor_optimizer = tf.keras.optimizers.Adam(learning_rate=ACTOR_LR)
-critic_optimizer = tf.keras.optimizers.Adam(learning_rate=CRITIC_LR)
+            buffer.store(obs, act, rew, next_obs, termination)
+            obs = next_obs
 
-# Random policy
-def random_policy(time_step):
-    actions = []
-    action_specs = env.action_spec()
-    for action_spec in action_specs:
-        action = np.random.uniform(
-            action_spec.minimum, action_spec.maximum, size=action_spec.shape)
-        actions.append(action)
-    return actions
+            if termination or truncated:
+                break
 
-def constant_policy(time_step):
-    actions = []
-    action_specs = env.action_spec()
-    for action_spec in action_specs:
-        action = np.ones(action_spec.shape)
-        actions.append(action)
-    return actions
+            # Update on filled buffer and update check
+            if (
+                global_step % config["update_every_n"] == 0
+                and global_step > config["svg0"]["buffer_steps"]
+            ):
+                batch = buffer.get()
+                agent.optimize(batch, global_step)
+
+            global_step += 1
+
+        # Log final episode statistics
+        writer = Logger.get().writer
+        writer.add_scalar("env/ep_return", info["episode"]["r"], global_step)
+        writer.add_scalar("env/ep_length", info["episode"]["l"], global_step)
+
+        # Store the weights, make a gif, eval and logging
+        if episode % config["log_every_n"] == 0 and episode != 0:
+            if episode % (config["log_every_n"] * 5) == 0:
+                make_gif(agent, test_env, episode, config)
+
+            # Save the weights
+            if not config["debug"]:
+                agent.save_weights(config["path"], episode)
+
+            test_return, test_ep_len = evaluate_policy(agent, test_env)
+
+            Logger.get().info(
+                f"episode #: {episode} "
+                f"train - episode return, length: ({np.mean(info['episode']['r']):.3f}, "
+                f" {np.mean(info['episode']['l']):.0f}) "
+                f"test - episode return, length: ({np.mean(test_return):.3f}, "
+                f"{np.mean(test_ep_len):.0f})"
+            )
+
+            writer.add_scalar("env/test_ep_return", test_return, global_step)
+            writer.add_scalar("env/test_ep_length", test_ep_len, global_step)
 
 
-counter = 0
+def evaluate_policy(agent, env, episodes=10):
+    avg_return, avg_ep_len = [], []
+    for _ in range(1, episodes):
+        obs, _ = env.reset()
+        termination, truncated = False, False
 
-def custom_policy(time_step):
-    actions = []
-    action_specs = env.action_spec()
+        while not (termination or truncated):
+            obs = torch.tensor(obs).to(config["device"])
+            act = agent.act(obs, deterministic=True)
+            next_obs, _, termination, truncated, info = env.step(act.cpu().numpy())
 
-    for action_spec in action_specs:
-        # global counter
-        # counter += 1
-        # print(0.2 - counter / 50000)
+            obs = next_obs
 
-        action = np.ones(action_spec.shape)
-        action[0] = 1.0 # forward accel
-        action[1] = 0.0 # torque
-        action[2] = 0.0 # jump
-     
-        # if counter > 500:
-        #     action[1] = np.random.uniform(-0.3, -0.1) 
-        #     counter = 0
-        print(time_step.observation[1])
+            if termination or truncated:
+                avg_return.append(info["episode"]["r"])
+                avg_ep_len.append(info["episode"]["l"])
+                break
 
-
-        actions.append(action)
-    return actions
-
-# Training function to replace random_policy
-def svg0_policy(time_step):
-    if replay_buffer.size() < MIN_BUFFER_SIZE: 
-        return random_policy(time_step) 
-    
-    # Otherwise, use the actor model to generate actions
-    actions = []
-    for walker_observation in time_step.observation['observations']:
-        action = actor.predict(walker_observation[np.newaxis, ...])
-        actions.append(action.squeeze())
-    return actions
+    return np.array(avg_return).mean(), np.array(avg_ep_len).mean()
 
 
-# # Main training loop
-# for episode in range(NUM_EPISODES):
-#     time_step = env.reset()
-#     episode_reward = 0
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-n", "--name", required=True, type=str)
+    parser.add_argument("-d", "--debug", action="store_true", help="run in debug mode")
+    parser.add_argument(
+        "-a",
+        "--agent",
+        type=str,
+        default="svg0_prior",
+        choices=["svg0", "svg0_prior", "cnn_svg0"],
+    )
+    parser.add_argument("-c", "--config", type=str, default="configs/svg0.yml")
+    args = parser.parse_args()
 
-#     while not time_step.last():
-#         action = svg0_policy(time_step)
-#         next_time_step = env.step(action)
-#         reward = next_time_step.reward
-#         done = next_time_step.last()
+    with open(args.config, "r", encoding="utf-8") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
 
-#         # Convert the TimeStep and action to suitable data structures
-#         # before adding to replay buffer
-#         replay_buffer.add(time_step.observation, action, reward, next_time_step.observation, done)
-#         time_step = next_time_step
+    # TODO: Ignore the DeprecationWarning from Tensorboard
+    import warnings
 
-#         # Train as in the SVG(0) algorithm
-#         if replay_buffer.size() >= MIN_BUFFER_SIZE:
-#             states, actions, rewards, next_states, dones = replay_buffer.sample(BATCH_SIZE)
-#             train_step(states, actions, rewards, next_states, dones)
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-#         episode_reward += reward
+    # Initialize logger
+    config["name"] = args.name
+    config["debug"] = args.debug
+    config["path"] = f"runs/{args.name}"
+    Logger(args.name, config["path"])
 
-#     print(f'Episode: {episode} Total Reward: {episode_reward}')
+    # CUDA device
+    config["device"] = torch.device(config["device_id"])
+    torch.autograd.set_detect_anomaly(True)
 
-# Use the viewer to visualize the environment
-viewer.launch(env, policy=custom_policy)
+    # Seed Numpy and Torch
+    np.random.seed(config["seed"])
+    torch.manual_seed(config["seed"])
+
+    # Determine the agent
+    agent = {"svg0": SVG0, "svg0_prior": SVG0_KL_prior}
+    agent_cls = agent[args.agent]
+    main(config, agent_cls=agent_cls)

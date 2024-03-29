@@ -2,9 +2,10 @@ import gym
 from gym import spaces
 import numpy as np
 from dm_control.locomotion import soccer as dm_soccer
+import matplotlib.pyplot as plt
 
 class BoxHeadSoccerEnv(gym.Env):
-    def __init__(self, team_size=2, time_limit=2.0, disable_walker_contacts=False, enable_field_box=True, terminate_on_goal=False):
+    def __init__(self, team_size=2, time_limit=0.2, disable_walker_contacts=False, enable_field_box=True, terminate_on_goal=False):
         super(BoxHeadSoccerEnv, self).__init__()
 
         self.env = dm_soccer.load(
@@ -58,6 +59,10 @@ class BoxHeadSoccerEnv(gym.Env):
         return obs
 
     def render(self, mode='human'):
-        # Implement rendering if necessary
+        image = self.env.physics.render(height=480, width=640, camera_id=0)
         
-        pass
+        if mode == 'human':
+            plt.imshow(image)
+            plt.show()
+        elif mode == 'rgb_array':
+            return image

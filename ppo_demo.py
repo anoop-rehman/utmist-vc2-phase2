@@ -7,7 +7,7 @@ from stable_baselines3.common.env_util import make_vec_env
 vec_env = make_vec_env("Ant-v4", n_envs=4)
 
 model = PPO("MlpPolicy", vec_env, verbose=1)
-model.learn(total_timesteps=25000)
+model.learn(total_timesteps=25000) # around 4 epochs
 model.save("ppo_ant")
 
 del model # remove to demonstrate saving and loading

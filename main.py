@@ -14,24 +14,6 @@ env = dm_soccer.load(team_size=2,
                      terminate_on_goal=False,
                      walker_type=dm_soccer.WalkerType.ANT)
 
-# # Retrieves action_specs for all 4 players.
-# action_specs = env.action_spec()
-
-# # Step through the environment for one episode with random actions.
-# timestep = env.reset()
-# while not timestep.last():
-#   actions = []
-#   for action_spec in action_specs:
-#     action = np.random.uniform(
-#         action_spec.minimum, action_spec.maximum, size=action_spec.shape)
-#     actions.append(action)
-#   timestep = env.step(actions)
-
-#   for i in range(len(action_specs)):
-#     print(
-#         "Player {}: reward = {}, discount = {}, observations = {}.".format(
-#             i, timestep.reward[i], timestep.discount, timestep.observation[i]))
-
 # Function to generate random actions for all players.
 def random_policy(time_step):
     actions = []

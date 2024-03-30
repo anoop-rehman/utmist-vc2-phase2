@@ -22,7 +22,25 @@ env = dm_soccer.load(team_size=TEAM_SIZE,
 stats_over_time = {key: [] for key in env.observation_spec()[0].keys() if 'stats' in key for player in range(TEAM_SIZE)}
 
 # Function to update the plots with the new data
+
+flag = False
 def update_plots(fig, axes, stats_over_time):
+
+    team1_velocities = []
+    team2_velocities = []
+    global flag
+
+    if not flag:
+        print(stats_over_time.items())
+        flag = True
+    # Home Home, Away Away
+    for key, values in stats_over_time.items()[0]:
+        if 'stats_home' in key:
+            team1_velocities.append(values)
+        else:
+            team2_velocities.append(values)
+        
+    # for i in range(0, )
     for ax, (key, values) in zip(axes.flat, stats_over_time.items()):
         ax.clear()  # Clear current axes to redraw
         values = np.array(values)  # Ensure it's a numpy array for easier manipulation
@@ -36,11 +54,11 @@ def update_plots(fig, axes, stats_over_time):
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Value')
         ax.legend()
-    plt.draw()
-    plt.pause(0.01)  # Pause briefly to allow the plot to be updated
+    # plt.draw()
+    # plt.pause(0.01)  # Pause briefly to allow the plot to be updated
 
 # Prepare the figure and axes for plotting
-plt.ion()  # Turn on interactive plotting mode
+# plt.ion()  # Turn on interactive plotting mode
 fig, axes = plt.subplots(len(stats_over_time) // 2, 2, figsize=(20, 10))
 if len(stats_over_time) % 2 != 0:
     fig.delaxes(axes.flatten()[-1])  # Remove the last ax if an odd number of plots
@@ -61,5 +79,5 @@ while not timestep.last():
         update_plots(fig, axes, stats_over_time)
     time += 1
 
-plt.ioff()  # Turn off interactive mode
-plt.show()
+# plt.ioff()  # Turn off interactive mode
+# plt.show()

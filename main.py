@@ -32,14 +32,24 @@ def update_plots(fig, axes, stats_over_time):
 
     if not flag:
         print(stats_over_time.items())
-        flag = True
-    # Home Home, Away Away
-    for key, values in stats_over_time.items()[0]:
-        if 'stats_home' in key:
-            team1_velocities.append(values)
-        else:
-            team2_velocities.append(values)
+
+    '''
+    stats_over_time:
+        Is a dict of key value pairs, where the key is the name of the stat and the value is a list of values for each player.
+        The first TEAM_SIZE values in the list are player i's velocity to ball for team1, the next TEAM_SIZE values are for player j's velocities to ball for team2.
         
+        etc. for each of the other stats.
+    '''    
+    # Home Home, Away Away
+    for i in range(len(stats_over_time['stats_vel_to_ball'])):
+        if i < TEAM_SIZE:
+            team1_velocities.append(stats_over_time['stats_vel_to_ball'][i])
+        else:
+            team2_velocities.append(stats_over_time['stats_vel_to_ball'][i])
+    if not flag:
+        flag = True
+        print(team1_velocities)
+        print(team2_velocities)
     # for i in range(0, )
     for ax, (key, values) in zip(axes.flat, stats_over_time.items()):
         ax.clear()  # Clear current axes to redraw
@@ -78,6 +88,7 @@ while not timestep.last():
         # Update plots with new data
         update_plots(fig, axes, stats_over_time)
     time += 1
+
 
 # plt.ioff()  # Turn off interactive mode
 # plt.show()

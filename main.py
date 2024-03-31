@@ -22,53 +22,51 @@ env = dm_soccer.load(team_size=TEAM_SIZE,
 stats_over_time = {key: [] for key in env.observation_spec()[0].keys() if 'stats' in key for player in range(TEAM_SIZE)}
 
 # Function to update the plots with the new data
-
 flag = False
 def update_plots(fig, axes, stats_over_time):
-
-    team1_velocities = []
-    team2_velocities = []
     global flag
-
+    
     if not flag:
         print(stats_over_time.items())
-
+        flag = True
+        
     '''
     stats_over_time:
         Is a dict of key value pairs, where the key is the name of the stat and the value is a list of values for each player.
         The first TEAM_SIZE values in the list are player i's velocity to ball for team1, the next TEAM_SIZE values are for player j's velocities to ball for team2.
         
         etc. for each of the other stats.
-    '''    
-    # Home Home, Away Away
-    for i in range(len(stats_over_time['stats_vel_to_ball'])):
-        if i < TEAM_SIZE:
-            team1_velocities.append(stats_over_time['stats_vel_to_ball'][i])
-        else:
-            team2_velocities.append(stats_over_time['stats_vel_to_ball'][i])
-    if not flag:
-        flag = True
-        print(team1_velocities)
-        print(team2_velocities)
-    # for i in range(0, )
+    '''   
+
     for ax, (key, values) in zip(axes.flat, stats_over_time.items()):
         ax.clear()  # Clear current axes to redraw
-        values = np.array(values)  # Ensure it's a numpy array for easier manipulation
-        num_players = TEAM_SIZE
-        num_data_points = len(values)
-        num_values_per_player = num_data_points // num_players
-        for i in range(num_players):
-            player_values = values[i::num_players]  # Extract values for each player
-            ax.plot(player_values, label=f'Player {i+1}')
+        
+        #if (key == 'closest_velocity_to_ball' or ):
+        color_team1 = ['red', 'orange', 'magenta']
+        color_team2 = ['blue', 'green', 'cyan']
+        
+        # Plot for each player in home team
+        for i in range(TEAM_SIZE):
+            player_values_home = values[i::2*TEAM_SIZE]  # Extract values for each player in home team
+            color = color_team1[i]
+            ax.plot(player_values_home, label=f'Home Team, Player {i+1}', color=color)
+        
+        # Plot for each player in away team
+        for i in range(TEAM_SIZE):
+            color = color_team2[i]
+            player_values_away = values[TEAM_SIZE + i::2*TEAM_SIZE]  # Extract values for each player in away team
+            ax.plot(player_values_away, label=f'Away Team, Player {i+1}', color=color)
+        
         ax.set_title(key)
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Value')
         ax.legend()
-    # plt.draw()
-    # plt.pause(0.01)  # Pause briefly to allow the plot to be updated
+    
+    plt.draw()
+    plt.pause(0.01)  # Pause briefly to allow the plot to be updated
 
 # Prepare the figure and axes for plotting
-# plt.ion()  # Turn on interactive plotting mode
+plt.ion()  # Turn on interactive plotting mode
 fig, axes = plt.subplots(len(stats_over_time) // 2, 2, figsize=(20, 10))
 if len(stats_over_time) % 2 != 0:
     fig.delaxes(axes.flatten()[-1])  # Remove the last ax if an odd number of plots
@@ -89,6 +87,5 @@ while not timestep.last():
         update_plots(fig, axes, stats_over_time)
     time += 1
 
-
-# plt.ioff()  # Turn off interactive mode
-# plt.show()
+plt.ioff()  # Turn off interactive mode
+plt.show()

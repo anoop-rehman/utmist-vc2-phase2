@@ -104,7 +104,8 @@ class Ant(legacy_base.Walker):
 
   @property
   def _foot_bodies(self):
-    return (self._mjcf_root.find('body', 'seg2'))
+    return (self._mjcf_root.find('body', 'seg2'),
+            self._mjcf_root.find('body', 'seg1'))
 
   @composer.cached_property
   def end_effectors(self):

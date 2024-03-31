@@ -38,8 +38,9 @@ def random_policy(time_step):
     action_specs = env.action_spec()
     for action_spec in action_specs:
         action = np.random.uniform(
-            action_spec.minimum, action_spec.maximum, size=action_spec.shape)
+            -100, 100, size=action_spec.shape)
         actions.append(action)
+        print(action)
     return actions
 
 # Use the viewer to visualize the environment with the random policy.

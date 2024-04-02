@@ -42,8 +42,20 @@ def update_plots(fig, axes, stats_over_time):
         ax.clear()  # Clear current axes to redraw
         
         #if (key == 'closest_velocity_to_ball' or ):
-        color_team1 = ['red', 'orange', 'magenta']
-        color_team2 = ['blue', 'green', 'cyan']
+
+        dark_red = "#8c0303"
+        medium_red = '#db1818'
+        light_red = '#ff2e2e'
+
+        dark_blue = '#11018c'
+        medium_blue = '#2d18c9'
+        light_blue = '#462eff'
+
+
+        color_team1 = [dark_red, medium_red, light_red]
+        color_team2 = [dark_blue, medium_blue, light_blue]
+
+        # color_team2 = ['blue', 'green', 'cyan']
         
         # Plot for each player in home team
         for i in range(TEAM_SIZE):

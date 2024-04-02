@@ -12,7 +12,7 @@ TEAM_SIZE = 2
 # ball is trapped within an invisible box encapsulating the field.
 env = dm_soccer.load(team_size=TEAM_SIZE,
                     #  time_limit=10.0,
-                     time_limit=5.0,
+                     time_limit=1.0,
                      disable_walker_contacts=False,
                      enable_field_box=True,
                      terminate_on_goal=False,
@@ -55,7 +55,6 @@ def update_plots(fig, axes, stats_over_time):
         color_team1 = [dark_red, medium_red, light_red]
         color_team2 = [dark_blue, medium_blue, light_blue]
 
-        # color_team2 = ['blue', 'green', 'cyan']
         
         # Plot for each player in home team
         for i in range(TEAM_SIZE):

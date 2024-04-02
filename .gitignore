@@ -1,5 +1,2 @@
 
 /venv
-!/venv/lib/python3.11/site-packages/dm_control/composer/arena.xml
-!/venv/lib/python3.11/site-packages/dm_control/third_party/ant/ant.xml
-!/venv/lib/python3.11/site-packages/dm_control/locomotion/walkers/ant.py

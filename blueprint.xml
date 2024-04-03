@@ -57,12 +57,12 @@ https://opensource.org/licenses/MIT.
       <site name="rc9" type="sphere" size=".1" rgba="1 1 1 1"/>
       <site name="rc10" type="sphere" size=".1" rgba="1 1 1 1"/>
 
-      <body name="seg1" pos="0.384460345 -0.1082156 1.3215">
+      <body name="seg1" pos="0.384460345 0.1082156 -1.3215">
         <joint name="seg0_to_1" range="-75 75" type="hinge" axis="0 1 0"/>
         <geom name="seg1_geom" type="box" pos="0 0 0" size="0.595344 0.388579842 0.419512331" euler="351.413818 156.671753 186.149872" rgba="1 1 1 0"/>
         <site name="seg1_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
       </body>
-      <body name="seg2" pos="-0.22067261 -0.5 1.30303946">
+      <body name="seg2" pos="0.1637878399999999 -0.3913437099999999 -0.018478389999999845">
         <joint name="seg1_to_2" range="-75 75" type="hinge" axis="0 1 0"/>
         <geom name="seg2_geom" type="box" pos="0 0 0" size="0.165260255 0.482132822 0.5905807" euler="20.4026775 257.081238 240.1416" rgba="1 1 1 0"/>
         <site name="seg2_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
@@ -97,5 +97,6 @@ https://opensource.org/licenses/MIT.
   <contact>
     <exclude body1="seg0" body2="seg1"/>
     <exclude body1="seg1" body2="seg2"/>
+    <exclude body1="seg0" body2="seg2"/>
   </contact>
 </mujoco>

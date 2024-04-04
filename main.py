@@ -95,7 +95,7 @@ def main(config, agent_cls):
             obs = next_obs
 
             if episode % 10 == 0:
-                env.render(visualization_frames, mode='gif')
+                env.renderGif(visualization_frames, mode='gif')
                 visualization_frames = []
 
             if termination or truncated:

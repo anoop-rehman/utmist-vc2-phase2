@@ -66,7 +66,7 @@ class BoxHeadSoccerEnv(gym.Env):
         frame = self.env.physics.render(height=480, width=640, camera_id=0)
         return frame
 
-    def render(self, visualization_frames = [], mode='gif'):
+    def renderGif(self, visualization_frames = [], mode='gif'):
         # image = self.env.physics.render(height=480, width=640, camera_id=0)
         # if mode == 'human':
         #     plt.imshow(image)

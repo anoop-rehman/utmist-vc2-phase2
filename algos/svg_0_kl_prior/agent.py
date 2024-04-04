@@ -45,8 +45,8 @@ class SVG0(nn.Module):
         self.update_interval = update_interval
 
         # Set clamp values
-        self.action_low = torch.tensor(action_space.low).to(device)
-        self.action_high = torch.tensor(action_space.high).to(device)
+        self.action_low = torch.tensor(action_space.low, dtype=torch.float32).to(device)
+        self.action_high = torch.tensor(action_space.high, dtype=torch.float32).to(device)
 
         # Policy network
         self.pi = StochasticPolicy(obs_dim, action_dim, hidden_sizes, activation)

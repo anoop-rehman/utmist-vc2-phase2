@@ -1,5 +1,5 @@
 # Experiment
-device_id: cpu
+device_id: mps
 seed: 42
 epochs: 200
 log_every_n: 5 

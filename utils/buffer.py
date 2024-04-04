@@ -13,7 +13,6 @@ class RolloutBuffer:
         A buffer for storing trajectories experienced by an SVG-0 agent interacting
         with the environment.
         """
-
         self.data = {
             "obs": torch.zeros((size, obs_dim)).to(device),
             "next_obs": torch.zeros((size, obs_dim)).to(device),
@@ -30,11 +29,11 @@ class RolloutBuffer:
         """
 
         curr_ptr = self.ptr % self.max_size
-        self.data["obs"][curr_ptr] = obs
-        self.data["action"][curr_ptr] = torch.tensor(action).to(self.device)
-        self.data["reward"][curr_ptr] = torch.tensor(rew).to(self.device)
-        self.data["next_obs"][curr_ptr] = torch.tensor(next_obs).to(self.device)
-        self.data["termination"][curr_ptr] = torch.tensor(termination).to(self.device)
+        self.data["obs"][curr_ptr] = obs[: 372] # Bad idea. Find out why obs_spec size 372 has obs of 444?
+        self.data["action"][curr_ptr] = torch.tensor(action, dtype=torch.float32).to(self.device)
+        self.data["reward"][curr_ptr] = torch.tensor(rew, dtype=torch.float32).to(self.device)
+        self.data["next_obs"][curr_ptr] = torch.tensor(next_obs, dtype=torch.float32).to(self.device)
+        self.data["termination"][curr_ptr] = torch.tensor(termination, dtype=torch.float32).to(self.device)
 
         self.ptr = (self.ptr + 1) % self.max_size
 

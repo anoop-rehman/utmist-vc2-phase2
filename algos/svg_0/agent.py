@@ -1,5 +1,5 @@
 import copy
-
+from pprint import pprint
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.utils.data import BatchSampler, RandomSampler
 
 from utils.logger import Logger
+from utils.constants import *
 from utils.misc import save_state
 from algos.svg_0.core import StochasticPolicy, DoubleQFunction
 
@@ -46,8 +47,8 @@ class SVG0(nn.Module):
         self.use_target_entropy = use_target_entropy
 
         # Set clamp values
-        self.action_low = torch.tensor(action_space.low).to(device)
-        self.action_high = torch.tensor(action_space.high).to(device)
+        self.action_low = torch.tensor(action_space.low, dtype=torch.float32).to(device)
+        self.action_high = torch.tensor(action_space.high, dtype=torch.float32).to(device)
 
         # Policy network
         self.pi = StochasticPolicy(obs_dim, action_dim, hidden_sizes, activation)
@@ -61,8 +62,9 @@ class SVG0(nn.Module):
             p.requires_grad = False
 
         # Set up optimizers for policy and value function
-        self.q_optim = optim.Adam(self.q.parameters(), lr=lr)
-        self.pi_optim = optim.Adam(self.pi.parameters(), lr=lr)
+            # Policy -> Actor --> pi, Critic -> Value --> q
+        self.q_optim = optim.Adam(self.q.parameters(), lr=ACTOR_LR)   # learning rate (lr) is what Mathew will find via PBT
+        self.pi_optim = optim.Adam(self.pi.parameters(), lr=CRITIC_LR)
 
         self.pi_scheduler = optim.lr_scheduler.LinearLR(
             self.pi_optim, 1, 1e-6, total_iters=3000
@@ -74,7 +76,7 @@ class SVG0(nn.Module):
         # Temperature for target entropy to compare with KL priors
         if self.use_target_entropy:
             self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
-            self.temp_optimizer = optim.Adam([self.log_alpha], lr=lr)
+            self.temp_optimizer = optim.Adam([self.log_alpha], lr=ENTROPY_REGULARIZER_COST)
 
     def save_weights(self, path, episode):
         save_state(
@@ -200,7 +202,7 @@ class SVG0(nn.Module):
 
     def _compute_policy_loss(self, batch):
         b_obs = batch["obs"]
-
+        
         b_action, b_logprobs, _ = self.pi(b_obs, with_logp=True)
         q_b1, q_b2 = self.q(b_obs, b_action)
         b_q_values = torch.min(q_b1, q_b2)

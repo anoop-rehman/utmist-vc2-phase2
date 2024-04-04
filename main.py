@@ -9,17 +9,20 @@ from gymnasium.wrappers import RecordEpisodeStatistics
 from algos.svg_0.agent import SVG0
 from algos.svg_0_kl_prior.agent import SVG0 as SVG0_KL_prior
 from utils import make_gif, Logger, RolloutBuffer, DMControlWrapper
+from utils.constants import *
+from pprint import pprint
 
 from simple_svg_boxheads2 import BoxHeadSoccerEnv
 
 def main(config, agent_cls):
     Logger.get().info(f"Start training, experiment name: {config['name']}")
-    Logger.get().info(f"Config: {config}")
-
+    # Logger.get().info(f"Config: {config}")
+    env = None
     if config["is_dm_control"]:
         env = RecordEpisodeStatistics(BoxHeadSoccerEnv(
             team_size=2,
-            time_limit=20.0,
+            # time_limit=20.0,
+            time_limit=0.5,
             disable_walker_contacts=False,
             enable_field_box=True,
             terminate_on_goal=False
@@ -27,7 +30,8 @@ def main(config, agent_cls):
 
         test_env = RecordEpisodeStatistics(BoxHeadSoccerEnv(
             team_size=2,
-            time_limit=20.0,
+            # time_limit=20.0,
+            time_limit=0.5,
             disable_walker_contacts=False,
             enable_field_box=True,
             terminate_on_goal=False
@@ -51,7 +55,6 @@ def main(config, agent_cls):
         test_env = RecordEpisodeStatistics(
             gym.make(config["env"], render_mode="rgb_array")
         )
-
     Logger.get().info(f"Env spaces: {env.observation_space, env.action_space}")
     agent = agent_cls(
         obs_dim=env.observation_space.shape[0],
@@ -70,26 +73,34 @@ def main(config, agent_cls):
     )
 
     global_step = 0
+    visualization_frames = []
     for episode in range(1, config["epochs"]):
         obs, _ = env.reset()
         termination, truncated = False, False
 
         while not (termination or truncated):
-            obs = torch.tensor(obs).to(config["device"])
-
+            obs = torch.tensor(obs, dtype=torch.float32).to(config["device"])
+            obs = obs[: 372]
             if global_step < config["svg0"]["buffer_steps"]:
                 act = env.action_space.sample()
             else:
                 act = agent.act(obs).cpu().numpy()
-
+    
             next_obs, rew, termination, truncated, info = env.step(act)
+            # Store current environment state frame
+            frame = env.getFrameImage()
+            visualization_frames.append(frame)
 
             buffer.store(obs, act, rew, next_obs, termination)
             obs = next_obs
 
+            if episode % 10 == 0:
+                env.render(visualization_frames, mode='gif')
+                visualization_frames = []
+
             if termination or truncated:
                 break
-
+            
             # Update on filled buffer and update check
             if (
                 global_step % config["update_every_n"] == 0
@@ -107,8 +118,8 @@ def main(config, agent_cls):
 
         # Store the weights, make a gif, eval and logging
         if episode % config["log_every_n"] == 0 and episode != 0:
-            if episode % (config["log_every_n"] * 5) == 0:
-                make_gif(agent, test_env, episode, config)
+            # if episode % (config["log_every_n"] * 5) == 0:
+            #     make_gif(agent, test_env, episode, config)
 
             # Save the weights
             if not config["debug"]:
@@ -135,7 +146,8 @@ def evaluate_policy(agent, env, episodes=10):
         termination, truncated = False, False
 
         while not (termination or truncated):
-            obs = torch.tensor(obs).to(config["device"])
+            obs = torch.tensor(obs, dtype=torch.float32).to(config["device"])
+            obs = obs[:372]
             act = agent.act(obs, deterministic=True)
             next_obs, _, termination, truncated, info = env.step(act.cpu().numpy())
 

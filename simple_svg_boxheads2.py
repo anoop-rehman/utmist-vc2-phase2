@@ -1,6 +1,7 @@
 import gym
 from gym import spaces
 import numpy as np
+import cv2 as cv
 from dm_control.locomotion import soccer as dm_soccer
 import matplotlib.pyplot as plt
 import imageio
@@ -16,6 +17,7 @@ class BoxHeadSoccerEnv(gym.Env):
             time_limit=time_limit,
             disable_walker_contacts=disable_walker_contacts,
             enable_field_box=enable_field_box,
+            keep_aspect_ratio=True,
             terminate_on_goal=terminate_on_goal,
             walker_type=dm_soccer.WalkerType.BOXHEAD)
         # Define action and observation space
@@ -31,7 +33,6 @@ class BoxHeadSoccerEnv(gym.Env):
 
 
     def step(self, action):
-        action = action[:-1]
         time_step = self.env.step(action)
         obs = self._get_observation(time_step)
         # reward = time_step.reward or 0
@@ -65,6 +66,13 @@ class BoxHeadSoccerEnv(gym.Env):
     def getFrameImage(self):
         frame = self.env.physics.render(height=480, width=640, camera_id=0)
         return frame
+    
+    def grabFrame(self):
+        '''
+        This function is for testing frame capture and render using openCV
+        '''
+        frame = self.getFrameImage()
+        return cv.cvtColor(frame, cv.COLOR_RGB2BGR)
 
     def renderGif(self, visualization_frames = [], mode='gif'):
         # image = self.env.physics.render(height=480, width=640, camera_id=0)

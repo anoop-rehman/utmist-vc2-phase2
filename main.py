@@ -23,7 +23,7 @@ def main(config, agent_cls):
         env = RecordEpisodeStatistics(BoxHeadSoccerEnv(
             team_size=2,
             # time_limit=20.0,
-            time_limit=10,
+            time_limit=5,
             disable_walker_contacts=False,
             enable_field_box=True,
             terminate_on_goal=False
@@ -32,7 +32,7 @@ def main(config, agent_cls):
         test_env = RecordEpisodeStatistics(BoxHeadSoccerEnv(
             team_size=2,
             # time_limit=20.0,
-            time_limit=10,
+            time_limit=5,
             disable_walker_contacts=False,
             enable_field_box=True,
             terminate_on_goal=False
@@ -66,6 +66,14 @@ def main(config, agent_cls):
         **config["svg0"],
     ).to(config["device"])
 
+    # Load the saved weights if specified
+    # weightsPath = "./runs/weightsToRun/e10_state"
+    weightsPath = None
+    if weightsPath is not None:
+        state_dict = agent.load_state(weightsPath)
+        agent.load_state_dict(state_dict)
+        print("Loading model pre-trained weights")
+
     buffer = RolloutBuffer(
         config["svg0"]["buffer_steps"],
         env.observation_space.shape[0],
@@ -76,10 +84,12 @@ def main(config, agent_cls):
     global_step = 0
     visualization_frames = []
     # Setup video writer - mp4 at 30 fps
-    video_name = 'soccerVideo.mp4'
+    episode = 1
+    video_name = f"episode-{episode}-video.mp4"
     frame = env.grabFrame()
     height, width, layers = frame.shape
-    video = cv.VideoWriter(video_name, cv.VideoWriter_fourcc(*'mp4v'), 30.0, (width, height))
+    videoTemplate = cv.VideoWriter(video_name, cv.VideoWriter_fourcc(*'mp4v'), 30.0, (width, height))
+    video = videoTemplate
 
 # First pass - Step through an episode and capture each frame
     for episode in range(1, config["epochs"]):
@@ -96,21 +106,26 @@ def main(config, agent_cls):
     
             next_obs, rew, termination, truncated, info = env.step(act)
             # Store current environment state frame
-            frame = env.getFrameImage()
-            visualization_frames.append(frame)
+            #frame = env.getFrameImage()
+            #visualization_frames.append(frame)
             # Render env output to video
-            video.write(env.grabFrame())
+
+            if (episode == 1) or (episode % 5 == 0):
+                video.write(env.grabFrame())
 
             buffer.store(obs, act, rew, next_obs, termination)
             obs = next_obs
 
-            if episode % 30 == 0:
-                print("End creating video.")
-                video.release()
-                env.renderGif(visualization_frames, mode='gif')
-                visualization_frames = []
+            # if (episode == 1) or (episode % 5 == 0):
+                # env.renderGif(visualization_frames, mode='gif')
+                # visualization_frames = []
 
             if termination or truncated:
+                # Save video from all collected frames
+                if (episode == 1) or (episode % 5 == 0):
+                    video.release()
+                    video_name = f"episodeStart-{episode}-video.mp4"
+                    video = cv.VideoWriter(video_name, cv.VideoWriter_fourcc(*'mp4v'), 30.0, (width, height))
                 break
             
             # Update on filled buffer and update check

@@ -1,4 +1,5 @@
 import copy
+import os
 from pprint import pprint
 import torch
 import torch.nn as nn
@@ -78,6 +79,17 @@ class SVG0(nn.Module):
             self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
             self.temp_optimizer = optim.Adam([self.log_alpha], lr=ENTROPY_REGULARIZER_COST)
 
+    def load_state(self, path):
+        '''
+        Loads presaved model weights into the network
+        '''
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"File '{path}' does not exist")
+
+        # Load the model state
+        state_dict = torch.load(path)
+        return state_dict
+    
     def save_weights(self, path, episode):
         save_state(
             {

@@ -14,6 +14,7 @@ class BoxHeadSoccerEnv(gym.Env):
 
         self.env = dm_soccer.load(
             team_size=team_size,
+            
             time_limit=time_limit,
             disable_walker_contacts=disable_walker_contacts,
             enable_field_box=enable_field_box,

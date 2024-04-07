@@ -1,4 +1,0 @@
-X add target vel to the obs vector
-X add averaging over time.
-X change reward to be 1/dist thing instead. 
-X- with removal of outliers - iqr range.

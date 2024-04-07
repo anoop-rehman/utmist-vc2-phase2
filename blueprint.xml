@@ -26,7 +26,7 @@ https://opensource.org/licenses/MIT.
       <camera name="egocentric"  pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
 
       <site name="seg0_touch" type="box" size="0.26 0.26 0.26" rgba="0 0 1 1" group="4"/>
-      <geom name="seg0_geom" type="box" pos="0 0 0" size="0.7817855 0.436341643 1.3171674" euler="19.852272 164.862534 256.7119" rgba="1 1 0 0"/>
+      <geom name="seg0_geom" type="box" pos="0 0 0" size="0.7817855 0.436341643 1.3171674" euler="0 0 0" rgba="1 1 0 0"/>
       <site name="seg0_site" size="0.05" rgba="1 0 0 1"/>
 
       <site name="rf_xp" class="rangefinder" pos="0.25 0 0.11" zaxis="1 0 0"/>
@@ -57,23 +57,30 @@ https://opensource.org/licenses/MIT.
       <site name="rc9" type="sphere" size=".1" rgba="1 1 1 1"/>
       <site name="rc10" type="sphere" size=".1" rgba="1 1 1 1"/>
 
-      <body name="seg1" pos="0.384460345 0.1082156 -1.3215">
-        <joint name="seg0_to_1" range="-75 75" type="hinge" axis="0 1 0"/>
-        <geom name="seg1_geom" type="box" pos="0 0 0" size="0.595344 0.388579842 0.419512331" euler="351.413818 156.671753 186.149872" rgba="1 1 1 0"/>
+      <body name="seg1" pos="-0.746078492 0.13879776 1.733679731">
+        <joint name="seg0_to_1" range="-75 75" type="hinge" axis="0 0 1"/>
+        <geom name="seg1_geom" type="box" pos="0 0 0" size="0.595344 0.388579842 0.419512331" euler="0.0008985509 0.00109280727 0.004466458" rgba="1 1 1 0"/>
         <site name="seg1_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
       </body>
-      <body name="seg2" pos="0.1637878399999999 -0.3913437099999999 -0.018478389999999845">
-        <joint name="seg1_to_2" range="-75 75" type="hinge" axis="0 1 0"/>
-        <geom name="seg2_geom" type="box" pos="0 0 0" size="0.165260255 0.482132822 0.5905807" euler="20.4026775 257.081238 240.1416" rgba="1 1 1 0"/>
+      <body name="seg2" pos="0.781785488 -0.12621116 -0.419321776">
+        <joint name="seg0_to_2" range="-75 75" type="hinge" axis="0 1 0"/>
+        <geom name="seg2_geom" type="box" pos="0 0 0" size="0.165260255 0.482132822 0.5905807" euler="0.000849346863 0.00307855778 0.0009179028" rgba="1 1 1 0"/>
         <site name="seg2_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+        <body name="seg3" pos="-0.080371756 0.48215293 1.013563076">
+          <joint name="seg2_to_3" range="-75 75" type="hinge" axis="0 1 0" pos="0.24 -0.91 -0.49"/>
+          <geom name="seg3_geom" type="box" pos="0 0 0" size="0.145482287 0.424432218 0.5199013" euler="0.000849346863 0.00307855778 0.0009179028" rgba="1 1 1 0"/>
+          <site name="seg3_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+        </body>      
       </body>
+      
 
     </body>
   </worldbody>
 
   <actuator>
     <motor name="seg0_to_1" joint="seg0_to_1"/>
-    <motor name="seg1_to_2" joint="seg1_to_2"/>
+    <motor name="seg0_to_2" joint="seg0_to_2"/>
+    <motor name="seg2_to_3" joint="seg2_to_3"/>
   </actuator>
 
   <sensor>
@@ -81,6 +88,7 @@ https://opensource.org/licenses/MIT.
     <touch name="seg0_site" site="seg0_site"/>
     <touch name="seg1_site" site="seg1_site"/>
     <touch name="seg2_site" site="seg2_site"/>
+    <touch name="seg3_site" site="seg3_site"/>
     <velocimeter name="torso_vel" site="seg0_site"/>
     <gyro name="torso_gyro" site="seg0_site"/>
     <accelerometer name="torso_accel" site="seg0_site"/>
@@ -98,5 +106,8 @@ https://opensource.org/licenses/MIT.
     <exclude body1="seg0" body2="seg1"/>
     <exclude body1="seg1" body2="seg2"/>
     <exclude body1="seg0" body2="seg2"/>
+    <exclude body1="seg2" body2="seg3"/>
+    <exclude body1="seg1" body2="seg3"/>
+    <exclude body1="seg0" body2="seg3"/>
   </contact>
 </mujoco>

@@ -9,4 +9,4 @@ X-- with removal of outliers - iqr range.
 -- see if / how to gpu accelerate
 - see how to integrate this model in the soccer env. 
 - get ant training to match a varying target velocity.
-- get ant training to match a varying target accel.
+- get ant training to match a varying target acceleration.

@@ -22,8 +22,14 @@ class RewardLoggerCallback(BaseCallback):
     def _on_training_end(self) -> None:
         self.rewards = self.episode_rewards
 
+gym.envs.registration.register(
+    id='LocalAnt-v4',
+    entry_point='local_ant_v4:AntEnv',
+    max_episode_steps=1000,
+)
+
 # Parallel environments
-vec_env = make_vec_env("Ant-v4", n_envs=4)
+vec_env = make_vec_env('LocalAnt-v4', n_envs=4)
 
 model = PPO("MlpPolicy", vec_env, verbose=1)
 reward_logger = RewardLoggerCallback()

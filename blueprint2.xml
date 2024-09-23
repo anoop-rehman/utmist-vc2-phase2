@@ -1,0 +1,94 @@
+<!--
+Copyright (c) 2020 Philipp Moritz, The dm_control Authors
+
+Use of this source code is governed by an MIT-style
+license that can be found in the LICENSE file or at
+https://opensource.org/licenses/MIT.
+-->
+<mujoco model="ant">
+  <compiler angle="degree"/>
+  <default>
+    <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="75"/>
+    <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50.0"/>
+    <joint limited="true" armature="1" damping="1" stiffness="1" solreflimit=".04 1" solimplimit="0 .8 .03"/>
+    <default class="rangefinder">
+        <site type="capsule" size=".05 .5" rgba="1 0 0 .4" group="4"/>
+    </default>
+  </default>
+  <asset>
+    <material name="self" rgba=".8 .6 .4 1"/>
+  </asset>
+  <worldbody>
+    <camera name="sideon" pos="0 -10 5" fovy="45" mode="targetbody" target="seg0" />
+    <camera name="float_far"  pos="-4 0 2" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90"/>
+    <body name="seg0" pos="1 1 5">
+      <camera name="floating"  pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90"/>
+      <camera name="egocentric"  pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
+
+      <site name="seg0_touch" type="box" size="0.26 0.26 0.26" rgba="0 0 1 1" group="4"/>
+      <geom name="seg0_geom" type="box" pos="0 0 0" size="0.7817855 0.436341643 1.3171674" euler="0 0 0" rgba="1 1 0 0"/>
+      <site name="seg0_site" size="0.05" rgba="1 0 0 1"/>
+
+      <site name="rf_xp" class="rangefinder" pos="0.25 0 0.11" zaxis="1 0 0"/>
+      <site name="rf_xn" class="rangefinder" pos="-0.25 0 0.11" zaxis="-1 0 0"/>
+      <site name="rf_yp" class="rangefinder" pos="0 0.25 0.11"  zaxis="0 1 0"/>
+      <site name="rf_yn" class="rangefinder" pos="0 -0.25 0.11"  zaxis="0 -1 0"/>
+      <site name="rf_xpyp" class="rangefinder" pos="0.25 0.25 0.11" zaxis="1 1 0"/>
+      <site name="rf_xpyn" class="rangefinder" pos="0.25 -0.25 0.11"  zaxis="1 -1 0"/>
+      <site name="rf_xnyn" class="rangefinder" pos="-0.25 -0.25 0.11" zaxis="-1 -1 0"/>
+      <site name="rf_xnyp" class="rangefinder" pos="-0.25 0.25 0.11" zaxis="-1 1 0"/>
+
+      <body name="seg1" pos="-0.746078492 0.13879776 1.733679731">
+        <joint name="seg0_to_1" range="-75 75" type="hinge" axis="0 0 1"/>
+        <geom name="seg1_geom" type="box" pos="0 0 0" size="0.595344 0.388579842 0.419512331" euler="0.0008985509 0.00109280727 0.004466458" rgba="1 1 1 0"/>
+        <site name="seg1_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+      </body>
+      <body name="seg2" pos="0.781785488 -0.12621116 -0.419321776">
+        <joint name="seg0_to_2" range="-75 75" type="hinge" axis="0 1 0"/>
+        <geom name="seg2_geom" type="box" pos="0 0 0" size="0.165260255 0.482132822 0.5905807" euler="0.000849346863 0.00307855778 0.0009179028" rgba="1 1 1 0"/>
+        <site name="seg2_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+        <body name="seg3" pos="-0.080371756 0.48215293 1.013563076">
+          <joint name="seg2_to_3" range="-75 75" type="hinge" axis="0 1 0" pos="0.24 -0.91 -0.49"/>
+          <geom name="seg3_geom" type="box" pos="0 0 0" size="0.145482287 0.424432218 0.5199013" euler="0.000849346863 0.00307855778 0.0009179028" rgba="1 1 1 0"/>
+          <site name="seg3_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+        </body>      
+      </body>
+      
+
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="seg0_to_1" joint="seg0_to_1"/>
+    <motor name="seg0_to_2" joint="seg0_to_2"/>
+    <motor name="seg2_to_3" joint="seg2_to_3"/>
+  </actuator>
+
+  <sensor>
+    <touch name="seg0_touch" site="seg0_touch"/>
+    <touch name="seg0_site" site="seg0_site"/>
+    <touch name="seg1_site" site="seg1_site"/>
+    <touch name="seg2_site" site="seg2_site"/>
+    <touch name="seg3_site" site="seg3_site"/>
+    <velocimeter name="torso_vel" site="seg0_site"/>
+    <gyro name="torso_gyro" site="seg0_site"/>
+    <accelerometer name="torso_accel" site="seg0_site"/>
+    <rangefinder name="rf_xp" site="rf_xp"/>
+    <rangefinder name="rf_yp" site="rf_yp"/>
+    <rangefinder name="rf_xn" site="rf_xn"/>
+    <rangefinder name="rf_yn" site="rf_yn"/>
+    <rangefinder name="rf_xpyp" site="rf_xpyp"/>
+    <rangefinder name="rf_xpyn" site="rf_xpyn"/>
+    <rangefinder name="rf_xnyp" site="rf_xnyp"/>
+    <rangefinder name="rf_xnyn" site="rf_xnyn"/>
+  </sensor>
+
+  <contact>
+    <exclude body1="seg0" body2="seg1"/>
+    <exclude body1="seg1" body2="seg2"/>
+    <exclude body1="seg0" body2="seg2"/>
+    <exclude body1="seg2" body2="seg3"/>
+    <exclude body1="seg1" body2="seg3"/>
+    <exclude body1="seg0" body2="seg3"/>
+  </contact>
+</mujoco>

@@ -23,8 +23,8 @@ from dm_control.locomotion.walkers import base
 from dm_control.locomotion.walkers import legacy_base
 import numpy as np
 
-_XML_DIRNAME = os.path.join(os.path.dirname(__file__), '../../third_party/ant')
-_XML_FILENAME = 'ant.xml'
+_XML_DIRNAME = os.path.join(os.path.dirname(__file__))
+_XML_FILENAME = 'blueprint2.xml'
 
 
 class Ant(legacy_base.Walker):

@@ -5,6 +5,7 @@ from gymnasium.spaces import Box
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 4.0,
+    # "distance": 16.0,
 }
 
 class AntEnv(MujocoEnv, utils.EzPickle):
@@ -19,7 +20,8 @@ class AntEnv(MujocoEnv, utils.EzPickle):
 
     def __init__(
         self,
-        xml_file="ant.xml",
+        # xml_file="ant.xml",
+        xml_file="/Users/anooprehman/Documents/uoft/extracurricular/design_teams/utmist2/utmist-vc2-phase2/two_arm_rower.xml",
         ctrl_cost_weight=0.5,
         use_contact_forces=False,
         contact_cost_weight=5e-4,
@@ -60,12 +62,14 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         self.averaged_x_velocity = 0.0
         self.x_velocities = []
 
-        obs_shape = 27
-        if not exclude_current_positions_from_observation:
-            obs_shape += 2
-        if use_contact_forces:
-            obs_shape += 84
-        obs_shape += 2  # For target_x_velocity and averaged_x_velocity
+        # obs_shape = 27
+        # if not exclude_current_positions_from_observation:
+        #     obs_shape += 2
+        # if use_contact_forces:
+        #     obs_shape += 84
+        # obs_shape += 2  # For target_x_velocity and averaged_x_velocity
+
+        obs_shape = 16
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
@@ -74,7 +78,8 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         MujocoEnv.__init__(
             self,
             xml_file,
-            5,
+            # 5,
+            25,
             observation_space=observation_space,
             default_camera_config=DEFAULT_CAMERA_CONFIG,
             **kwargs,
@@ -118,9 +123,9 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         return terminated
 
     def step(self, action):
-        xy_position_before = self.get_body_com("torso")[:2].copy()
+        xy_position_before = self.get_body_com("seg0")[:2].copy()
         self.do_simulation(action, self.frame_skip)
-        xy_position_after = self.get_body_com("torso")[:2].copy()
+        xy_position_after = self.get_body_com("seg0")[:2].copy()
 
         xy_velocity = (xy_position_after - xy_position_before) / self.dt
         x_velocity, y_velocity = xy_velocity
@@ -175,20 +180,49 @@ class AntEnv(MujocoEnv, utils.EzPickle):
 
         return observation, reward, terminated, False, info
 
+    # def _get_obs(self):
+    #     position = self.data.qpos.flat.copy()
+    #     velocity = self.data.qvel.flat.copy()
+
+    #     if self._exclude_current_positions_from_observation:
+    #         position = position[2:]
+
+    #     basic_obs = np.concatenate((position, velocity))
+
+    #     if self._use_contact_forces:
+    #         contact_force = self.contact_forces.flat.copy()
+    #         return np.concatenate((basic_obs, contact_force, [self.target_x_velocity, self.averaged_x_velocity]))
+    #     else:
+    #         return np.concatenate((basic_obs, [self.target_x_velocity, self.averaged_x_velocity]))
+
+
     def _get_obs(self):
         position = self.data.qpos.flat.copy()
         velocity = self.data.qvel.flat.copy()
 
+        # print("Position shape:", position.shape, "Values:", position)
+        # print("Velocity shape:", velocity.shape, "Values:", velocity)
+
         if self._exclude_current_positions_from_observation:
-            position = position[2:]
+            position = position[2:]  # Adjust based on the model's qpos structure
+            # print("Position shape after exclusion:", position.shape, "Values:", position)
 
         basic_obs = np.concatenate((position, velocity))
+        # print("Basic observation shape:", basic_obs.shape, "Values:", basic_obs)
 
         if self._use_contact_forces:
             contact_force = self.contact_forces.flat.copy()
-            return np.concatenate((basic_obs, contact_force, [self.target_x_velocity, self.averaged_x_velocity]))
+            # print("Contact force shape:", contact_force.shape, "Values:", contact_force)
+            final_observation = np.concatenate((basic_obs, contact_force, [self.target_x_velocity, self.averaged_x_velocity]))
+            # print("Final observation shape with contact forces:", final_observation.shape, "Values:", final_observation)
+            return final_observation
         else:
-            return np.concatenate((basic_obs, [self.target_x_velocity, self.averaged_x_velocity]))
+            final_observation = np.concatenate((basic_obs, [self.target_x_velocity, self.averaged_x_velocity]))
+            # print("Final observation shape without contact forces:", final_observation.shape, "Values:", final_observation)
+            return final_observation
+
+
+
 
     def reset_model(self):
         noise_low = -self._reset_noise_scale

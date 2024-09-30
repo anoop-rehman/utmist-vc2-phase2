@@ -3,12 +3,13 @@ from custom_soccer_env import create_soccer_env
 from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED
 from dm_control import viewer
 
-from creature_configs.ant import Ant
+from ant import Ant
+from creature import Creature
 
-home_player_1 = Ant(marker_rgba=RGBA_BLUE)
-home_player_2 = Ant(marker_rgba=RGBA_BLUE)
-away_player_1 = Ant(marker_rgba=RGBA_RED)
-away_player_2 = Ant(marker_rgba=RGBA_RED)
+home_player_1 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_BLUE)
+home_player_2 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_BLUE)
+away_player_1 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_RED)
+away_player_2 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_RED)
 
 # Instantiates soccer environment using custom creatures with episodes of 10 seconds
 # each. Upon scoring, the environment reset player positions and the episode
@@ -49,7 +50,7 @@ def random_policy(time_step):
     action_specs = env.action_spec()
     for action_spec in action_specs:
         action = np.random.uniform(
-            -100, 100, size=action_spec.shape)
+            -1, 1, size=action_spec.shape)
         actions.append(action)
         print(action)
     return actions

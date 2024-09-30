@@ -1,7 +1,7 @@
 <mujoco model="{{model_name}}">
     <compiler angle="degree" />
     <default>
-        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="75" />
+		<motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="1500" />
         <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50.0" />
         <joint limited="true" armature="1" damping="1" stiffness="1" solreflimit=".04 1"
             solimplimit="0 .8 .03" />
@@ -52,7 +52,7 @@
         <!-- Motors for all joints -->
         {%- for bp_item in bp_list %}
         {%- if bp_item.joint %}
-        <motor name="motor{{bp.parent.id}}_to_{{bp.id}}" joint="seg{{bp.parent.id}}_to_{{bp.id}}" />
+        <motor name="motor{{bp_item.parent.id}}_to_{{bp_item.id}}" joint="seg{{bp_item.parent.id}}_to_{{bp_item.id}}" />
         {%- endif %}
         {%- endfor %}
     </actuator>

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
-"""A quadruped "ant" walker."""
 
 import os
 
@@ -23,28 +22,28 @@ from dm_control.locomotion.walkers import base
 from dm_control.locomotion.walkers import legacy_base
 import numpy as np
 
-_XML_DIRNAME = os.path.join(os.path.dirname(__file__))
-_XML_FILENAME = 'creature.xml'
+class Creature(legacy_base.Walker):
+  """A fully configurable creature walker."""
 
-
-class Ant(legacy_base.Walker):
-  """A quadruped "Ant" walker."""
-
-  def _build(self, name='walker', marker_rgba=None, initializer=None):
-    """Build an Ant walker.
+  def _build(self, xml_config, name='creature', marker_rgba=None, initializer=None):
+    """Build an creature.
 
     Args:
+      xml_config: path to XML configuration of creature
       name: name of the walker.
       marker_rgba: (Optional) color the ant's front legs with marker_rgba.
       initializer: (Optional) A `WalkerInitializer` object.
     """
+    
     super()._build(initializer=initializer)
     self._appendages_sensors = []
     self._bodies_pos_sensors = []
     self._bodies_quats_sensors = []
-    self._mjcf_root = mjcf.from_path(os.path.join(_XML_DIRNAME, _XML_FILENAME))
+    self._mjcf_root = mjcf.from_path(xml_config)
     if name:
       self._mjcf_root.model = name
+      
+    print(self._mjcf_root.find_all('geom', immediate_children_only=False, exclude_attachments=False))
 
     # Set corresponding marker color if specified.
     
@@ -66,7 +65,7 @@ class Ant(legacy_base.Walker):
     self._prev_action[:] = action
 
   def _build_observables(self):
-    return AntObservables(self)
+    return CreatureObservables(self)
 
   @property
   def mjcf_model(self):
@@ -78,16 +77,7 @@ class Ant(legacy_base.Walker):
 
   @property
   def marker_geoms(self):
-    return [self._mjcf_root.find('geom', 'seg0_geom'),
-            self._mjcf_root.find('geom', 'seg1_geom'),
-            self._mjcf_root.find('geom', 'seg2_geom'),
-            self._mjcf_root.find('geom', 'seg3_geom'),
-            self._mjcf_root.find('geom', 'seg4_geom'),
-            self._mjcf_root.find('geom', 'seg5_geom'),
-            self._mjcf_root.find('geom', 'seg6_geom'),
-            self._mjcf_root.find('geom', 'seg7_geom'),
-            self._mjcf_root.find('geom', 'seg8_geom'),
-            ]
+    return self._mjcf_root.find_all('geom')
 
   @composer.cached_property
   def actuators(self):
@@ -112,8 +102,7 @@ class Ant(legacy_base.Walker):
 
   @property
   def _foot_bodies(self):
-    return (self._mjcf_root.find('body', 'seg2'),
-            self._mjcf_root.find('body', 'seg1'))
+    return tuple(self.mjcf_model.find_all('body'))
 
   @composer.cached_property
   def end_effectors(self):
@@ -154,8 +143,8 @@ class Ant(legacy_base.Walker):
     return self._bodies_quats_sensors
 
 
-class AntObservables(legacy_base.WalkerObservables):
-  """Observables for the Ant."""
+class CreatureObservables(legacy_base.WalkerObservables):
+  """Observables for the Creature."""
 
   @composer.observable
   def appendages_pos(self):

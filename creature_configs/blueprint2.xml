@@ -82,7 +82,7 @@ https://opensource.org/licenses/MIT.
 				<body name="seg3" pos="-0.080371756 0.48215293 1.013563076">
 					<!-- TODO: check whether instead of multiplying each coordinate by -1, if we can just have -1 instead of 1 in the axis vector instead -->
 					<joint name="seg2_to_3" range="-75 75" type="hinge" axis="0 1 0"
-						pos="0.243193358 -0.4999997 -0.9179543" />
+						pos="0.24 -0.91 -0.49" />
 					<geom name="seg3_geom" type="box" pos="0 0 0"
 						size="0.145482287 0.424432218 0.5199013"
 						euler="0.000849346863 0.00307855778 0.0009179028" rgba="1 1 1 0" />

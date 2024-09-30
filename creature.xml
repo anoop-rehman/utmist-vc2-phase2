@@ -1,0 +1,166 @@
+<mujoco model="TwoArmedRower">
+    <compiler angle="degree" />
+    <default>
+        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="75" />
+        <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50.0" />
+        <joint limited="true" armature="1" damping="1" stiffness="1" solreflimit=".04 1"
+            solimplimit="0 .8 .03" />
+        <default class="rangefinder">
+            <site type="capsule" size=".05 .5" rgba="1 0 0 .4" group="4" />
+        </default>
+    </default>
+    <asset>
+        <material name="self" rgba=".8 .6 .4 1" />
+    </asset>
+
+    <worldbody>
+        <body name="seg0" pos="-3.03933716 -2.49635315 -0.7158742">
+            
+            <camera name="floating" pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" />
+
+            <!-- KEEP THIS -->
+            <camera name="egocentric" pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
+
+            <!-- Sensors as we need -->
+            <site name="rf_xp" class="rangefinder" pos="0.25 0 0.11" zaxis="1 0 0" />
+            <site name="rf_xn" class="rangefinder" pos="-0.25 0 0.11" zaxis="-1 0 0" />
+            <site name="rf_yp" class="rangefinder" pos="0 0.25 0.11" zaxis="0 1 0" />
+            <site name="rf_yn" class="rangefinder" pos="0 -0.25 0.11" zaxis="0 -1 0" />
+            <site name="rf_xpyp" class="rangefinder" pos="0.25 0.25 0.11" zaxis="1 1 0" />
+            <site name="rf_xpyn" class="rangefinder" pos="0.25 -0.25 0.11" zaxis="1 -1 0" />
+            <site name="rf_xnyn" class="rangefinder" pos="-0.25 -0.25 0.11" zaxis="-1 -1 0" />
+            <site name="rf_xnyp" class="rangefinder" pos="-0.25 0.25 0.11" zaxis="-1 1 0" />
+
+            <!-- sites that visualize the x-y axis of the ant body, good for debugging -->
+            <site name="x_pos" type="capsule" pos="0.5 0 0" size=".05 .5" zaxis="1 0 0"
+                rgba="1 0 0 1" group="5" />
+            <site name="x_neg" type="capsule" pos="-0.5 0 0" size=".05 .5" zaxis="-1 0 0"
+                rgba="0 0 1 1" group="5" />
+            <site name="y_pos" type="capsule" pos="0 0.5 0" size=".05 .5" zaxis="0 1 0"
+                rgba="1 1 1 1" group="5" />
+            <site name="y_neg" type="capsule" pos="0 -0.5 0" size=".05 .5" zaxis="0 -1 0"
+                rgba="0 0 0 1" group="5" />
+            <site name="port_site" pos=".5 0 0" size="0.5" rgba="1 0 0 1" group="5" />
+            <site name="starboard_site" pos="-.5 0 0" size="0.5" rgba="0 1 0 1" group="5" />
+                    
+            <geom name="seg0_geom" type="box" pos="0 0 0" size="0.7817855 1.3171674 0.436341643" euler="19.852272 256.7119 164.862534" />
+            <site name="seg0_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+
+            <body name="seg1" pos="-2.65487671 -3.817871 -0.6076586">
+                <joint name="seg0_to_1" range="-75 75" type="" axis="" pos=" "/>
+                <geom name="seg1_geom" type="box" pos="0 0 0" size="0.595344 0.419512331 0.388579845" euler="351.413818 186.149872 156.671753" />
+                <site name="seg1_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+            </body>
+
+            <body name="seg2" pos="-2.87554932 -2.51483154 -1.10721791">
+                <joint name="seg0_to_2" range="-75 75" type="" axis="" pos=" "/>
+                <geom name="seg2_geom" type="box" pos="0 0 0" size="0.165260255 0.5905807 0.482132822" euler="20.4026775 257.081238 240.1416" />
+                <site name="seg2_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+
+                <body name="seg3" pos="-3.13427734 -2.79385376 -0.6540449">
+                    <joint name="seg2_to_3" range="-75 75" type="" axis="" pos=" "/>
+                    <geom name="seg3_geom" type="box" pos="0 0 0" size="0.145482287 0.5199013 0.424432218" euler="17.5526886 258.3423 318.075745" />
+                    <site name="seg3_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+                </body>
+            </body>
+
+            <body name="seg4" pos="-2.68029785 -3.72415161 -1.15989685">
+                <joint name="seg0_to_4" range="-75 75" type="" axis="" pos=" "/>
+                <geom name="seg4_geom" type="box" pos="0 0 0" size="0.386039972 1.37956786 1.126239" euler="20.4677544 257.067383 90.0739441" />
+                <site name="seg4_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+
+                <body name="seg5" pos="-2.92819214 -3.77680969 -2.56077242">
+                    <joint name="seg4_to_5" range="-75 75" type="" axis="" pos=" "/>
+                    <geom name="seg5_geom" type="box" pos="0 0 0" size="0.339839548 1.21446419 0.9914531" euler="17.8545475 255.745743 21.2874279" />
+                    <site name="seg5_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+                </body>
+            </body>
+
+            <body name="seg6" pos="-2.361084 -3.52288818 -0.71639967">
+                <joint name="seg0_to_6" range="-75 75" type="" axis="" pos=" "/>
+                <geom name="seg6_geom" type="box" pos="0 0 0" size="0.4374656 1.5633446 1.27626884" euler="23.47614 265.4939 212.517929" />
+                <site name="seg6_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+
+                <body name="seg7" pos="-2.53570557 -4.837387 0.169285059">
+                    <joint name="seg6_to_7" range="-75 75" type="" axis="" pos=" "/>
+                    <geom name="seg7_geom" type="box" pos="0 0 0" size="0.385110676 1.37624693 1.12352777" euler="23.2930145 267.197662 288.213745" />
+                    <site name="seg7_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+                </body>
+            </body>
+
+            <body name="seg8" pos="-3.186676 -2.498703 -1.07571065">
+                <joint name="seg0_to_8" range="-75 75" type="" axis="" pos=" "/>
+                <geom name="seg8_geom" type="box" pos="0 0 0" size="0.7438524 0.524159551 0.485510945" euler="19.0098019 336.870422 195.831238" />
+                <site name="seg8_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+            </body>
+        </body>
+    </worldbody>
+
+    <actuator>
+        <!-- Motors for all joints -->
+        <motor name="motor_to_0" joint="seg_to_0" />
+        <motor name="motor_to_0" joint="seg_to_0" />
+        <motor name="motor_to_0" joint="seg_to_0" />
+        <motor name="motor_to_0" joint="seg_to_0" />
+        <motor name="motor_to_0" joint="seg_to_0" />
+        <motor name="motor_to_0" joint="seg_to_0" />
+        <motor name="motor_to_0" joint="seg_to_0" />
+        <motor name="motor_to_0" joint="seg_to_0" />
+    </actuator>
+
+    <sensor>
+        <!-- Sensors for touch and other info -->
+        <touch name="seg0_touch" site="seg0_site" />
+        <touch name="seg1_touch" site="seg1_site" />
+        <touch name="seg2_touch" site="seg2_site" />
+        <touch name="seg3_touch" site="seg3_site" />
+        <touch name="seg4_touch" site="seg4_site" />
+        <touch name="seg5_touch" site="seg5_site" />
+        <touch name="seg6_touch" site="seg6_site" />
+        <touch name="seg7_touch" site="seg7_site" />
+        <touch name="seg8_touch" site="seg8_site" />
+        <velocimeter name="torso_vel" site="seg0_site" />
+        <gyro name="torso_gyro" site="seg0_site" />
+        <accelerometer name="torso_accel" site="seg0_site" />
+    </sensor>
+
+    <contact>
+        <!-- Contact Exclusions (should be everything) -->
+        <exclude body1="seg0" body2="seg1" />
+        <exclude body1="seg0" body2="seg2" />
+        <exclude body1="seg0" body2="seg3" />
+        <exclude body1="seg0" body2="seg4" />
+        <exclude body1="seg0" body2="seg5" />
+        <exclude body1="seg0" body2="seg6" />
+        <exclude body1="seg0" body2="seg7" />
+        <exclude body1="seg0" body2="seg8" />
+        <exclude body1="seg1" body2="seg2" />
+        <exclude body1="seg1" body2="seg3" />
+        <exclude body1="seg1" body2="seg4" />
+        <exclude body1="seg1" body2="seg5" />
+        <exclude body1="seg1" body2="seg6" />
+        <exclude body1="seg1" body2="seg7" />
+        <exclude body1="seg1" body2="seg8" />
+        <exclude body1="seg2" body2="seg3" />
+        <exclude body1="seg2" body2="seg4" />
+        <exclude body1="seg2" body2="seg5" />
+        <exclude body1="seg2" body2="seg6" />
+        <exclude body1="seg2" body2="seg7" />
+        <exclude body1="seg2" body2="seg8" />
+        <exclude body1="seg3" body2="seg4" />
+        <exclude body1="seg3" body2="seg5" />
+        <exclude body1="seg3" body2="seg6" />
+        <exclude body1="seg3" body2="seg7" />
+        <exclude body1="seg3" body2="seg8" />
+        <exclude body1="seg4" body2="seg5" />
+        <exclude body1="seg4" body2="seg6" />
+        <exclude body1="seg4" body2="seg7" />
+        <exclude body1="seg4" body2="seg8" />
+        <exclude body1="seg5" body2="seg6" />
+        <exclude body1="seg5" body2="seg7" />
+        <exclude body1="seg5" body2="seg8" />
+        <exclude body1="seg6" body2="seg7" />
+        <exclude body1="seg6" body2="seg8" />
+        <exclude body1="seg7" body2="seg8" />
+    </contact>
+</mujoco>

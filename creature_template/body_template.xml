@@ -1,0 +1,15 @@
+<body name="seg{{bp.id}}" pos="{{bp.position}}">
+    {%- if properties %}
+    {{ properties | indent(4) }}
+
+    {%- endif %}
+    {%- if bp.joint %}
+    <joint name="seg{{bp.parent.id}}_to_{{bp.id}}" range="-75 75" type="{{bp.joint.joint_type}}" axis="{{bp.joint.joint_axis}}" pos="{{bp.joint.joint_position}} "/>
+    {%- endif %}
+    <geom name="seg{{bp.id}}_geom" type="box" pos="0 0 0" size="{{bp.size}}" euler="{{bp.rotation}}" />
+    <site name="seg{{bp.id}}_site" type="box" pos="0 0 0" size="0.01 0.01 0.1" zaxis="0 0 0" />
+    {%- for child in bp.children %}
+
+    {{ child | render_body_part | indent(4) }}
+    {%- endfor %}
+</body>

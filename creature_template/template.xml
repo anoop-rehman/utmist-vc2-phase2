@@ -1,0 +1,78 @@
+<mujoco model="{{model_name}}">
+    <compiler angle="degree" />
+    <default>
+        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="75" />
+        <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50.0" />
+        <joint limited="true" armature="1" damping="1" stiffness="1" solreflimit=".04 1"
+            solimplimit="0 .8 .03" />
+        <default class="rangefinder">
+            <site type="capsule" size=".05 .5" rgba="1 0 0 .4" group="4" />
+        </default>
+    </default>
+    <asset>
+        <material name="self" rgba=".8 .6 .4 1" />
+    </asset>
+
+    <worldbody>
+        {%- with properties='
+<camera name="floating" pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" />
+
+<!-- KEEP THIS -->
+<camera name="egocentric" pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
+
+<!-- Sensors as we need -->
+<site name="rf_xp" class="rangefinder" pos="0.25 0 0.11" zaxis="1 0 0" />
+<site name="rf_xn" class="rangefinder" pos="-0.25 0 0.11" zaxis="-1 0 0" />
+<site name="rf_yp" class="rangefinder" pos="0 0.25 0.11" zaxis="0 1 0" />
+<site name="rf_yn" class="rangefinder" pos="0 -0.25 0.11" zaxis="0 -1 0" />
+<site name="rf_xpyp" class="rangefinder" pos="0.25 0.25 0.11" zaxis="1 1 0" />
+<site name="rf_xpyn" class="rangefinder" pos="0.25 -0.25 0.11" zaxis="1 -1 0" />
+<site name="rf_xnyn" class="rangefinder" pos="-0.25 -0.25 0.11" zaxis="-1 -1 0" />
+<site name="rf_xnyp" class="rangefinder" pos="-0.25 0.25 0.11" zaxis="-1 1 0" />
+
+<!-- sites that visualize the x-y axis of the ant body, good for debugging -->
+<site name="x_pos" type="capsule" pos="0.5 0 0" size=".05 .5" zaxis="1 0 0"
+    rgba="1 0 0 1" group="5" />
+<site name="x_neg" type="capsule" pos="-0.5 0 0" size=".05 .5" zaxis="-1 0 0"
+    rgba="0 0 1 1" group="5" />
+<site name="y_pos" type="capsule" pos="0 0.5 0" size=".05 .5" zaxis="0 1 0"
+    rgba="1 1 1 1" group="5" />
+<site name="y_neg" type="capsule" pos="0 -0.5 0" size=".05 .5" zaxis="0 -1 0"
+    rgba="0 0 0 1" group="5" />
+<site name="port_site" pos=".5 0 0" size="0.5" rgba="1 0 0 1" group="5" />
+<site name="starboard_site" pos="-.5 0 0" size="0.5" rgba="0 1 0 1" group="5" />
+        ' %}
+        {%- filter indent(width=8) %}
+{% include './body_template.xml' %}
+        {%- endfilter %}
+        {%- endwith %}
+    </worldbody>
+
+    <actuator>
+        <!-- Motors for all joints -->
+        {%- for bp_item in bp_list %}
+        {%- if bp_item.joint %}
+        <motor name="motor{{bp.parent.id}}_to_{{bp.id}}" joint="seg{{bp.parent.id}}_to_{{bp.id}}" />
+        {%- endif %}
+        {%- endfor %}
+    </actuator>
+
+    <sensor>
+        <!-- Sensors for touch and other info -->
+        {%- for bp_item in bp_list %}
+        <touch name="seg{{bp_item.id}}_touch" site="seg{{bp_item.id}}_site" />
+        {%- endfor %}
+        <velocimeter name="torso_vel" site="seg0_site" />
+        <gyro name="torso_gyro" site="seg0_site" />
+        <accelerometer name="torso_accel" site="seg0_site" />
+    </sensor>
+
+    <contact>
+        <!-- Contact Exclusions (should be everything) -->
+        {%- for bp_item_1 in bp_list %}
+        {%- for bp_item_2 in bp_list[loop.index:] %}
+        <exclude body1="seg{{bp_item_1.id}}" body2="seg{{bp_item_2.id}}" />
+        {%- endfor %}
+        {%- endfor %}
+    </contact>
+</mujoco>

@@ -82,7 +82,9 @@ class Ant(legacy_base.Walker):
             self._mjcf_root.find('geom', 'seg1_geom'),
             self._mjcf_root.find('geom', 'seg2_geom'),
             self._mjcf_root.find('geom', 'seg3_geom'),
-            self._mjcf_root.find('geom', 'seg4_geom')]
+            self._mjcf_root.find('geom', 'seg4_geom'),
+            self._mjcf_root.find('geom', 'seg5_geom'),
+            ]
 
   @composer.cached_property
   def actuators(self):

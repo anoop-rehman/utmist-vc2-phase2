@@ -8,7 +8,8 @@ https://opensource.org/licenses/MIT.
 <mujoco model="ant">
 	<compiler angle="degree" />
 	<default>
-		<motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="75" />
+		<!-- <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="75" /> -->
+		<motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="750" />
 		<geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50.0" />
 		<joint limited="true" armature="1" damping="1" stiffness="1" solreflimit=".04 1"
 			solimplimit="0 .8 .03" />
@@ -95,8 +96,17 @@ https://opensource.org/licenses/MIT.
 			<joint name="seg0_to_4" range="-75 75" type="hinge" axis="0 1 0" pos="-0.218564183 -0.438239634 -0.9999999"/>
 			<geom name="seg4_geom" type="box" pos="0 0 0" size="0.386039972 1.126239 1.37956786" euler="0.0 0.0 0.0" rgba="1 1 1 0"/>
 			<site name="seg4_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+
+            <body name="seg5" pos="0.18776560000000003 1.126239818 2.36765385">
+                <joint name="seg4_to_5" range="-75 75" type="hinge" axis="0.0 0.0 1.0" pos="0.243194491 0.500000358 0.917953134"/>
+                <geom name="seg5_geom" type="box" pos="0 0 0" size="0.339839548 0.9914531 1.21446419" euler="0.0 0.0 0.0" rgba="1 1 1 0"/>
+                <site name="seg5_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+            </body> 
+               
 		</body>    
 
+
+       
 
 		</body>
 	</worldbody>
@@ -106,6 +116,7 @@ https://opensource.org/licenses/MIT.
 		<motor name="seg0_to_2" joint="seg0_to_2" />
 		<motor name="seg2_to_3" joint="seg2_to_3" />
 		<motor name="seg0_to_4" joint="seg0_to_4" />
+        <motor name="seg4_to_5" joint="seg4_to_5" />
 	</actuator>
 
 	<sensor>
@@ -116,6 +127,7 @@ https://opensource.org/licenses/MIT.
 		<touch name="seg2_site" site="seg2_site" />
 		<touch name="seg3_site" site="seg3_site" />
 		<touch name="seg4_site" site="seg4_site" />
+        <touch name="seg5_site" site="seg5_site" />
 		<velocimeter name="torso_vel" site="seg0_site" />
 		<gyro name="torso_gyro" site="seg0_site" />
 		<accelerometer name="torso_accel" site="seg0_site" />
@@ -145,19 +157,24 @@ https://opensource.org/licenses/MIT.
 		<exclude body1="seg3" body2="seg4" /> -->
 
 		<exclude body1="seg0" body2="seg1" />
-		<exclude body1="seg0" body2="seg2" />
-		<exclude body1="seg0" body2="seg3" />
-		<exclude body1="seg0" body2="seg4" />
+        <exclude body1="seg0" body2="seg2" />
+        <exclude body1="seg0" body2="seg3" />
+        <exclude body1="seg0" body2="seg4" />
+        <exclude body1="seg0" body2="seg5" />
 
-		<exclude body1="seg1" body2="seg2" />
-		<exclude body1="seg1" body2="seg3" />
-		<exclude body1="seg1" body2="seg4" />
+        <exclude body1="seg1" body2="seg2" />
+        <exclude body1="seg1" body2="seg3" />
+        <exclude body1="seg1" body2="seg4" />
+        <exclude body1="seg1" body2="seg5" />
 
-		<exclude body1="seg2" body2="seg3" />
-		<exclude body1="seg2" body2="seg4" />
+        <exclude body1="seg2" body2="seg3" />
+        <exclude body1="seg2" body2="seg4" />
+        <exclude body1="seg2" body2="seg5" />
 
-		<exclude body1="seg3" body2="seg4" />
+        <exclude body1="seg3" body2="seg4" />
+        <exclude body1="seg3" body2="seg5" />
 
+        <exclude body1="seg4" body2="seg5" />
 
 	</contact>
 </mujoco>

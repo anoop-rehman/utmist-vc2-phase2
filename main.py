@@ -5,15 +5,18 @@ from dm_control import viewer
 
 from creature_configs.ant import Ant
 
-home_player = Ant(marker_rgba=RGBA_BLUE)
+home_player_1 = Ant(marker_rgba=RGBA_BLUE)
+home_player_2 = Ant(marker_rgba=RGBA_BLUE)
+away_player_1 = Ant(marker_rgba=RGBA_RED)
+away_player_2 = Ant(marker_rgba=RGBA_RED)
 
 # Instantiates soccer environment using custom creatures with episodes of 10 seconds
 # each. Upon scoring, the environment reset player positions and the episode
 # continues. In this example, players can physically block each other and the
 # ball is trapped within an invisible box encapsulating the field.
 env = create_soccer_env(
-    home_players=[home_player],
-    away_players=[],
+    home_players=[home_player_1, home_player_2],
+    away_players=[away_player_1, away_player_2],
     time_limit=60.0,
     disable_walker_contacts=False,
     enable_field_box=True,
@@ -47,7 +50,6 @@ def random_policy(time_step):
     for action_spec in action_specs:
         action = np.random.uniform(
             -100, 100, size=action_spec.shape)
-        action[3] = 100
         actions.append(action)
         print(action)
     return actions

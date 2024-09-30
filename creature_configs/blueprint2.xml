@@ -103,7 +103,27 @@ https://opensource.org/licenses/MIT.
                 <site name="seg5_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
             </body> 
                
-		</body>    
+		</body>
+
+		
+		<body name="seg6" pos="-0.27436924 -0.43634224 2.61815406">
+			<joint name="seg0_to_6" range="-75 75" type="hinge" axis="0.0 0.0 1.0" pos="0.17547603 0.500000656 -0.9004083"/>
+			<geom name="seg6_geom" type="box" pos="0 0 0" size="0.4374656 1.27626884 1.5633446" euler="0.0009045518 -0.000434916059 -0.00434324844" rgba="1 1 1 0"/>
+			<site name="seg6_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+
+			<body name="seg7" pos="-0.21257019 1.2763118759999998 2.68305289">
+				<joint name="seg6_to_7" range="-75 75" type="hinge" axis="0.0 0.0 1.0" pos="0.243194059 -0.499999762 -0.917953253"/>
+				<geom name="seg7_geom" type="box" pos="0 0 0" size="0.385110676 1.12352777 1.37624693" euler="0.0009045518 -0.000434916059 -0.00434324844" rgba="1 1 1 0"/>
+				<site name="seg7_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+			</body>
+		</body>
+
+		<body name="seg8" pos="0.643415928 0.43634224 -0.7651751024">
+			<joint name="seg0_to_8" range="-75 75" type="hinge" axis="0.0 1.0 0.0" pos="0.41150412 0.500000656 0.01056538"/>
+			<geom name="seg8_geom" type="box" pos="0 0 0" size="0.7438524 0.485510945 0.524159551" euler="0.0009045518 -0.000434916059 -0.00434324844" rgba="1 1 1 0"/>
+			<site name="seg8_site" type="box" pos="0.1 0.1 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0"/>
+		</body>
+
 
 
        
@@ -117,6 +137,9 @@ https://opensource.org/licenses/MIT.
 		<motor name="seg2_to_3" joint="seg2_to_3" />
 		<motor name="seg0_to_4" joint="seg0_to_4" />
         <motor name="seg4_to_5" joint="seg4_to_5" />
+        <motor name="seg0_to_6" joint="seg0_to_6" />
+        <motor name="seg6_to_7" joint="seg6_to_7" />
+        <motor name="seg0_to_8" joint="seg0_to_8" />
 	</actuator>
 
 	<sensor>
@@ -128,6 +151,9 @@ https://opensource.org/licenses/MIT.
 		<touch name="seg3_site" site="seg3_site" />
 		<touch name="seg4_site" site="seg4_site" />
         <touch name="seg5_site" site="seg5_site" />
+		<touch name="seg6_site" site="seg6_site" />
+		<touch name="seg7_site" site="seg7_site" />
+		<touch name="seg8_site" site="seg8_site" />
 		<velocimeter name="torso_vel" site="seg0_site" />
 		<gyro name="torso_gyro" site="seg0_site" />
 		<accelerometer name="torso_accel" site="seg0_site" />
@@ -157,24 +183,50 @@ https://opensource.org/licenses/MIT.
 		<exclude body1="seg3" body2="seg4" /> -->
 
 		<exclude body1="seg0" body2="seg1" />
-        <exclude body1="seg0" body2="seg2" />
-        <exclude body1="seg0" body2="seg3" />
-        <exclude body1="seg0" body2="seg4" />
-        <exclude body1="seg0" body2="seg5" />
+		<exclude body1="seg0" body2="seg2" />
+		<exclude body1="seg0" body2="seg3" />
+		<exclude body1="seg0" body2="seg4" />
+		<exclude body1="seg0" body2="seg5" />
+		<exclude body1="seg0" body2="seg6" />
+		<exclude body1="seg0" body2="seg7" />
+		<exclude body1="seg0" body2="seg8" />
 
-        <exclude body1="seg1" body2="seg2" />
-        <exclude body1="seg1" body2="seg3" />
-        <exclude body1="seg1" body2="seg4" />
-        <exclude body1="seg1" body2="seg5" />
+		<exclude body1="seg1" body2="seg2" />
+		<exclude body1="seg1" body2="seg3" />
+		<exclude body1="seg1" body2="seg4" />
+		<exclude body1="seg1" body2="seg5" />
+		<exclude body1="seg1" body2="seg6" />
+		<exclude body1="seg1" body2="seg7" />
+		<exclude body1="seg1" body2="seg8" />
+		
+		<exclude body1="seg2" body2="seg3" />
+		<exclude body1="seg2" body2="seg4" />
+		<exclude body1="seg2" body2="seg5" />
+		<exclude body1="seg2" body2="seg6" />
+		<exclude body1="seg2" body2="seg7" />
+		<exclude body1="seg2" body2="seg8" />
+		
+		<exclude body1="seg3" body2="seg4" />
+		<exclude body1="seg3" body2="seg5" />
+		<exclude body1="seg3" body2="seg6" />
+		<exclude body1="seg3" body2="seg7" />
+		<exclude body1="seg3" body2="seg8" />
 
-        <exclude body1="seg2" body2="seg3" />
-        <exclude body1="seg2" body2="seg4" />
-        <exclude body1="seg2" body2="seg5" />
+		
+		<exclude body1="seg4" body2="seg5" />
+		<exclude body1="seg4" body2="seg6" />
+		<exclude body1="seg4" body2="seg7" />
+		<exclude body1="seg4" body2="seg8" />
 
-        <exclude body1="seg3" body2="seg4" />
-        <exclude body1="seg3" body2="seg5" />
+		
+		<exclude body1="seg5" body2="seg6" />
+		<exclude body1="seg5" body2="seg7" />
+		<exclude body1="seg5" body2="seg8" />
 
-        <exclude body1="seg4" body2="seg5" />
+		
+		<exclude body1="seg6" body2="seg7" />
+		<exclude body1="seg6" body2="seg8" />
 
+		<exclude body1="seg7" body2="seg8" />
 	</contact>
 </mujoco>

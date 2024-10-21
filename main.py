@@ -6,10 +6,10 @@ from dm_control import viewer
 from ant import Ant
 from creature import Creature
 
-home_player_1 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_BLUE)
-home_player_2 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_BLUE)
-away_player_1 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_RED)
-away_player_2 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", marker_rgba=RGBA_RED)
+home_player_1 = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_BLUE)
+home_player_2 = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_BLUE)
+away_player_1 = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_RED)
+away_player_2 = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_RED)
 
 # Instantiates soccer environment using custom creatures with episodes of 10 seconds
 # each. Upon scoring, the environment reset player positions and the episode
@@ -17,7 +17,7 @@ away_player_2 = Creature("creature_configs/two_legged_shlawg_blueprint.xml", mar
 # ball is trapped within an invisible box encapsulating the field.
 env = create_soccer_env(
     home_players=[home_player_1, home_player_2],
-    away_players=[away_player_1, away_player_2],
+    away_players = [away_player_1, away_player_2],
     time_limit=60.0,
     disable_walker_contacts=False,
     enable_field_box=True,

@@ -15,7 +15,8 @@ class AntEnv(MujocoEnv, utils.EzPickle):
             "rgb_array",
             "depth_array",
         ],
-        "render_fps": 20,
+        # "render_fps": 20,
+        "render_fps": 4,
     }
 
     def __init__(
@@ -27,7 +28,8 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         contact_cost_weight=5e-4,
         healthy_reward=1.0,
         terminate_when_unhealthy=True,
-        healthy_z_range=(0.2, 1.0),
+        # healthy_z_range=(0.2, 1.0),
+        healthy_z_range=(-10.0, 10.0),
         contact_force_range=(-1.0, 1.0),
         reset_noise_scale=0.1,
         exclude_current_positions_from_observation=True,
@@ -69,7 +71,10 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         #     obs_shape += 84
         # obs_shape += 2  # For target_x_velocity and averaged_x_velocity
 
-        obs_shape = 16
+        # obs_shape = 16
+        obs_shape = 29
+
+        
 
         observation_space = Box(
             low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float64
@@ -84,6 +89,7 @@ class AntEnv(MujocoEnv, utils.EzPickle):
             default_camera_config=DEFAULT_CAMERA_CONFIG,
             **kwargs,
         )
+        print("Gravity option:", self.model.opt.gravity)
 
     @property
     def healthy_reward(self):
@@ -123,9 +129,16 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         return terminated
 
     def step(self, action):
+        # Add at the start of the step function
+        # z_before = self.get_body_com("torso")[2]
+        
         xy_position_before = self.get_body_com("seg0")[:2].copy()
         self.do_simulation(action, self.frame_skip)
         xy_position_after = self.get_body_com("seg0")[:2].copy()
+
+        # xy_position_before = self.get_body_com("torso")[:2].copy()
+        # self.do_simulation(action, self.frame_skip)
+        # xy_position_after = self.get_body_com("torso")[:2].copy()
 
         xy_velocity = (xy_position_after - xy_position_before) / self.dt
         x_velocity, y_velocity = xy_velocity
@@ -177,6 +190,10 @@ class AntEnv(MujocoEnv, utils.EzPickle):
 
         if False:  # placeholder for render mode check
             self.render()
+
+        # Add before return
+        # z_after = self.get_body_com("torso")[2]
+        # print(f"Z position: {z_after:.3f}, Z change: {(z_after - z_before):.3f}")
 
         return observation, reward, terminated, False, info
 

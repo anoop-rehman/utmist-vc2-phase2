@@ -24,12 +24,12 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         # xml_file="ant.xml",
         xml_file="/Users/anooprehman/Documents/uoft/extracurricular/design_teams/utmist2/utmist-vc2-phase2/two_arm_rower.xml",
         ctrl_cost_weight=0.5,
-        use_contact_forces=False,
+        use_contact_forces=True,
         contact_cost_weight=5e-4,
         healthy_reward=1.0,
         terminate_when_unhealthy=True,
         # healthy_z_range=(0.2, 1.0),
-        healthy_z_range=(-10.0, 10.0),
+        healthy_z_range=(-100.0, 100.0),
         contact_force_range=(-1.0, 1.0),
         reset_noise_scale=0.1,
         exclude_current_positions_from_observation=True,
@@ -71,8 +71,9 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         #     obs_shape += 84
         # obs_shape += 2  # For target_x_velocity and averaged_x_velocity
 
-        # obs_shape = 16
-        obs_shape = 29
+
+        obs_shape = 89
+        # obs_shape = 29
 
         
 
@@ -128,10 +129,7 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         terminated = not self.is_healthy if self._terminate_when_unhealthy else False
         return terminated
 
-    def step(self, action):
-        # Add at the start of the step function
-        # z_before = self.get_body_com("torso")[2]
-        
+    def step(self, action):        
         xy_position_before = self.get_body_com("seg0")[:2].copy()
         self.do_simulation(action, self.frame_skip)
         xy_position_after = self.get_body_com("seg0")[:2].copy()
@@ -153,7 +151,10 @@ class AntEnv(MujocoEnv, utils.EzPickle):
 
         # Scaled reward based on the difference from the target velocity
         velocity_diff = np.abs(self.averaged_x_velocity - self.target_x_velocity)
-        forward_reward = 1.0 / (velocity_diff + 1.0)
+
+
+        # forward_reward = 1.0 / (velocity_diff + 1.0)
+        forward_reward = x_velocity
 
         healthy_reward = self.healthy_reward
 
@@ -190,10 +191,6 @@ class AntEnv(MujocoEnv, utils.EzPickle):
 
         if False:  # placeholder for render mode check
             self.render()
-
-        # Add before return
-        # z_after = self.get_body_com("torso")[2]
-        # print(f"Z position: {z_after:.3f}, Z change: {(z_after - z_before):.3f}")
 
         return observation, reward, terminated, False, info
 

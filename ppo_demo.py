@@ -33,9 +33,9 @@ vec_env = make_vec_env('LocalAnt-v4', n_envs=4)
 
 model = PPO("MlpPolicy", vec_env, verbose=1)
 reward_logger = RewardLoggerCallback()
-# model.learn(total_timesteps=25000*10*10, callback=reward_logger) # 25000 timesteps = around 4 epochs
-# model.learn(total_timesteps=2500, callback=reward_logger) # 25000 timesteps = around 4 epochs
-# model.save("saved_models/ppo_twoArmRower_2500timesteps")
+model.learn(total_timesteps=250000, callback=reward_logger) # 25000 timesteps = around 4 epochs
+# model.learn(total_timesteps=2500, callback=reward_logger) 
+model.save("saved_models/ppo_twoArmRower_250000timesteps_vmax_v1")
 
 # del model # remove to demonstrate saving and loading
 
@@ -45,7 +45,7 @@ reward_logger = RewardLoggerCallback()
 # plt.title('Training Rewards Over Time')
 # plt.show()
 
-model.load("saved_models/ppo_twoArmRower_2500timesteps")
+model.load("saved_models/ppo_twoArmRower_250000timesteps_vmax_v1")
 
 obs = vec_env.reset()
 while True:

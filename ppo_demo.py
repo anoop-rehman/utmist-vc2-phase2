@@ -35,9 +35,9 @@ model = PPO("MlpPolicy", vec_env, verbose=1)
 reward_logger = RewardLoggerCallback()
 
 # model.learn(total_timesteps=2500, callback=reward_logger) 
-# model.learn(total_timesteps=2500000, callback=reward_logger) # 25000 timesteps = around 4 epochs
+model.learn(total_timesteps=750000, callback=reward_logger) # 25000 timesteps = around 4 epochs
 
-# model.save("saved_models/ppo_twoArmRower_2500000timesteps_vmax_v1")
+model.save("saved_models/ppo_twoArmRower_750000timesteps_vmax_700gear")
 
 # del model # remove to demonstrate saving and loading
 
@@ -47,7 +47,7 @@ reward_logger = RewardLoggerCallback()
 # plt.title('Training Rewards Over Time')
 # plt.show()
 
-model.load("saved_models/ppo_twoArmRower_2500000timesteps_vmax_v1")
+model.load("saved_models/ppo_twoArmRower_750000timesteps_vmax_700gear")
 
 obs = vec_env.reset()
 while True:

@@ -139,23 +139,18 @@
                 <geom name="seg8_geom" type="box" pos="0 0 0" size="0.7438524 0.485510945 0.524159551" euler="0.0 0.0 0.0" rgba = "0.632558644 0.284143984 0.720508 1"/>
                 <!-- <site name="seg8_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" /> -->
             </body>
-
-
-
-       
-
 		</body>
 	</worldbody>
 
 	<actuator>
-		<motor joint="seg0_to_1" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-		<motor joint="seg0_to_2" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-		<motor joint="seg2_to_3" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-		<motor joint="seg0_to_4" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg4_to_5" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg0_to_6" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg6_to_7" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg0_to_8" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg0_to_1" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg0_to_2" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg2_to_3" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg0_to_4" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg4_to_5" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg0_to_6" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg6_to_7" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg0_to_8" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
 	</actuator>
 
 	<!-- <sensor>

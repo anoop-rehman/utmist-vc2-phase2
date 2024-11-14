@@ -29,9 +29,9 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         healthy_reward=1.0,
         terminate_when_unhealthy=True,
         # healthy_z_range=(0.2, 1.0),
-        healthy_z_range=(-100.0, 100.0),
+        healthy_z_range=(-10000.0, 10000.0),
         contact_force_range=(-1.0, 1.0),
-        reset_noise_scale=0.1,
+        reset_noise_scale=0.003,
         exclude_current_positions_from_observation=True,
         **kwargs,
     ):
@@ -91,7 +91,8 @@ class AntEnv(MujocoEnv, utils.EzPickle):
             **kwargs,
         )
         print("Gravity option:", self.model.opt.gravity)
-
+        
+        self.init_qpos = np.array([0.0, 0.0, 0.55, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 1.0])
     @property
     def healthy_reward(self):
         return (

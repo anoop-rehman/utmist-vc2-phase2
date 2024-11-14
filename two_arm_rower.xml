@@ -3,9 +3,9 @@
     <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
     <option integrator="RK4" timestep="0.01"/>
 
-    <custom>
+    <!-- <custom>
         <numeric data="0.0 0.0 0.55 1.0 0.0 0.0 0.0 0.0 1.0 0.0 -1.0 0.0 -1.0 0.0 1.0" name="init_qpos"/>
-    </custom>
+    </custom> -->
 
     <default>
         <joint armature="1" damping="1" limited="true"/>
@@ -44,7 +44,7 @@
 		<!-- <camera name="sideon" pos="0 -10 5" fovy="45" mode="targetbody" target="seg0" /> -->
 		<!-- <camera name="float_far" pos="-4 0 2" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" /> -->
 		<!-- <body name="seg0" pos="1 1 5"> -->
-		<body name="seg0" pos="0 0 0.75">
+		<body name="seg0" pos="0 0 0">
 			<!-- <camera name="floating" pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" /> -->
 			<!-- <camera name="egocentric" pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" /> -->
 			<!-- <camera name="egocentric" pos=".25 0 5" xyaxes="0 -1 0 0 0 1" fovy="90" /> -->

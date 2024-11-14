@@ -25,7 +25,7 @@ class RewardLoggerCallback(BaseCallback):
 gym.envs.registration.register(
     id='LocalAnt-v4',
     entry_point='local_ant_v4:AntEnv',
-    max_episode_steps=1000,
+    max_episode_steps=20,
 )
 
 # Parallel environments
@@ -35,9 +35,9 @@ model = PPO("MlpPolicy", vec_env, verbose=1)
 reward_logger = RewardLoggerCallback()
 
 # model.learn(total_timesteps=2500, callback=reward_logger) 
-model.learn(total_timesteps=250000, callback=reward_logger) # 25000 timesteps = around 4 epochs
+model.learn(total_timesteps=20, callback=reward_logger) # 25000 timesteps = around 4 epochs
 
-model.save("saved_models/ppo_twoArmRowerCORRECTEDXML_250000timesteps_vmax_700gear")
+model.save("saved_models/temp1")
 
 # del model # remove to demonstrate saving and loading
 
@@ -47,7 +47,7 @@ model.save("saved_models/ppo_twoArmRowerCORRECTEDXML_250000timesteps_vmax_700gea
 # plt.title('Training Rewards Over Time')
 # plt.show()
 
-model.load("saved_models/ppo_twoArmRowerCORRECTEDXML_250000timesteps_vmax_700gear")
+model.load("saved_models/temp1")
 
 obs = vec_env.reset()
 while True:

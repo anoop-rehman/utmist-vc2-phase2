@@ -162,14 +162,14 @@
 	</worldbody>
 
 	<actuator>
-		<motor joint="seg0_to_1" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-		<motor joint="seg0_to_2" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-		<motor joint="seg2_to_3" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-		<motor joint="seg0_to_4" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg4_to_5" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg0_to_6" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg6_to_7" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
-        <motor joint="seg0_to_8" gear="700" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg0_to_1" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg0_to_2" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg2_to_3" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+		<motor joint="seg0_to_4" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg4_to_5" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg0_to_6" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg6_to_7" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
+        <motor joint="seg0_to_8" gear="200" ctrllimited="true" ctrlrange="-1.0 1.0"/>
 	</actuator>
 
 	<!-- <sensor>

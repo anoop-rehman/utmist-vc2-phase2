@@ -40,10 +40,13 @@ class DMControlWrapper(gym.Env):
         obs_dict = timestep.observation[0]
         obs = np.concatenate([v.flatten() for v in obs_dict.values()])
         
-        reward = float(timestep.reward[0]) if timestep.reward is not None else 0.0
+        # reward = float(timestep.reward[0]) if timestep.reward is not None else 0.0
+        reward = timestep.observation[0]['stats_vel_to_ball'][0]
+        # print(timestep.observation[0]['stats_vel_to_ball'])
         done = timestep.last()
         info = {}  # Add any additional info you want to track
         
+        print("train reward:", reward)
         return obs, reward, done, info
 
     def reset(self):
@@ -68,7 +71,7 @@ class TrainingCallback(BaseCallback):
                 print(f"Episode {len(self.episode_rewards)}, Mean Reward: {mean_reward:.2f}")
         return True
 
-def train_creature(env, save_path="trained_creature", total_timesteps=10_000):
+def train_creature(env, save_path="trained_creature", total_timesteps=1_000_000):
     # Wrap environment for Stable Baselines3
     wrapped_env = DMControlWrapper(env)
     vec_env = DummyVecEnv([lambda: wrapped_env])

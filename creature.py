@@ -43,8 +43,6 @@ class Creature(legacy_base.Walker):
     if name:
       self._mjcf_root.model = name
       
-    print(self._mjcf_root.find_all('geom', immediate_children_only=False, exclude_attachments=False))
-
     # Set corresponding marker color if specified.
     
     if marker_rgba is not None:

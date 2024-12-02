@@ -2,9 +2,8 @@ import numpy as np
 from custom_soccer_env import create_soccer_env
 from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED
 from dm_control import viewer
-# from stable_baselines3 import PPO
-# from stable_baselines3.common.callbacks import BaseCallback
-
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
 
 from ant import Ant
 from creature import Creature
@@ -47,21 +46,15 @@ env = create_soccer_env(
 
 # Function to generate random actions for all players.
 
-count = 0
-
 def random_policy(time_step):
-    global count
-    if count < 5:
-        actions = []
-        action_specs = env.action_spec()
-        for action_spec in action_specs:
-            action = np.random.uniform(
-                -1, 1, size=action_spec.shape)
-            actions.append(action)
-        count += 1 
-        print(time_step.observation[0]['joints_vel'])
-        return actions
-    return
+    actions = []
+    action_specs = env.action_spec()
+    for action_spec in action_specs:
+        action = np.random.uniform(
+            -1, 1, size=action_spec.shape)
+        actions.append(action)
+    print(time_step.observation[0]['joints_vel'])
+    return actions
     
 
 # Use the viewer to visualize the environment with the random policy.

@@ -15,7 +15,7 @@ from typing import List
 def create_soccer_env(
     home_players: List[legacy_base.Walker],
     away_players: List[legacy_base.Walker],
-    time_limit=45.,
+    time_limit=45.0,
     random_state=None,
     disable_walker_contacts=False,
     enable_field_box=False,
@@ -44,7 +44,8 @@ def create_soccer_env(
     """
     goal_size = None
     min_size = (32, 24)
-    max_size = (48, 36)
+    # max_size = (48, 36)
+    max_size = (32, 24)
     ball = SoccerBall()
 
     task_factory = Task
@@ -59,13 +60,12 @@ def create_soccer_env(
     if len(players) < 1:
         raise ValueError("No players on the scene")
 
+    size = (32, 24)
     return composer.Environment(
         task=task_factory(
             players=players,
-            arena=RandomizedPitch(
-                min_size=min_size,
-                max_size=max_size,
-                keep_aspect_ratio=keep_aspect_ratio,
+            arena=Pitch(
+                size=size,
                 field_box=enable_field_box,
                 goal_size=goal_size),
             ball=ball,

@@ -76,7 +76,7 @@ class TrainingCallback(BaseCallback):
                 print(f"Episode {len(self.episode_rewards)}, Mean Reward: {mean_reward:.2f}")
         return True
 
-def train_creature(env, save_path="trained_creature", total_timesteps=480_000):
+def train_creature(env, save_path="trained_creature", total_timesteps=60_000):
     # Wrap environment for Stable Baselines3
     wrapped_env = DMControlWrapper(env)
     vec_env = DummyVecEnv([lambda: wrapped_env])

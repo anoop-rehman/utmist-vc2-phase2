@@ -22,7 +22,7 @@ env = create_soccer_env(
 )
 
 # Train the creature
-model = train_creature(env, save_path="trained_creatures/v1_2_1__240kTimesteps")
+model = train_creature(env, save_path="trained_creatures/v1_2_1__720kTimesteps")
 
 # Load a trained model
 # wrapped_env = DMControlWrapper(env)
@@ -39,7 +39,7 @@ model = train_creature(env, save_path="trained_creatures/v1_2_1__240kTimesteps")
 #     gae_lambda=0.95,
 #     clip_range=0.2
 # )
-model.load("trained_creatures/v1_2_1__240kTimesteps")
+model.load("trained_creatures/v1_2_1__720kTimesteps")
 
 # Define a policy function for the viewer
 def policy(time_step):
@@ -59,7 +59,7 @@ def policy(time_step):
     reward = vel_to_ball + 1.0 - ctrl_cost 
 
     print("-------------------------------")
-    print("vel to ball:", vel_to_ball)
+    print("vel_to_ball:", vel_to_ball)
     print("test reward:", reward)
 
 

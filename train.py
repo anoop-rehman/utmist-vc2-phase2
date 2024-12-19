@@ -34,6 +34,10 @@ class DMControlWrapper(gym.Env):
             dtype=np.float32
         )
 
+        self.vel_to_balls = []
+        self.averaged_vel_to_ball = 0.0
+
+
     def step(self, action):
         timestep = self.env.step([action])
         
@@ -41,15 +45,27 @@ class DMControlWrapper(gym.Env):
         obs = np.concatenate([v.flatten() for v in obs_dict.values()])
         
         vel_to_ball = timestep.observation[0]['stats_vel_to_ball'][0]
-        ctrl_cost_weight = 0.5
-        ctrl_cost = ctrl_cost_weight * np.sum(np.square(action))
-        reward = vel_to_ball + 1.0 - ctrl_cost 
+
+        self.vel_to_balls.append(vel_to_ball)
+        alpha = 0.1  # smoothing factor for EWMA
+        if len(self.vel_to_balls) == 1:
+            self.averaged_vel_to_ball = vel_to_ball
+        else:
+            self.averaged_vel_to_ball = alpha * vel_to_ball + (1 - alpha) * self.averaged_vel_to_ball
+
+        reward = self.averaged_vel_to_ball
+
+        if (len(self.vel_to_balls) > 100 and self.averaged_vel_to_ball < 0.01):
+            reward -= 5.0
+            
 
         done = timestep.last()
         info = {}  # Add any additional info you want to track
         
         print("-------------------------------")
-        print("vel to ball:", vel_to_ball)
+        print("vel_to_ball:", vel_to_ball)
+        print('self.averaged_vel_to_ball:', self.averaged_vel_to_ball)
+        print('len(self.vel_to_balls)', len(self.vel_to_balls))
         print("train reward:", reward)
 
         return obs, reward, done, info
@@ -76,7 +92,7 @@ class TrainingCallback(BaseCallback):
                 print(f"Episode {len(self.episode_rewards)}, Mean Reward: {mean_reward:.2f}")
         return True
 
-def train_creature(env, save_path="trained_creature", total_timesteps=240_000):
+def train_creature(env, save_path="trained_creature", total_timesteps=720_000):
     # Wrap environment for Stable Baselines3
     wrapped_env = DMControlWrapper(env)
     vec_env = DummyVecEnv([lambda: wrapped_env])

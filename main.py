@@ -18,28 +18,28 @@ env = create_soccer_env(
     disable_walker_contacts=False,
     enable_field_box=True,
     terminate_on_goal=False,
-    random_state=0
+    random_state=3
 )
 
 # Train the creature
-# model = train_creature(env, save_path="trained_creatures/v1_2_1__20kTimesteps")
+model = train_creature(env, save_path="trained_creatures/v1_2_1__240kTimesteps")
 
 # Load a trained model
-wrapped_env = DMControlWrapper(env)
-vec_env = DummyVecEnv([lambda: wrapped_env])
-model = PPO(
-    "MlpPolicy",
-    vec_env,
-    verbose=1,
-    learning_rate=3e-4,
-    n_steps=2048,
-    batch_size=64,
-    n_epochs=10,
-    gamma=0.99,
-    gae_lambda=0.95,
-    clip_range=0.2
-)
-model.load("trained_creatures/v1_2_1__20kTimesteps")
+# wrapped_env = DMControlWrapper(env)
+# vec_env = DummyVecEnv([lambda: wrapped_env])
+# model = PPO(
+#     "MlpPolicy",
+#     vec_env,
+#     verbose=1,
+#     learning_rate=3e-4,
+#     n_steps=2048,
+#     batch_size=64,
+#     n_epochs=10,
+#     gamma=0.99,
+#     gae_lambda=0.95,
+#     clip_range=0.2
+# )
+model.load("trained_creatures/v1_2_1__240kTimesteps")
 
 # Define a policy function for the viewer
 def policy(time_step):

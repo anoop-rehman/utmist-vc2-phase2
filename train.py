@@ -40,13 +40,17 @@ class DMControlWrapper(gym.Env):
         obs_dict = timestep.observation[0]
         obs = np.concatenate([v.flatten() for v in obs_dict.values()])
         
-        # reward = float(timestep.reward[0]) if timestep.reward is not None else 0.0
-        reward = timestep.observation[0]['stats_vel_to_ball'][0]
-        # print(timestep.observation[0]['stats_vel_to_ball'])
+        vel_to_ball = timestep.observation[0]['stats_vel_to_ball'][0]
+        ctrl_cost_weight = 0.5
+        ctrl_cost = ctrl_cost_weight * np.sum(np.square(action))
+        reward = vel_to_ball + 1.0 - ctrl_cost 
+
         done = timestep.last()
         info = {}  # Add any additional info you want to track
         
+        print("vel to ball:", vel_to_ball)
         print("train reward:", reward)
+
         return obs, reward, done, info
 
     def reset(self):

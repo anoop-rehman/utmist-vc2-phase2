@@ -48,6 +48,7 @@ class DMControlWrapper(gym.Env):
         done = timestep.last()
         info = {}  # Add any additional info you want to track
         
+        print("-------------------------------")
         print("vel to ball:", vel_to_ball)
         print("train reward:", reward)
 

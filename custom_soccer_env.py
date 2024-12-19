@@ -1,5 +1,6 @@
 import os
 from dm_control import composer
+import numpy as np
 
 # Monkey patch out original XML path
 # cuz they removed the parameter to override it normally 💀
@@ -11,6 +12,25 @@ from dm_control.locomotion.soccer.task import Task, MultiturnTask
 from dm_control.locomotion.soccer.soccer_ball import SoccerBall
 from dm_control.locomotion.soccer.pitch import RandomizedPitch
 from typing import List
+
+class FixedResetEnvironment(composer.Environment):
+    """Environment wrapper that resets random state before each episode."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Store the initial seed
+        if isinstance(self._random_state, np.random.RandomState):
+            self._initial_seed = self._random_state.get_state()
+        else:
+            self._initial_seed = self._random_state
+
+    def reset(self):
+        # Reset random state to initial value
+        if isinstance(self._initial_seed, tuple):
+            self._random_state.set_state(self._initial_seed)
+        else:
+            self._random_state = np.random.RandomState(self._initial_seed)
+        return super().reset()
 
 def create_soccer_env(
     home_players: List[legacy_base.Walker],
@@ -61,7 +81,7 @@ def create_soccer_env(
         raise ValueError("No players on the scene")
 
     print("RANDOM STATE:", random_state)
-    return composer.Environment(
+    return FixedResetEnvironment(
         task=task_factory(
             players=players,
             arena=RandomizedPitch(

@@ -18,7 +18,7 @@ env = create_soccer_env(
     disable_walker_contacts=False,
     enable_field_box=True,
     terminate_on_goal=False,
-    random_state=42
+    random_state=0
 )
 
 # Train the creature

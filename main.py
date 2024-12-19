@@ -21,24 +21,24 @@ env = create_soccer_env(
 )
 
 # Train the creature
-# model = train_creature(env, save_path="trained_creatures/v0reward_1milTimesteps")
+model = train_creature(env, save_path="trained_creatures/v0_51__60kTimesteps")
 
 # Load a trained model
-wrapped_env = DMControlWrapper(env)
-vec_env = DummyVecEnv([lambda: wrapped_env])
-model = PPO(
-    "MlpPolicy",
-    vec_env,
-    verbose=1,
-    learning_rate=3e-4,
-    n_steps=2048,
-    batch_size=64,
-    n_epochs=10,
-    gamma=0.99,
-    gae_lambda=0.95,
-    clip_range=0.2
-)
-model.load("trained_creatures/v0reward_1milTimesteps")
+# wrapped_env = DMControlWrapper(env)
+# vec_env = DummyVecEnv([lambda: wrapped_env])
+# model = PPO(
+#     "MlpPolicy",
+#     vec_env,
+#     verbose=1,
+#     learning_rate=3e-4,
+#     n_steps=2048,
+#     batch_size=64,
+#     n_epochs=10,
+#     gamma=0.99,
+#     gae_lambda=0.95,
+#     clip_range=0.2
+# )
+model.load("trained_creatures/v0_51__60kTimesteps")
 
 # Define a policy function for the viewer
 def policy(time_step):
@@ -47,9 +47,10 @@ def policy(time_step):
     obs = np.concatenate([v.flatten() for v in obs_dict.values()])
     
     # Get action from model
-    # action, _states = model.predict(obs, deterministic=True)
+    action, _states = model.predict(obs, deterministic=True)
 
-    action = np.random.uniform(-1, 1, size=(8,))
+    # Just randomly generate action (for testing)
+    # action = np.random.uniform(-1, 1, size=(8,))
 
     vel_to_ball = time_step.observation[0]['stats_vel_to_ball'][0]
     ctrl_cost_weight = 0.5

@@ -60,12 +60,14 @@ def create_soccer_env(
     if len(players) < 1:
         raise ValueError("No players on the scene")
 
-    size = (32, 24)
+    print("RANDOM STATE:", random_state)
     return composer.Environment(
         task=task_factory(
             players=players,
-            arena=Pitch(
-                size=size,
+            arena=RandomizedPitch(
+                min_size=min_size,
+                max_size=max_size,
+                keep_aspect_ratio=keep_aspect_ratio,
                 field_box=enable_field_box,
                 goal_size=goal_size),
             ball=ball,

@@ -6,6 +6,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from gym import spaces
 import os
 from datetime import datetime
+from model_card_generator import generate_model_card
 
 # Default hyperparameters
 PPO_PARAMS = {
@@ -178,6 +179,8 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
         tensorboard_log: Directory for tensorboard logs (optional, will create new one if not provided)
                         When resuming training, pass the same directory to continue the training graphs
     """
+    start_time = datetime.now()  # Record training start time
+    
     # Get starting timesteps from parameter or load_path
     if start_timesteps is not None:
         print(f"Using provided start_timesteps: {start_timesteps}")
@@ -238,4 +241,9 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
     model.save(final_path)
     print(f"\nSaved final model to {final_path}")
     model.last_save_folder = os.path.basename(save_dir)  # Store the folder name in the model for reference
-    return model 
+    
+    # Generate model card
+    end_time = datetime.now()
+    generate_model_card(model, save_dir, start_time, end_time, start_timesteps, total_timesteps, load_path, tensorboard_log)
+    
+    return model

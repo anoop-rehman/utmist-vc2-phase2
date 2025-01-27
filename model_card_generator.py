@@ -28,7 +28,7 @@ def get_reward_function_text():
     formatted_lines = ["    " + line for line in lines]
     return "\n".join(formatted_lines)
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, total_timesteps, tensorboard_log=None, checkpoint_freq=4000, keep_checkpoints=False, checkpoint_stride=1):
+def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, total_timesteps, tensorboard_log=None, checkpoint_freq=4000, keep_checkpoints=False, checkpoint_stride=1, load_path=None):
     """Generate a markdown file with model details.
     
     Args:
@@ -42,6 +42,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, 
         checkpoint_freq: How often checkpoints were saved
         keep_checkpoints: Whether all checkpoints were kept
         checkpoint_stride: How many checkpoints were skipped between saves
+        load_path: Path to the model loaded for continued training
     """
     card_path = os.path.join(save_dir, "model_card.md")
     
@@ -80,6 +81,13 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, 
         f.write(f"- Total Steps (cumulative steps after training): {start_timesteps + total_timesteps}\n")
         final_model_path = os.path.join(save_dir, f'final_model_{start_timesteps + total_timesteps}_steps.zip')
         f.write(f"- Final Model Path: `{final_model_path}`\n")
+        if start_timesteps > 0:
+            if load_path:
+                f.write(f"- Previous Model Path: `{load_path}`\n")
+            else:
+                f.write("- Previous Model Path: Not found\n")
+        else:
+            f.write("- Previous Model Path: N/A\n")
         if tensorboard_log:
             f.write(f"- TensorBoard Log: {tensorboard_log}\n")
         

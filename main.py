@@ -81,7 +81,7 @@ if __name__ == "__main__":
             env=vec_env,  # Use the wrapped environment
             total_timesteps=args.timesteps,
             checkpoint_freq=args.checkpoint_freq,
-            load_path=args.load_path,
+            load_path=args.load_model or args.load_path,  # Use load_model if provided, otherwise use load_path
             tensorboard_log=args.tensorboard_log,
             keep_checkpoints=args.keep_checkpoints,
             checkpoint_stride=args.checkpoint_stride,

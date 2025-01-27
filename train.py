@@ -275,7 +275,8 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         tensorboard_log=tensorboard_log,
         checkpoint_freq=checkpoint_freq,
         keep_checkpoints=keep_checkpoints,
-        checkpoint_stride=checkpoint_stride
+        checkpoint_stride=checkpoint_stride,
+        load_path=load_path
     )
     
     return model

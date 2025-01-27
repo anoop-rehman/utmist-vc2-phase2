@@ -223,10 +223,13 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
     )
 
     # Clean up last checkpoint
-    checkpoint_path = os.path.join(save_dir, f"model_{checkpoint_freq}steps.zip")
+    last_checkpoint = total_timesteps - (total_timesteps % checkpoint_freq)
+    if last_checkpoint == total_timesteps:
+        last_checkpoint -= checkpoint_freq
+    checkpoint_path = os.path.join(save_dir, f"model_{last_checkpoint}steps.zip")
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
-        print(f"\nRemoved checkpoint at {checkpoint_freq} steps")
+        print(f"\nRemoved checkpoint at {last_checkpoint} steps")
 
     # Save final model with cumulative step count in filename
     last_steps = start_timesteps + total_timesteps

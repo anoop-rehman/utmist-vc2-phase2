@@ -100,11 +100,28 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, 
         f.write(get_reward_function_text())
         f.write("\n```\n\n")
         
+        # Training Command
+        f.write("## Training Command\n")
+        command = "python main.py"
+        if total_timesteps:
+            command += f" --timesteps {total_timesteps}"
+        if load_path:
+            command += f" --load-path {load_path}"
+        if tensorboard_log:
+            command += f" --tensorboard-log {tensorboard_log}"
+        f.write(f"```bash\n{command}\n```\n\n")
+        
         # Additional Notes
         f.write("## Additional Notes\n")
-        f.write("- Algorithm: Proximal Policy Optimization (PPO)\n")
+        if isinstance(model, str):
+            f.write("- Model Type: Unknown (loaded from path)\n")
+        else:
+            f.write(f"- Algorithm: {model.__class__.__name__}\n")
+        if tensorboard_log:
+            f.write(f"- TensorBoard: Enabled (logs at {tensorboard_log})\n")
+        else:
+            f.write("- TensorBoard: Disabled\n")
         f.write("- Checkpoints: Saved during training\n")
-        f.write("- TensorBoard: Logging enabled for training visualization\n")
         
     print(f"\nGenerated model card at {card_path}")
     

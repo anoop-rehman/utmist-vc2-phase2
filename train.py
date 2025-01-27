@@ -163,15 +163,20 @@ class CheckpointCallback(BaseCallback):
 def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000, start_timesteps=None, tensorboard_log=None):
     """
     Train a creature while maintaining the most recent checkpoint.
+    When loading from a previous model, it will:
+    1. Continue the global step count from where the previous model left off
+    2. Use the same tensorboard log directory if provided, enabling continuous training graphs
+    3. Save the final model with the cumulative step count in its name
     
     Args:
         env: The environment to train in
         save_dir: Directory to save models (if None, uses datetime-based folder)
-        total_timesteps: Total timesteps to train for
+        total_timesteps: Total timesteps to train for in this session
         load_path: Path to load a pre-trained model (optional)
         checkpoint_freq: Frequency at which to save checkpoints (default 4000)
         start_timesteps: Starting timestep count (optional, will try to parse from load_path if not provided)
-        tensorboard_log: Directory for tensorboard logs (optional)
+        tensorboard_log: Directory for tensorboard logs (optional, will create new one if not provided)
+                        When resuming training, pass the same directory to continue the training graphs
     """
     # Get starting timesteps from parameter or load_path
     if start_timesteps is not None:
@@ -185,7 +190,7 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
             except:
                 print("Could not parse starting timesteps from load_path")
     
-    # Generate default save directory if none provided
+    # Generate default save directory if none provided (datetime-based folder)
     if save_dir is None:
         save_dir = os.path.join("trained_creatures", get_default_folder())
     
@@ -205,30 +210,29 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
     
     model = create_ppo_model(vec_env, tensorboard_log, load_path)
 
-    # Train the model
+    # Train the model with callbacks for logging and checkpointing
     callbacks = [
-        TensorboardCallback(start_timesteps=start_timesteps),
+        TensorboardCallback(start_timesteps=start_timesteps),  # Tracks global step count
         TrainingCallback(),
         CheckpointCallback(save_dir, checkpoint_freq, start_timesteps, total_timesteps)
     ]
     model.learn(
         total_timesteps=total_timesteps,
         callback=callbacks,
-        reset_num_timesteps=False if load_path else True
+        reset_num_timesteps=False if load_path else True  # Continue step count when loading model
     )
 
-    # Save the final model with step count
+    # Clean up last checkpoint
+    checkpoint_path = os.path.join(save_dir, f"model_{checkpoint_freq}steps.zip")
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
+        print(f"\nRemoved checkpoint at {checkpoint_freq} steps")
+
+    # Save final model with cumulative step count in filename
     last_steps = start_timesteps + total_timesteps
     final_path = os.path.join(save_dir, f"final_model_{last_steps}_steps")
+    final_path += ".zip"  # Add .zip extension
     model.save(final_path)
-    
-    # Delete the last checkpoint after confirming final model was saved
-    if os.path.exists(final_path + ".zip"):
-        last_checkpoint = os.path.join(save_dir, f"model_{last_steps}steps")
-        if os.path.exists(last_checkpoint + ".zip"):
-            os.remove(last_checkpoint + ".zip")
-            print(f"\nRemoved last checkpoint at {last_steps} steps")
-    
-    # Store the folder name in the model for reference
-    model.last_save_folder = model_folder
+    print(f"\nSaved final model to {final_path}")
+    model.last_save_folder = os.path.basename(save_dir)  # Store the folder name in the model for reference
     return model 

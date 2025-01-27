@@ -190,7 +190,16 @@ def train_creature_with_checkpoints(env, save_dir=None, total_timesteps=240_000,
     )
 
     # Save the final model
-    model.save(os.path.join(save_dir, "final_model"))
+    final_path = os.path.join(save_dir, "final_model")
+    model.save(final_path)
+    
+    # Delete the last checkpoint after confirming final model was saved
+    if os.path.exists(final_path + ".zip"):
+        last_checkpoint = os.path.join(save_dir, f"model_{total_timesteps}steps")
+        if os.path.exists(last_checkpoint + ".zip"):
+            os.remove(last_checkpoint + ".zip")
+            print(f"\nRemoved last checkpoint at {total_timesteps} steps")
+    
     return model
 
 def train_creature(env, save_path="trained_creature", total_timesteps=240_000, load_path=None):

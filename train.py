@@ -8,6 +8,7 @@ from gym import spaces
 class DMControlWrapper(gym.Env):
     def __init__(self, env):
         self.env = env
+        self.reward = 0  # Add this to store current reward for tensorboard
         
         # Get action and observation specs
         action_spec = env.action_spec()[0]  # Get first player's action spec
@@ -52,6 +53,7 @@ class DMControlWrapper(gym.Env):
         print("vel to ball:", vel_to_ball)
         print("train reward:", reward)
 
+        self.reward = reward  # Store the reward
         return obs, reward, done, info
 
     def reset(self):
@@ -76,12 +78,21 @@ class TrainingCallback(BaseCallback):
                 print(f"Episode {len(self.episode_rewards)}, Mean Reward: {mean_reward:.2f}")
         return True
 
-def train_creature(env, save_path="trained_creature", total_timesteps=480_000):
+class TensorboardCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        
+    def _on_step(self):
+        # Log reward
+        self.logger.record('reward', self.training_env.get_attr('reward')[0])
+        return True
+
+def train_creature(env, save_path="trained_creature", total_timesteps=720_000):
     # Wrap environment for Stable Baselines3
     wrapped_env = DMControlWrapper(env)
     vec_env = DummyVecEnv([lambda: wrapped_env])
 
-    # Initialize PPO model
+    # Initialize PPO model with tensorboard logging
     model = PPO(
         "MlpPolicy",
         vec_env,
@@ -92,14 +103,18 @@ def train_creature(env, save_path="trained_creature", total_timesteps=480_000):
         n_epochs=10,
         gamma=0.99,
         gae_lambda=0.95,
-        clip_range=0.2
+        clip_range=0.2,
+        tensorboard_log="./tensorboard_logs/"  # Add tensorboard logging
     )
 
-    # Train the model
-    callback = TrainingCallback()
+    # Train the model with both callbacks
+    callbacks = [
+        TensorboardCallback(),
+        TrainingCallback()
+    ]
     model.learn(
         total_timesteps=total_timesteps,
-        callback=callback
+        callback=callbacks
     )
 
     # Save the trained model

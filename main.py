@@ -6,7 +6,18 @@ from dm_control import viewer
 import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
+import os
 
+# Add this new callback class for real-time plotting
+class TensorboardCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        
+    def _on_step(self):
+        # Log scalar value (here a random value)
+        self.logger.record('reward', self.training_env.get_attr('reward')[0])
+        return True
 
 # Create creature and environment
 home_player = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_BLUE)
@@ -21,9 +32,9 @@ env = create_soccer_env(
 )
 
 # Train the creature
-model = train_creature(env, save_path="trained_creatures/v0_51__60kTimesteps")
+model = train_creature(env, save_path="trained_creatures/v0_51__240kTimesteps")
 
-# Load a trained model
+# # Load a trained model
 # wrapped_env = DMControlWrapper(env)
 # vec_env = DummyVecEnv([lambda: wrapped_env])
 # model = PPO(
@@ -36,9 +47,10 @@ model = train_creature(env, save_path="trained_creatures/v0_51__60kTimesteps")
 #     n_epochs=10,
 #     gamma=0.99,
 #     gae_lambda=0.95,
-#     clip_range=0.2
+#     clip_range=0.2,
+#     tensorboard_log="./tensorboard_logs/"
 # )
-model.load("trained_creatures/v0_51__60kTimesteps")
+# model.load("trained_creatures/v0_51__60kTimesteps")
 
 # Define a policy function for the viewer
 def policy(time_step):

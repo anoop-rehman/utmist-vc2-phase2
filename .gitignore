@@ -163,3 +163,4 @@ cython_debug/
 /trained_creatures
 /tensorboard_logs
 /tensorboard_logs
+.DS_Store

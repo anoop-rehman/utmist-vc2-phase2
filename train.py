@@ -42,6 +42,19 @@ def get_default_folder():
     now = datetime.now()
     return now.strftime("%Y%m%d__%I_%M%p").lower()
 
+def process_observation(timestep):
+    """Convert DM Control observation to the format expected by the model."""
+    obs_dict = timestep.observation[0]
+    return np.concatenate([v.flatten() for v in obs_dict.values()])
+
+def calculate_reward(timestep, action):
+    """Calculate reward based on velocity to ball and control cost."""
+    vel_to_ball = timestep.observation[0]['stats_vel_to_ball'][0]
+    ctrl_cost_weight = 0.5
+    ctrl_cost = ctrl_cost_weight * np.sum(np.square(action))
+    reward = vel_to_ball + 1.0 - ctrl_cost
+    return reward, vel_to_ball
+
 class DMControlWrapper(gym.Env):
     def __init__(self, env):
         self.env = env
@@ -60,8 +73,7 @@ class DMControlWrapper(gym.Env):
         
         # Calculate observation size and create a sample observation to verify shape
         timestep = env.reset()
-        obs_dict = timestep.observation[0]
-        self.obs_concat = np.concatenate([v.flatten() for v in obs_dict.values()])
+        self.obs_concat = process_observation(timestep)
         obs_size = self.obs_concat.shape[0]
         
         # Define observation space with the correct size
@@ -75,14 +87,8 @@ class DMControlWrapper(gym.Env):
     def step(self, action):
         timestep = self.env.step([action])
         
-        obs_dict = timestep.observation[0]
-        obs = np.concatenate([v.flatten() for v in obs_dict.values()])
-        
-        vel_to_ball = timestep.observation[0]['stats_vel_to_ball'][0]
-        ctrl_cost_weight = 0.5
-        ctrl_cost = ctrl_cost_weight * np.sum(np.square(action))
-        reward = vel_to_ball + 1.0 - ctrl_cost 
-
+        obs = process_observation(timestep)
+        reward, vel_to_ball = calculate_reward(timestep, action)
         done = timestep.last()
         info = {}
         
@@ -95,9 +101,7 @@ class DMControlWrapper(gym.Env):
 
     def reset(self):
         timestep = self.env.reset()
-        obs_dict = timestep.observation[0]
-        obs = np.concatenate([v.flatten() for v in obs_dict.values()])
-        return obs
+        return process_observation(timestep)
 
     def render(self, mode='human'):
         pass
@@ -148,7 +152,7 @@ class CheckpointCallback(BaseCallback):
                     print(f"Removed previous checkpoint at {previous_checkpoint} steps")
         return True
 
-def train_creature_with_checkpoints(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000):
+def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000):
     """
     Train a creature while maintaining the most recent checkpoint.
     
@@ -195,24 +199,4 @@ def train_creature_with_checkpoints(env, save_dir=None, total_timesteps=240_000,
             os.remove(last_checkpoint + ".zip")
             print(f"\nRemoved last checkpoint at {total_timesteps} steps")
     
-    return model
-
-def train_creature(env, save_path="trained_creature", total_timesteps=240_000, load_path=None):
-    """Train a creature without checkpointing."""
-    # Setup environment and model
-    vec_env = setup_env(env)
-    run_name = f"PPO_{os.path.basename(save_path)}"
-    tensorboard_log = f"./tensorboard_logs/{run_name}"
-    model = create_ppo_model(vec_env, tensorboard_log, load_path)
-
-    # Train the model
-    callbacks = [TensorboardCallback(), TrainingCallback()]
-    model.learn(
-        total_timesteps=total_timesteps,
-        callback=callbacks,
-        reset_num_timesteps=False if load_path else True
-    )
-
-    # Save the trained model
-    model.save(save_path)
     return model 

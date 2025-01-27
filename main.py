@@ -1,7 +1,7 @@
 from custom_soccer_env import create_soccer_env
 from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED
 from creature import Creature
-from train import train_creature, DMControlWrapper, train_creature_with_checkpoints
+from train import train_creature, DMControlWrapper, process_observation, calculate_reward
 from dm_control import viewer
 import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -33,7 +33,7 @@ env = create_soccer_env(
 
 # Train with checkpoints
 print("Starting training with checkpoints...")
-model = train_creature_with_checkpoints(
+model = train_creature(
     env, 
     total_timesteps=20_000,  # This will create checkpoints at 4k, 8k, 12k, 16k, 20k
     checkpoint_freq=4000
@@ -41,18 +41,12 @@ model = train_creature_with_checkpoints(
 
 # Define a policy function for the viewer
 def policy(time_step):
-    # Convert observation to the format expected by the model
-    obs_dict = time_step.observation[0]
-    obs = np.concatenate([v.flatten() for v in obs_dict.values()])
-    
-    # Get action from model
+    # Process observation and get action
+    obs = process_observation(time_step)
     action, _states = model.predict(obs, deterministic=True)
     
-    vel_to_ball = time_step.observation[0]['stats_vel_to_ball'][0]
-    ctrl_cost_weight = 0.5
-    ctrl_cost = ctrl_cost_weight * np.sum(np.square(action))
-    reward = vel_to_ball + 1.0 - ctrl_cost 
-
+    # Calculate and print reward
+    reward, vel_to_ball = calculate_reward(time_step, action)
     print("-------------------------------")
     print("vel to ball:", vel_to_ball)
     print("test reward:", reward)

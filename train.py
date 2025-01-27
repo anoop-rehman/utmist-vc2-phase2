@@ -128,24 +128,29 @@ class TensorboardCallback(BaseCallback):
         return True
 
 class CheckpointCallback(BaseCallback):
-    def __init__(self, save_dir, checkpoint_freq=4000, verbose=0):
+    def __init__(self, save_dir, checkpoint_freq=4000, start_timesteps=0, total_timesteps=None, verbose=0):
         super().__init__(verbose)
         self.checkpoint_freq = checkpoint_freq
         self.save_dir = save_dir
+        self.start_timesteps = start_timesteps
+        self.total_timesteps = total_timesteps
         
     def _on_step(self):
         if self.n_calls % self.checkpoint_freq == 0:
-            # Calculate which checkpoints to keep/remove
-            current_checkpoint = self.n_calls
+            current_checkpoint = self.start_timesteps + self.n_calls
             previous_checkpoint = current_checkpoint - self.checkpoint_freq
             
+            # Don't save if this is the final checkpoint (will be saved as final_model)
+            if current_checkpoint == self.start_timesteps + self.total_timesteps:
+                return True
+                
             # Save current checkpoint
             checkpoint_path = os.path.join(self.save_dir, f"model_{current_checkpoint}steps")
             self.model.save(checkpoint_path)
             print(f"\nSaved checkpoint at {current_checkpoint} steps")
             
             # Delete previous checkpoint if it exists
-            if previous_checkpoint > 0:
+            if previous_checkpoint > self.start_timesteps:
                 old_path = os.path.join(self.save_dir, f"model_{previous_checkpoint}steps")
                 if os.path.exists(old_path + ".zip"):
                     os.remove(old_path + ".zip")
@@ -163,6 +168,14 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
         load_path: Path to load a pre-trained model (optional)
         checkpoint_freq: Frequency at which to save checkpoints (default 4000)
     """
+    # Get starting timesteps from load_path if provided
+    start_timesteps = 0
+    if load_path and "steps" in load_path:
+        try:
+            start_timesteps = int(load_path.split("steps")[0].split("_")[-1])
+        except:
+            print("Could not parse starting timesteps from load_path")
+    
     # Generate default save directory if none provided
     if save_dir is None:
         save_dir = os.path.join("trained_creatures", get_default_folder())
@@ -180,7 +193,7 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
     callbacks = [
         TensorboardCallback(),
         TrainingCallback(),
-        CheckpointCallback(save_dir, checkpoint_freq)
+        CheckpointCallback(save_dir, checkpoint_freq, start_timesteps, total_timesteps)
     ]
     model.learn(
         total_timesteps=total_timesteps,
@@ -194,9 +207,10 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
     
     # Delete the last checkpoint after confirming final model was saved
     if os.path.exists(final_path + ".zip"):
-        last_checkpoint = os.path.join(save_dir, f"model_{total_timesteps}steps")
+        last_steps = start_timesteps + total_timesteps
+        last_checkpoint = os.path.join(save_dir, f"model_{last_steps}steps")
         if os.path.exists(last_checkpoint + ".zip"):
             os.remove(last_checkpoint + ".zip")
-            print(f"\nRemoved last checkpoint at {total_timesteps} steps")
+            print(f"\nRemoved last checkpoint at {last_steps} steps")
     
     return model 

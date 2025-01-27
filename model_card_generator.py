@@ -147,6 +147,10 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, 
         from train import PPO_PARAMS
         for param, value in PPO_PARAMS.items():
             f.write(f"- {param}: {value}\n")
+        
+        # Other Notes section for manual additions
+        f.write("\n## Other Notes\n")
+        f.write("<!-- Add any interesting observations about this training run here -->\n")
     
     print(f"\nGenerated model card at {card_path}")
     return card_path 

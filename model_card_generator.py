@@ -21,8 +21,8 @@ def get_tensorboard_metrics(tensorboard_log, run_name):
     rewards = []
     if 'train/reward' in event_acc.Tags()['scalars']:
         rewards = [s.value for s in event_acc.Scalars('train/reward')]
-    elif 'train_reward' in event_acc.Tags()['scalars']:
-        rewards = [s.value for s in event_acc.Scalars('train_reward')]
+    elif 'train/episode_reward_mean' in event_acc.Tags()['scalars']:  # Fallback to episode mean
+        rewards = [s.value for s in event_acc.Scalars('train/episode_reward_mean')]
     
     if not rewards:
         return None

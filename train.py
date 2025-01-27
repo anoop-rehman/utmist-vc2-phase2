@@ -5,6 +5,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 from gym import spaces
 import os
+from datetime import datetime
 
 class DMControlWrapper(gym.Env):
     def __init__(self, env):
@@ -88,6 +89,110 @@ class TensorboardCallback(BaseCallback):
         self.logger.record('reward', self.training_env.get_attr('reward')[0])
         return True
 
+def get_default_folder():
+    """Generate a default folder name using datetime."""
+    now = datetime.now()
+    return now.strftime("%Y%m%d__%I_%M%p").lower()
+
+class CheckpointCallback(BaseCallback):
+    def __init__(self, save_dir, checkpoint_freq=4000, verbose=0):
+        super().__init__(verbose)
+        self.checkpoint_freq = checkpoint_freq
+        self.save_dir = save_dir
+        
+    def _on_step(self):
+        if self.n_calls % self.checkpoint_freq == 0:
+            # Calculate which checkpoints to keep/remove
+            current_checkpoint = self.n_calls
+            previous_checkpoint = current_checkpoint - self.checkpoint_freq
+            
+            # Save current checkpoint
+            checkpoint_path = os.path.join(self.save_dir, f"model_{current_checkpoint}steps")
+            self.model.save(checkpoint_path)
+            print(f"\nSaved checkpoint at {current_checkpoint} steps")
+            
+            # Delete previous checkpoint if it exists
+            if previous_checkpoint > 0:
+                old_path = os.path.join(self.save_dir, f"model_{previous_checkpoint}steps")
+                if os.path.exists(old_path + ".zip"):
+                    os.remove(old_path + ".zip")
+                    print(f"Removed previous checkpoint at {previous_checkpoint} steps")
+        
+        return True
+
+def train_creature_with_checkpoints(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000):
+    """
+    Train a creature while maintaining the most recent checkpoint.
+    
+    Args:
+        env: The environment to train in
+        save_dir: Directory to save models (if None, uses datetime-based folder)
+        total_timesteps: Total timesteps to train for
+        load_path: Path to load a pre-trained model (optional)
+        checkpoint_freq: Frequency at which to save checkpoints (default 4000)
+    """
+    # Generate default save directory if none provided
+    if save_dir is None:
+        save_dir = os.path.join("trained_creatures", get_default_folder())
+    
+    # Ensure the directory exists
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Wrap environment for Stable Baselines3
+    wrapped_env = DMControlWrapper(env)
+    vec_env = DummyVecEnv([lambda: wrapped_env])
+
+    # Create a unique run name
+    run_name = f"PPO_{os.path.basename(save_dir)}"
+    tensorboard_log = f"./tensorboard_logs/{run_name}"
+
+    if load_path:
+        print(f"Loading pre-trained model from {load_path}")
+        model = PPO.load(
+            load_path, 
+            env=vec_env,
+            tensorboard_log=tensorboard_log,
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2
+        )
+    else:
+        model = PPO(
+            "MlpPolicy",
+            vec_env,
+            verbose=1,
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            tensorboard_log=tensorboard_log
+        )
+
+    # Set up callbacks
+    callbacks = [
+        TensorboardCallback(),
+        TrainingCallback(),
+        CheckpointCallback(save_dir, checkpoint_freq)
+    ]
+
+    # Train the model
+    model.learn(
+        total_timesteps=total_timesteps,
+        callback=callbacks,
+        reset_num_timesteps=False if load_path else True
+    )
+
+    # Save the final model
+    model.save(os.path.join(save_dir, "final_model"))
+    return model
+
 def train_creature(env, save_path="trained_creature", total_timesteps=240_000, load_path=None):
     # Wrap environment for Stable Baselines3
     wrapped_env = DMControlWrapper(env)
@@ -137,7 +242,7 @@ def train_creature(env, save_path="trained_creature", total_timesteps=240_000, l
     model.learn(
         total_timesteps=total_timesteps,
         callback=callbacks,
-        reset_num_timesteps=False  # This ensures the timestep counting continues from the loaded model
+        reset_num_timesteps=False if load_path else True
     )
 
     # Save the trained model

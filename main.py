@@ -1,7 +1,7 @@
 from custom_soccer_env import create_soccer_env
 from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED
 from creature import Creature
-from train import train_creature, DMControlWrapper
+from train import train_creature, DMControlWrapper, train_creature_with_checkpoints
 from dm_control import viewer
 import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -31,23 +31,13 @@ env = create_soccer_env(
     terminate_on_goal=False
 )
 
-# Initial training
-print("Starting initial training (Run 1)...")
-model = train_creature(
+# Train with checkpoints
+print("Starting training with checkpoints...")
+model = train_creature_with_checkpoints(
     env, 
-    save_path="trained_creatures/run_10k",
-    total_timesteps=10_000
+    total_timesteps=20_000,  # This will create checkpoints at 4k, 8k, 12k, 16k, 20k
+    checkpoint_freq=4000
 )
-
-# Sequential runs
-for i in range(2, 9):  # Runs 2 through 8
-    print(f"\nStarting Run {i}...")
-    model = train_creature(
-        env, 
-        save_path=f"trained_creatures/run_{i*10}k",
-        total_timesteps=10_000,
-        load_path=f"trained_creatures/run_{(i-1)*10}k"
-    )
 
 # Define a policy function for the viewer
 def policy(time_step):

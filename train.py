@@ -53,10 +53,11 @@ class DMControlWrapper(gym.Env):
         else:
             self.averaged_vel_to_ball = alpha * vel_to_ball + (1 - alpha) * self.averaged_vel_to_ball
 
-        reward = self.averaged_vel_to_ball
+        # reward = self.averaged_vel_to_ball
+        reward = vel_to_ball 
 
-        if (len(self.vel_to_balls) > 100 and self.averaged_vel_to_ball < 0.01):
-            reward -= 5.0
+        if (len(self.vel_to_balls) > 1400 and vel_to_ball < 0.1):
+            reward -= 15.0
             
 
         done = timestep.last()
@@ -74,6 +75,9 @@ class DMControlWrapper(gym.Env):
         timestep = self.env.reset()
         obs_dict = timestep.observation[0]
         obs = np.concatenate([v.flatten() for v in obs_dict.values()])
+
+        self.vel_to_balls = []  
+        self.averaged_vel_to_ball = 0.0  
         return obs
 
     def render(self, mode='human'):
@@ -92,7 +96,7 @@ class TrainingCallback(BaseCallback):
                 print(f"Episode {len(self.episode_rewards)}, Mean Reward: {mean_reward:.2f}")
         return True
 
-def train_creature(env, save_path="trained_creature", total_timesteps=720_000):
+def train_creature(env, save_path="trained_creature", total_timesteps=480_000):
     # Wrap environment for Stable Baselines3
     wrapped_env = DMControlWrapper(env)
     vec_env = DummyVecEnv([lambda: wrapped_env])
@@ -103,7 +107,8 @@ def train_creature(env, save_path="trained_creature", total_timesteps=720_000):
         vec_env,
         verbose=1,
         learning_rate=3e-4,
-        n_steps=2048,
+        # n_steps=2048,
+        n_steps=5120,
         batch_size=64,
         n_epochs=10,
         gamma=0.99,

@@ -262,6 +262,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         start_timesteps = start_timesteps or 0
     
     # Setup callbacks
+    tensorboard_callback = TensorboardCallback(start_timesteps=start_timesteps)
     callbacks = [
         CheckpointCallback(
             save_dir=save_dir,
@@ -272,7 +273,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
             checkpoint_stride=checkpoint_stride,
             verbose=1
         ),
-        TensorboardCallback(start_timesteps=start_timesteps)
+        tensorboard_callback
     ]
     
     # Train the model
@@ -290,6 +291,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     
     # Store the folder name in the model for reference
     model.last_save_folder = os.path.basename(save_dir)
+    
+    # Store the tensorboard callback in the model for model card generation
+    model.last_callback = tensorboard_callback
     
     # After training is complete, record end time
     end_time = datetime.now()

@@ -1,6 +1,37 @@
 import inspect
 import os
 from datetime import datetime
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+def get_tensorboard_metrics(tensorboard_log, run_name):
+    """Read metrics from tensorboard logs."""
+    if not tensorboard_log or not run_name:
+        return None
+    
+    # Get the latest run directory
+    run_dir = os.path.join(tensorboard_log, f"{run_name}_0")
+    if not os.path.exists(run_dir):
+        return None
+    
+    # Load the events file
+    event_acc = EventAccumulator(run_dir)
+    event_acc.Reload()
+    
+    # Get reward metrics
+    rewards = []
+    if 'train/reward' in event_acc.Tags()['scalars']:
+        rewards = [s.value for s in event_acc.Scalars('train/reward')]
+    elif 'train_reward' in event_acc.Tags()['scalars']:
+        rewards = [s.value for s in event_acc.Scalars('train_reward')]
+    
+    if not rewards:
+        return None
+    
+    return {
+        'final_reward': rewards[-1],
+        'best_reward': max(rewards),
+        'worst_reward': min(rewards)
+    }
 
 def get_reward_function_text():
     """Extract the reward function implementation from train.py."""
@@ -28,7 +59,7 @@ def get_reward_function_text():
     formatted_lines = ["    " + line for line in lines]
     return "\n".join(formatted_lines)
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, total_timesteps, tensorboard_log=None, checkpoint_freq=4000, keep_checkpoints=False, checkpoint_stride=1, load_path=None):
+def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, total_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None):
     """Generate a markdown file with model details.
     
     Args:
@@ -61,12 +92,6 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, 
         # Training Command in its own subsection
         f.write("### Training Command\n")
         command = f"python main.py --timesteps {total_timesteps}"
-        if checkpoint_freq != 4000:  # Only add if different from default
-            command += f" --checkpoint-freq {checkpoint_freq}"
-        if keep_checkpoints:
-            command += " --keep-checkpoints"
-        if checkpoint_stride != 1:  # Only add if different from default
-            command += f" --checkpoint-stride {checkpoint_stride}"
         if tensorboard_log:
             command += f" --tensorboard-log {tensorboard_log}"
         if load_path:
@@ -109,14 +134,15 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps, 
             
             # Reward metrics subsection
             f.write("### Reward\n")
-            rewards = [v for k, v in model.logger.name_to_value.items() if 'reward' in k.lower()]
-            if rewards:
-                final_reward = rewards[-1]
-                best_reward = max(rewards)
-                worst_reward = min(rewards)
-                f.write(f"- Final Reward: {final_reward:.3f}\n")
-                f.write(f"- Best Reward: {best_reward:.3f}\n")
-                f.write(f"- Worst Reward: {worst_reward:.3f}\n")
+            # Get run name from save_dir (format: YYYYMMDD__HH_MM_SSpm)
+            run_name = os.path.basename(save_dir)
+            reward_metrics = get_tensorboard_metrics(tensorboard_log, run_name)
+            if reward_metrics:
+                f.write(f"- Final Reward: {reward_metrics['final_reward']:.3f}\n")
+                f.write(f"- Best Reward: {reward_metrics['best_reward']:.3f}\n")
+                f.write(f"- Worst Reward: {reward_metrics['worst_reward']:.3f}\n")
+            else:
+                f.write("No reward metrics found in tensorboard logs.\n")
             
             # Other metrics subsection
             f.write("\n### Other Metrics\n")

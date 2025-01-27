@@ -120,11 +120,14 @@ class TrainingCallback(BaseCallback):
         return True
 
 class TensorboardCallback(BaseCallback):
-    def __init__(self, verbose=0):
+    def __init__(self, start_timesteps=0, verbose=0):
         super().__init__(verbose)
+        self.start_timesteps = start_timesteps
         
     def _on_step(self):
-        self.logger.record('reward', self.training_env.get_attr('reward')[0])
+        # Use global step count for tensorboard
+        global_step = self.start_timesteps + self.n_calls
+        self.logger.record('reward', self.training_env.get_attr('reward')[0], global_step)
         return True
 
 class CheckpointCallback(BaseCallback):
@@ -157,7 +160,7 @@ class CheckpointCallback(BaseCallback):
                     print(f"Removed previous checkpoint at {previous_checkpoint} steps")
         return True
 
-def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000):
+def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000, start_timesteps=None, tensorboard_log=None):
     """
     Train a creature while maintaining the most recent checkpoint.
     
@@ -167,31 +170,44 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
         total_timesteps: Total timesteps to train for
         load_path: Path to load a pre-trained model (optional)
         checkpoint_freq: Frequency at which to save checkpoints (default 4000)
+        start_timesteps: Starting timestep count (optional, will try to parse from load_path if not provided)
+        tensorboard_log: Directory for tensorboard logs (optional)
     """
-    # Get starting timesteps from load_path if provided
-    start_timesteps = 0
-    if load_path and "steps" in load_path:
-        try:
-            start_timesteps = int(load_path.split("steps")[0].split("_")[-1])
-        except:
-            print("Could not parse starting timesteps from load_path")
+    # Get starting timesteps from parameter or load_path
+    if start_timesteps is not None:
+        print(f"Using provided start_timesteps: {start_timesteps}")
+    else:
+        start_timesteps = 0
+        if load_path and "steps" in load_path:
+            try:
+                start_timesteps = int(load_path.split("steps")[0].split("_")[-1])
+                print(f"Parsed start_timesteps from load_path: {start_timesteps}")
+            except:
+                print("Could not parse starting timesteps from load_path")
     
     # Generate default save directory if none provided
     if save_dir is None:
         save_dir = os.path.join("trained_creatures", get_default_folder())
+    
+    # Store the folder name for reference
+    model_folder = os.path.basename(save_dir)
     
     # Ensure the directory exists
     os.makedirs(save_dir, exist_ok=True)
     
     # Setup environment and model
     vec_env = setup_env(env)
-    run_name = f"PPO_{os.path.basename(save_dir)}"
-    tensorboard_log = f"./tensorboard_logs/{run_name}"
+    
+    # Use provided tensorboard_log or create default
+    if tensorboard_log is None:
+        run_name = f"PPO_{model_folder}"
+        tensorboard_log = f"./tensorboard_logs/{run_name}"
+    
     model = create_ppo_model(vec_env, tensorboard_log, load_path)
 
     # Train the model
     callbacks = [
-        TensorboardCallback(),
+        TensorboardCallback(start_timesteps=start_timesteps),
         TrainingCallback(),
         CheckpointCallback(save_dir, checkpoint_freq, start_timesteps, total_timesteps)
     ]
@@ -201,16 +217,18 @@ def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, 
         reset_num_timesteps=False if load_path else True
     )
 
-    # Save the final model
-    final_path = os.path.join(save_dir, "final_model")
+    # Save the final model with step count
+    last_steps = start_timesteps + total_timesteps
+    final_path = os.path.join(save_dir, f"final_model_{last_steps}_steps")
     model.save(final_path)
     
     # Delete the last checkpoint after confirming final model was saved
     if os.path.exists(final_path + ".zip"):
-        last_steps = start_timesteps + total_timesteps
         last_checkpoint = os.path.join(save_dir, f"model_{last_steps}steps")
         if os.path.exists(last_checkpoint + ".zip"):
             os.remove(last_checkpoint + ".zip")
             print(f"\nRemoved last checkpoint at {last_steps} steps")
     
+    # Store the folder name in the model for reference
+    model.last_save_folder = model_folder
     return model 

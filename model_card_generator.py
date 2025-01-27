@@ -92,7 +92,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Training Command in its own subsection
         f.write("### Training Command\n")
         command = f"python main.py --timesteps {total_timesteps}"
-        if tensorboard_log:
+        if tensorboard_log and tensorboard_log != 'tensorboard_logs':  # Only include if not default
             command += f" --tensorboard-log {tensorboard_log}"
         if load_path:
             command += f" --load-path {load_path}"
@@ -118,7 +118,9 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         else:
             f.write("- Previous Model Path: N/A\n")
         if tensorboard_log:
-            f.write(f"- TensorBoard Log: {tensorboard_log}\n")
+            # Get run name from save_dir
+            run_name = os.path.basename(save_dir)
+            f.write(f"- TensorBoard Log: `{os.path.join(tensorboard_log, f'{run_name}_0')}`\n")
         
         # Reward Function
         reward_func = get_reward_function_text()

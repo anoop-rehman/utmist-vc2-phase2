@@ -7,6 +7,41 @@ from gym import spaces
 import os
 from datetime import datetime
 
+# Default hyperparameters
+PPO_PARAMS = {
+    "learning_rate": 3e-4,
+    "n_steps": 2048,
+    "batch_size": 64,
+    "n_epochs": 10,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2
+}
+
+def setup_env(env):
+    """Wrap environment and create vectorized env."""
+    wrapped_env = DMControlWrapper(env)
+    return DummyVecEnv([lambda: wrapped_env])
+
+def create_ppo_model(vec_env, tensorboard_log, load_path=None):
+    """Create or load a PPO model with standard parameters."""
+    if load_path:
+        print(f"Loading pre-trained model from {load_path}")
+        return PPO.load(load_path, env=vec_env, tensorboard_log=tensorboard_log, **PPO_PARAMS)
+    
+    return PPO(
+        "MlpPolicy",
+        vec_env,
+        verbose=1,
+        tensorboard_log=tensorboard_log,
+        **PPO_PARAMS
+    )
+
+def get_default_folder():
+    """Generate a default folder name using datetime."""
+    now = datetime.now()
+    return now.strftime("%Y%m%d__%I_%M%p").lower()
+
 class DMControlWrapper(gym.Env):
     def __init__(self, env):
         self.env = env
@@ -49,7 +84,7 @@ class DMControlWrapper(gym.Env):
         reward = vel_to_ball + 1.0 - ctrl_cost 
 
         done = timestep.last()
-        info = {}  # Add any additional info you want to track
+        info = {}
         
         print("-------------------------------")
         print("vel to ball:", vel_to_ball)
@@ -85,14 +120,8 @@ class TensorboardCallback(BaseCallback):
         super().__init__(verbose)
         
     def _on_step(self):
-        # Log reward
         self.logger.record('reward', self.training_env.get_attr('reward')[0])
         return True
-
-def get_default_folder():
-    """Generate a default folder name using datetime."""
-    now = datetime.now()
-    return now.strftime("%Y%m%d__%I_%M%p").lower()
 
 class CheckpointCallback(BaseCallback):
     def __init__(self, save_dir, checkpoint_freq=4000, verbose=0):
@@ -117,7 +146,6 @@ class CheckpointCallback(BaseCallback):
                 if os.path.exists(old_path + ".zip"):
                     os.remove(old_path + ".zip")
                     print(f"Removed previous checkpoint at {previous_checkpoint} steps")
-        
         return True
 
 def train_creature_with_checkpoints(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000):
@@ -138,51 +166,18 @@ def train_creature_with_checkpoints(env, save_dir=None, total_timesteps=240_000,
     # Ensure the directory exists
     os.makedirs(save_dir, exist_ok=True)
     
-    # Wrap environment for Stable Baselines3
-    wrapped_env = DMControlWrapper(env)
-    vec_env = DummyVecEnv([lambda: wrapped_env])
-
-    # Create a unique run name
+    # Setup environment and model
+    vec_env = setup_env(env)
     run_name = f"PPO_{os.path.basename(save_dir)}"
     tensorboard_log = f"./tensorboard_logs/{run_name}"
+    model = create_ppo_model(vec_env, tensorboard_log, load_path)
 
-    if load_path:
-        print(f"Loading pre-trained model from {load_path}")
-        model = PPO.load(
-            load_path, 
-            env=vec_env,
-            tensorboard_log=tensorboard_log,
-            learning_rate=3e-4,
-            n_steps=2048,
-            batch_size=64,
-            n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2
-        )
-    else:
-        model = PPO(
-            "MlpPolicy",
-            vec_env,
-            verbose=1,
-            learning_rate=3e-4,
-            n_steps=2048,
-            batch_size=64,
-            n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            tensorboard_log=tensorboard_log
-        )
-
-    # Set up callbacks
+    # Train the model
     callbacks = [
         TensorboardCallback(),
         TrainingCallback(),
         CheckpointCallback(save_dir, checkpoint_freq)
     ]
-
-    # Train the model
     model.learn(
         total_timesteps=total_timesteps,
         callback=callbacks,
@@ -203,51 +198,15 @@ def train_creature_with_checkpoints(env, save_dir=None, total_timesteps=240_000,
     return model
 
 def train_creature(env, save_path="trained_creature", total_timesteps=240_000, load_path=None):
-    # Wrap environment for Stable Baselines3
-    wrapped_env = DMControlWrapper(env)
-    vec_env = DummyVecEnv([lambda: wrapped_env])
-
-    # Create a unique run name based on whether it's initial or resumed training
+    """Train a creature without checkpointing."""
+    # Setup environment and model
+    vec_env = setup_env(env)
     run_name = f"PPO_{os.path.basename(save_path)}"
     tensorboard_log = f"./tensorboard_logs/{run_name}"
+    model = create_ppo_model(vec_env, tensorboard_log, load_path)
 
-    if load_path:
-        print(f"Loading pre-trained model from {load_path}")
-        # Load the pre-trained model
-        model = PPO.load(
-            load_path, 
-            env=vec_env,
-            tensorboard_log=tensorboard_log,
-            # Set hyperparameters in the constructor
-            learning_rate=3e-4,
-            n_steps=2048,
-            batch_size=64,
-            n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2
-        )
-    else:
-        # Initialize new PPO model with tensorboard logging
-        model = PPO(
-            "MlpPolicy",
-            vec_env,
-            verbose=1,
-            learning_rate=3e-4,
-            n_steps=2048,
-            batch_size=64,
-            n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            tensorboard_log=tensorboard_log
-        )
-
-    # Train the model with both callbacks
-    callbacks = [
-        TensorboardCallback(),
-        TrainingCallback()
-    ]
+    # Train the model
+    callbacks = [TensorboardCallback(), TrainingCallback()]
     model.learn(
         total_timesteps=total_timesteps,
         callback=callbacks,

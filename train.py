@@ -132,118 +132,150 @@ class TensorboardCallback(BaseCallback):
         return True
 
 class CheckpointCallback(BaseCallback):
-    def __init__(self, save_dir, checkpoint_freq=4000, start_timesteps=0, total_timesteps=None, verbose=0):
+    """Custom callback for saving model checkpoints during training."""
+    
+    def __init__(self, save_dir, checkpoint_freq=4000, start_timesteps=0, total_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, verbose=0):
+        """Initialize the callback.
+        
+        Args:
+            save_dir: Directory to save checkpoints in
+            checkpoint_freq: How often to save checkpoints
+            start_timesteps: Starting timestep count (for resumed training)
+            total_timesteps: Total timesteps to train for
+            keep_checkpoints: Whether to keep all checkpoints or delete previous ones
+            checkpoint_stride: Save every Nth checkpoint (e.g. 3 means save checkpoint_freq * 3)
+            verbose: Verbosity level
+        """
         super().__init__(verbose)
-        self.checkpoint_freq = checkpoint_freq
         self.save_dir = save_dir
+        self.checkpoint_freq = checkpoint_freq
         self.start_timesteps = start_timesteps
         self.total_timesteps = total_timesteps
+        self.keep_checkpoints = keep_checkpoints
+        self.checkpoint_stride = checkpoint_stride
         
-    def _on_step(self):
-        if self.n_calls % self.checkpoint_freq == 0:
-            current_checkpoint = self.start_timesteps + self.n_calls
-            previous_checkpoint = current_checkpoint - self.checkpoint_freq
-            
-            # Don't save if this is the final checkpoint (will be saved as final_model)
-            if current_checkpoint == self.start_timesteps + self.total_timesteps:
-                return True
+        # Create save directory if it doesn't exist
+        os.makedirs(save_dir, exist_ok=True)
+        
+    def _init_callback(self) -> None:
+        """Initialize callback attributes."""
+        pass
+        
+    def _on_step(self) -> bool:
+        """Save a checkpoint if it's time to do so."""
+        # Calculate current checkpoint number
+        current_checkpoint = self.start_timesteps + self.n_calls
+        
+        # Only save if we've reached a checkpoint frequency and it matches our stride
+        if current_checkpoint % self.checkpoint_freq == 0:
+            checkpoint_number = current_checkpoint // self.checkpoint_freq
+            if checkpoint_number % self.checkpoint_stride == 0:
+                # Don't save a checkpoint if we're at the end (final model will be saved)
+                if current_checkpoint == self.start_timesteps + self.total_timesteps:
+                    return True
+                    
+                checkpoint_path = os.path.join(self.save_dir, f"model_{current_checkpoint}steps.zip")
                 
-            # Save current checkpoint
-            checkpoint_path = os.path.join(self.save_dir, f"model_{current_checkpoint}steps")
-            self.model.save(checkpoint_path)
-            print(f"\nSaved checkpoint at {current_checkpoint} steps")
-            
-            # Delete previous checkpoint if it exists
-            if previous_checkpoint > self.start_timesteps:
-                old_path = os.path.join(self.save_dir, f"model_{previous_checkpoint}steps")
-                if os.path.exists(old_path + ".zip"):
-                    os.remove(old_path + ".zip")
-                    print(f"Removed previous checkpoint at {previous_checkpoint} steps")
+                # If not keeping checkpoints, delete the previous one
+                if not self.keep_checkpoints:
+                    prev_checkpoint = current_checkpoint - (self.checkpoint_freq * self.checkpoint_stride)
+                    if prev_checkpoint > 0:
+                        prev_path = os.path.join(self.save_dir, f"model_{prev_checkpoint}steps.zip")
+                        if os.path.exists(prev_path):
+                            os.remove(prev_path)
+                            if self.verbose > 0:
+                                print(f"\nRemoved checkpoint at {prev_checkpoint} steps")
+                
+                # Save the current checkpoint
+                self.model.save(checkpoint_path)
+                if self.verbose > 0:
+                    print(f"\nSaved checkpoint at {current_checkpoint} steps")
+        
         return True
 
-def train_creature(env, save_dir=None, total_timesteps=240_000, load_path=None, checkpoint_freq=4000, start_timesteps=None, tensorboard_log=None):
-    """
-    Train a creature while maintaining the most recent checkpoint.
-    When loading from a previous model, it will:
-    1. Continue the global step count from where the previous model left off
-    2. Use the same tensorboard log directory if provided, enabling continuous training graphs
-    3. Save the final model with the cumulative step count in its name
+def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1):
+    """Train a creature using PPO.
     
     Args:
         env: The environment to train in
-        save_dir: Directory to save models (if None, uses datetime-based folder)
-        total_timesteps: Total timesteps to train for in this session
-        load_path: Path to load a pre-trained model (optional)
-        checkpoint_freq: Frequency at which to save checkpoints (default 4000)
-        start_timesteps: Starting timestep count (optional, will try to parse from load_path if not provided)
-        tensorboard_log: Directory for tensorboard logs (optional, will create new one if not provided)
-                        When resuming training, pass the same directory to continue the training graphs
+        total_timesteps: Total timesteps to train for
+        checkpoint_freq: How often to save checkpoints
+        load_path: Path to load a model from
+        save_dir: Directory to save models in
+        tensorboard_log: TensorBoard log directory
+        start_timesteps: Starting timestep count (for resuming training)
+        keep_checkpoints: Whether to keep all checkpoints
+        checkpoint_stride: How many checkpoints to skip between saves
     """
-    start_time = datetime.now()  # Record training start time
-    
-    # Get starting timesteps from parameter or load_path
-    if start_timesteps is not None:
-        print(f"Using provided start_timesteps: {start_timesteps}")
-    else:
-        start_timesteps = 0
-        if load_path and "steps" in load_path:
-            try:
-                start_timesteps = int(load_path.split("steps")[0].split("_")[-1])
-                print(f"Parsed start_timesteps from load_path: {start_timesteps}")
-            except:
-                print("Could not parse starting timesteps from load_path")
-    
-    # Generate default save directory if none provided (datetime-based folder)
+    # Record start time
+    start_time = datetime.now()
+
+    # Create save directory if not provided
     if save_dir is None:
         save_dir = os.path.join("trained_creatures", get_default_folder())
-    
-    # Store the folder name for reference
-    model_folder = os.path.basename(save_dir)
-    
-    # Ensure the directory exists
     os.makedirs(save_dir, exist_ok=True)
     
-    # Setup environment and model
-    vec_env = setup_env(env)
+    # Load or create model
+    if load_path:
+        print(f"\nLoading model from {load_path}")
+        model = PPO.load(load_path)
+        model.set_env(env)
+        if start_timesteps is None and "steps" in load_path:
+            try:
+                start_timesteps = int(load_path.split("steps")[0].split("_")[-1])
+                print(f"Continuing from {start_timesteps} steps")
+            except:
+                print("Could not parse starting timesteps from load_path")
+                start_timesteps = 0
+    else:
+        print("\nCreating new model")
+        model = PPO("MlpPolicy", env, **PPO_PARAMS)
+        start_timesteps = start_timesteps or 0
     
-    # Use provided tensorboard_log or create default
-    if tensorboard_log is None:
-        run_name = f"PPO_{model_folder}"
-        tensorboard_log = f"./tensorboard_logs/{run_name}"
-    
-    model = create_ppo_model(vec_env, tensorboard_log, load_path)
-
-    # Train the model with callbacks for logging and checkpointing
+    # Setup callbacks
     callbacks = [
-        TensorboardCallback(start_timesteps=start_timesteps),  # Tracks global step count
-        TrainingCallback(),
-        CheckpointCallback(save_dir, checkpoint_freq, start_timesteps, total_timesteps)
+        CheckpointCallback(
+            save_dir=save_dir,
+            checkpoint_freq=checkpoint_freq,
+            start_timesteps=start_timesteps,
+            total_timesteps=total_timesteps,
+            keep_checkpoints=keep_checkpoints,
+            checkpoint_stride=checkpoint_stride,
+            verbose=1
+        )
     ]
+    
+    # Train the model
     model.learn(
         total_timesteps=total_timesteps,
         callback=callbacks,
-        reset_num_timesteps=False if load_path else True  # Continue step count when loading model
+        tb_log_name=os.path.basename(save_dir),
+        reset_num_timesteps=False
     )
-
-    # Clean up last checkpoint
-    last_checkpoint = total_timesteps - (total_timesteps % checkpoint_freq)
-    if last_checkpoint == total_timesteps:
-        last_checkpoint -= checkpoint_freq
-    checkpoint_path = os.path.join(save_dir, f"model_{last_checkpoint}steps.zip")
-    if os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
-        print(f"\nRemoved checkpoint at {last_checkpoint} steps")
-
+    
     # Save final model with cumulative step count in filename
-    last_steps = start_timesteps + total_timesteps
-    final_path = os.path.join(save_dir, f"final_model_{last_steps}_steps")
-    final_path += ".zip"  # Add .zip extension
+    final_path = os.path.join(save_dir, f"final_model_{start_timesteps + total_timesteps}_steps")
     model.save(final_path)
     print(f"\nSaved final model to {final_path}")
-    model.last_save_folder = os.path.basename(save_dir)  # Store the folder name in the model for reference
     
-    # Generate model card
+    # Store the folder name in the model for reference
+    model.last_save_folder = os.path.basename(save_dir)
+    
+    # After training is complete, record end time
     end_time = datetime.now()
-    generate_model_card(model, save_dir, start_time, end_time, start_timesteps, total_timesteps, load_path, tensorboard_log)
+    
+    # Generate model card with actual timing information
+    generate_model_card(
+        model=model,
+        save_dir=save_dir,
+        start_time=start_time,
+        end_time=end_time,
+        start_timesteps=start_timesteps or 0,
+        total_timesteps=total_timesteps,
+        tensorboard_log=tensorboard_log,
+        checkpoint_freq=checkpoint_freq,
+        keep_checkpoints=keep_checkpoints,
+        checkpoint_stride=checkpoint_stride
+    )
     
     return model

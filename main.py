@@ -53,16 +53,21 @@ if __name__ == "__main__":
     parser.add_argument('--load-model', type=str, help='Path to model to load')
     parser.add_argument('--view-only', action='store_true', help='Only view the model, no training')
     parser.add_argument('--timesteps', type=int, default=20_000, help='Number of timesteps to train')
-    parser.add_argument('--checkpoint-freq', type=int, default=4000, help='Frequency of checkpoints')
+    parser.add_argument('--load-path', type=str, default=None, help='Path to load a saved model from')
+    parser.add_argument('--checkpoint-freq', type=int, default=4000, help='How often to save checkpoints during training')
+    parser.add_argument('--keep-checkpoints', action='store_true', help='Keep all checkpoints instead of deleting them')
+    parser.add_argument('--checkpoint-stride', type=int, default=1, help='Save every Nth checkpoint (e.g. 3 means save checkpoint_freq * 3)')
+    parser.add_argument('--tensorboard-log', type=str, default=None, help='TensorBoard log directory')
+    parser.add_argument('--start-timesteps', type=int, default=None, help='Starting timestep count (for resuming training)')
     args = parser.parse_args()
 
     # Create environment
     env = create_env()
+    vec_env = setup_env(env)
 
     if args.view_only and args.load_model:
         # Load model and launch viewer
         print(f"\nLoading model from {args.load_model} for viewing...")
-        vec_env = setup_env(env)
         model = PPO.load(args.load_model, env=vec_env)
         print("Launching viewer...")
         viewer.launch(env, policy=create_policy(model))
@@ -73,10 +78,14 @@ if __name__ == "__main__":
             print(f"Resuming training from {args.load_model}")
         
         model = train_creature(
-            env, 
+            env=vec_env,  # Use the wrapped environment
             total_timesteps=args.timesteps,
             checkpoint_freq=args.checkpoint_freq,
-            load_path=args.load_model
+            load_path=args.load_path,
+            tensorboard_log=args.tensorboard_log,
+            keep_checkpoints=args.keep_checkpoints,
+            checkpoint_stride=args.checkpoint_stride,
+            start_timesteps=args.start_timesteps
         )
 
         # Launch viewer after training

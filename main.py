@@ -31,26 +31,23 @@ env = create_soccer_env(
     terminate_on_goal=False
 )
 
-# Train the creature
-model = train_creature(env, save_path="trained_creatures/v0_51__240kTimesteps")
+# Initial training
+print("Starting initial training (Run 1)...")
+model = train_creature(
+    env, 
+    save_path="trained_creatures/run_10k",
+    total_timesteps=10_000
+)
 
-# # Load a trained model
-# wrapped_env = DMControlWrapper(env)
-# vec_env = DummyVecEnv([lambda: wrapped_env])
-# model = PPO(
-#     "MlpPolicy",
-#     vec_env,
-#     verbose=1,
-#     learning_rate=3e-4,
-#     n_steps=2048,
-#     batch_size=64,
-#     n_epochs=10,
-#     gamma=0.99,
-#     gae_lambda=0.95,
-#     clip_range=0.2,
-#     tensorboard_log="./tensorboard_logs/"
-# )
-# model.load("trained_creatures/v0_51__60kTimesteps")
+# Sequential runs
+for i in range(2, 9):  # Runs 2 through 8
+    print(f"\nStarting Run {i}...")
+    model = train_creature(
+        env, 
+        save_path=f"trained_creatures/run_{i*10}k",
+        total_timesteps=10_000,
+        load_path=f"trained_creatures/run_{(i-1)*10}k"
+    )
 
 # Define a policy function for the viewer
 def policy(time_step):
@@ -60,10 +57,7 @@ def policy(time_step):
     
     # Get action from model
     action, _states = model.predict(obs, deterministic=True)
-
-    # Just randomly generate action (for testing)
-    # action = np.random.uniform(-1, 1, size=(8,))
-
+    
     vel_to_ball = time_step.observation[0]['stats_vel_to_ball'][0]
     ctrl_cost_weight = 0.5
     ctrl_cost = ctrl_cost_weight * np.sum(np.square(action))
@@ -73,10 +67,8 @@ def policy(time_step):
     print("vel to ball:", vel_to_ball)
     print("test reward:", reward)
 
-
-    # Return action wrapped in a list (for single agent)
     return [action]
 
-
-# Launch the viewer
+# Launch the viewer with the final model
+print("\nLaunching viewer with final model...")
 viewer.launch(env, policy=policy)

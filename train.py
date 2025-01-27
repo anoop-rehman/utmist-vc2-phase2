@@ -4,6 +4,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 from gym import spaces
+import os
 
 class DMControlWrapper(gym.Env):
     def __init__(self, env):
@@ -87,25 +88,46 @@ class TensorboardCallback(BaseCallback):
         self.logger.record('reward', self.training_env.get_attr('reward')[0])
         return True
 
-def train_creature(env, save_path="trained_creature", total_timesteps=720_000):
+def train_creature(env, save_path="trained_creature", total_timesteps=240_000, load_path=None):
     # Wrap environment for Stable Baselines3
     wrapped_env = DMControlWrapper(env)
     vec_env = DummyVecEnv([lambda: wrapped_env])
 
-    # Initialize PPO model with tensorboard logging
-    model = PPO(
-        "MlpPolicy",
-        vec_env,
-        verbose=1,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        tensorboard_log="./tensorboard_logs/"  # Add tensorboard logging
-    )
+    # Create a unique run name based on whether it's initial or resumed training
+    run_name = f"PPO_{os.path.basename(save_path)}"
+    tensorboard_log = f"./tensorboard_logs/{run_name}"
+
+    if load_path:
+        print(f"Loading pre-trained model from {load_path}")
+        # Load the pre-trained model
+        model = PPO.load(
+            load_path, 
+            env=vec_env,
+            tensorboard_log=tensorboard_log,
+            # Set hyperparameters in the constructor
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2
+        )
+    else:
+        # Initialize new PPO model with tensorboard logging
+        model = PPO(
+            "MlpPolicy",
+            vec_env,
+            verbose=1,
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            tensorboard_log=tensorboard_log
+        )
 
     # Train the model with both callbacks
     callbacks = [
@@ -114,7 +136,8 @@ def train_creature(env, save_path="trained_creature", total_timesteps=720_000):
     ]
     model.learn(
         total_timesteps=total_timesteps,
-        callback=callbacks
+        callback=callbacks,
+        reset_num_timesteps=False  # This ensures the timestep counting continues from the loaded model
     )
 
     # Save the trained model

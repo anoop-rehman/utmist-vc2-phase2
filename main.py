@@ -14,10 +14,30 @@ import argparse
 class TensorboardCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
+        self.episode_rewards = []
+        self.episode_velocities = []
         
     def _on_step(self):
-        # Log scalar value (here a random value)
-        self.logger.record('reward', self.training_env.get_attr('reward')[0])
+        # Get current reward and velocity
+        reward = self.training_env.get_attr('reward')[0]
+        vel_to_ball = self.training_env.get_attr('env')[0].last_vel_to_ball if hasattr(self.training_env.get_attr('env')[0], 'last_vel_to_ball') else 0
+        
+        # Log step metrics
+        self.logger.record('train/reward', reward)
+        self.logger.record('train/velocity_to_ball', vel_to_ball)
+        
+        # Track episode metrics
+        if self.locals.get('done'):
+            self.episode_rewards.append(reward)
+            self.episode_velocities.append(vel_to_ball)
+            
+            # Log episode metrics
+            if len(self.episode_rewards) > 0:
+                self.logger.record('train/episode_reward_mean', np.mean(self.episode_rewards[-100:]))
+                self.logger.record('train/episode_reward_max', np.max(self.episode_rewards[-100:]))
+                self.logger.record('train/episode_reward_min', np.min(self.episode_rewards[-100:]))
+                self.logger.record('train/episode_velocity_mean', np.mean(self.episode_velocities[-100:]))
+        
         return True
 
 def create_env():
@@ -57,7 +77,7 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint-freq', type=int, default=4000, help='How often to save checkpoints during training')
     parser.add_argument('--keep-checkpoints', action='store_true', help='Keep all checkpoints instead of deleting them')
     parser.add_argument('--checkpoint-stride', type=int, default=1, help='Save every Nth checkpoint (e.g. 3 means save checkpoint_freq * 3)')
-    parser.add_argument('--tensorboard-log', type=str, default=None, help='TensorBoard log directory')
+    parser.add_argument('--tensorboard-log', type=str, default='tensorboard_logs', help='TensorBoard log directory')
     parser.add_argument('--start-timesteps', type=int, default=None, help='Starting timestep count (for resuming training)')
     args = parser.parse_args()
 

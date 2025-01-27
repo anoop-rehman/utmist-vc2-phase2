@@ -60,6 +60,7 @@ class DMControlWrapper(gym.Env):
     def __init__(self, env):
         self.env = env
         self.reward = 0  # Add this to store current reward for tensorboard
+        self.last_vel_to_ball = 0  # Add this to store last velocity to ball
         
         # Get action and observation specs
         action_spec = env.action_spec()[0]  # Get first player's action spec
@@ -98,11 +99,15 @@ class DMControlWrapper(gym.Env):
         print("train reward:", reward)
 
         self.reward = reward  # Store the reward
+        self.last_vel_to_ball = vel_to_ball  # Store the velocity
         return obs, reward, done, info
 
     def reset(self):
         timestep = self.env.reset()
-        return process_observation(timestep)
+        obs = process_observation(timestep)
+        # Initialize last_vel_to_ball
+        _, self.last_vel_to_ball = calculate_reward(timestep, np.zeros(self.action_space.shape))
+        return obs
 
     def render(self, mode='human'):
         pass
@@ -124,11 +129,32 @@ class TensorboardCallback(BaseCallback):
     def __init__(self, start_timesteps=0, verbose=0):
         super().__init__(verbose)
         self.start_timesteps = start_timesteps
+        self.episode_rewards = []
+        self.episode_velocities = []
         
     def _on_step(self):
-        # Use global step count for tensorboard
+        # Get current reward and velocity from the wrapped environment
+        env = self.training_env.envs[0]  # Get the actual environment from DummyVecEnv
+        reward = env.reward
+        vel_to_ball = env.last_vel_to_ball
+        
+        # Log step metrics
         global_step = self.start_timesteps + self.n_calls
-        self.logger.record('reward', self.training_env.get_attr('reward')[0], global_step)
+        self.logger.record('train/reward', reward, global_step)
+        self.logger.record('train/velocity_to_ball', vel_to_ball, global_step)
+        
+        # Track episode metrics
+        if self.locals.get('done'):
+            self.episode_rewards.append(reward)
+            self.episode_velocities.append(vel_to_ball)
+            
+            # Log episode metrics
+            if len(self.episode_rewards) > 0:
+                self.logger.record('train/episode_reward_mean', np.mean(self.episode_rewards[-100:]), global_step)
+                self.logger.record('train/episode_reward_max', np.max(self.episode_rewards[-100:]), global_step)
+                self.logger.record('train/episode_reward_min', np.min(self.episode_rewards[-100:]), global_step)
+                self.logger.record('train/episode_velocity_mean', np.mean(self.episode_velocities[-100:]), global_step)
+        
         return True
 
 class CheckpointCallback(BaseCallback):
@@ -220,6 +246,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         print(f"\nLoading model from {load_path}")
         model = PPO.load(load_path)
         model.set_env(env)
+        # Set tensorboard log directory for loaded model
+        if tensorboard_log:
+            model.tensorboard_log = tensorboard_log
         if start_timesteps is None and "steps" in load_path:
             try:
                 start_timesteps = int(load_path.split("steps")[0].split("_")[-1])
@@ -229,7 +258,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
                 start_timesteps = 0
     else:
         print("\nCreating new model")
-        model = PPO("MlpPolicy", env, **PPO_PARAMS)
+        model = PPO("MlpPolicy", env, tensorboard_log=tensorboard_log, **PPO_PARAMS)
         start_timesteps = start_timesteps or 0
     
     # Setup callbacks
@@ -242,7 +271,8 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
             keep_checkpoints=keep_checkpoints,
             checkpoint_stride=checkpoint_stride,
             verbose=1
-        )
+        ),
+        TensorboardCallback(start_timesteps=start_timesteps)
     ]
     
     # Train the model

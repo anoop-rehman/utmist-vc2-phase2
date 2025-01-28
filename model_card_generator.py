@@ -2,6 +2,8 @@ import inspect
 import os
 from datetime import datetime
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+import xml.etree.ElementTree as ET
+from custom_soccer_env import create_soccer_env
 
 def get_tensorboard_metrics(tensorboard_log, run_name):
     """Read metrics from tensorboard logs."""
@@ -58,6 +60,60 @@ def get_reward_function_text():
     lines = function_text.split("\n")
     formatted_lines = ["    " + line for line in lines]
     return "\n".join(formatted_lines)
+
+def get_env_params():
+    """Get environment parameters from source files."""
+    # Read motor and physics params from XML
+    tree = ET.parse('creature_configs/two_arm_rower_blueprint.xml')
+    root = tree.getroot()
+    
+    # Get motor params
+    motor = root.find('.//motor')
+    control_range = motor.get('ctrlrange')
+    gear_ratio = motor.get('gear')
+    
+    # Get physics params
+    geom = root.find('.//geom')
+    friction = geom.get('friction')
+    joint = root.find('.//joint')
+    damping = joint.get('damping')
+    stiffness = joint.get('stiffness')
+    density = geom.get('density')
+    
+    # Get environment params from create_soccer_env
+    env_params = inspect.getsource(create_soccer_env)
+    # Extract default values using string parsing
+    import re
+    time_limit = float(re.search(r'time_limit=(\d+\.?\d*)', env_params).group(1))
+    disable_walker_contacts = re.search(r'disable_walker_contacts=(\w+)', env_params).group(1) == 'True'
+    enable_field_box = re.search(r'enable_field_box=(\w+)', env_params).group(1) == 'True'
+    terminate_on_goal = re.search(r'terminate_on_goal=(\w+)', env_params).group(1) == 'True'
+    
+    # Get pitch size from RandomizedPitch
+    try:
+        from dm_control.locomotion.soccer import pitch
+        pitch_params = inspect.getsource(pitch.RandomizedPitch)
+        min_size = re.search(r'min_size=\((\d+),\s*(\d+)\)', pitch_params)
+        if min_size:
+            pitch_size = (int(min_size.group(1)), int(min_size.group(2)))
+        else:
+            pitch_size = (40, 30)  # Default if not found
+    except:
+        pitch_size = (40, 30)  # Fallback default
+    
+    return {
+        'time_limit': time_limit,
+        'pitch_size': pitch_size,
+        'walker_contacts': not disable_walker_contacts,
+        'field_box': enable_field_box,
+        'terminate_on_goal': terminate_on_goal,
+        'control_range': control_range,
+        'gear_ratio': gear_ratio,
+        'friction': friction,
+        'joint_damping': damping,
+        'joint_stiffness': stiffness,
+        'body_density': density
+    }
 
 def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, total_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None):
     """Generate a markdown file with model details.
@@ -154,15 +210,16 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         
         # Model Architecture
         f.write("\n## Model Architecture\n")
+        f.write("### Overview\n")
         f.write("- Algorithm: Proximal Policy Optimization (PPO)\n")
         policy = model.policy
         f.write(f"- Policy Network: {type(policy).__name__}\n")
         f.write(f"- Input Shape: {policy.observation_space.shape}\n")
         f.write(f"- Output Shape: {policy.action_space.shape}\n")
-        f.write(f"- Activation Function: {policy.activation_fn.__name__}\n")
+        f.write(f"- Activation Function: {policy.activation_fn.__name__}\n\n")
         
         # MLP Architecture
-        f.write("\n### MLP Architecture\n")
+        f.write("### Detailed MLP Architecture\n")
         f.write("- Policy Network:\n")
         for i, layer in enumerate(policy.mlp_extractor.policy_net):
             f.write(f"  - Layer {i+1}: {layer}\n")
@@ -171,7 +228,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
             f.write(f"  - Layer {i+1}: {layer}\n")
         
         # Hyperparameters
-        f.write("\n## Hyperparameters\n")
+        f.write("\n## Model Hyperparameters\n")
         from train import default_hyperparameters
         for param, value in default_hyperparameters.items():
             if isinstance(value, dict):
@@ -180,6 +237,26 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
                     f.write(f"  - {k}: {v}\n")
             else:
                 f.write(f"- {param}: {value}\n")
+        
+        # Environment Parameters
+        f.write("\n## Environment Parameters\n")
+        env_params = get_env_params()
+        f.write("### General Parameters:\n")
+        f.write(f"- Time Limit: {env_params['time_limit']:.2f} seconds\n")
+        f.write(f"- Pitch Size: {env_params['pitch_size'][0]}x{env_params['pitch_size'][1]}\n")
+        f.write(f"- Walker Contacts: {'Enabled' if env_params['walker_contacts'] else 'Disabled'}\n")
+        f.write(f"- Field Box: {'Enabled' if env_params['field_box'] else 'Disabled'}\n")
+        f.write(f"- Goal Termination: {'Enabled' if env_params['terminate_on_goal'] else 'Disabled'}\n\n")
+        
+        f.write("### Motor Control Parameters:\n")
+        f.write(f"- Control Range: {env_params['control_range']}\n")
+        f.write(f"- Gear Ratio: {env_params['gear_ratio']}\n\n")
+        
+        f.write("### Physics Parameters:\n")
+        f.write(f"- Ground Friction: {env_params['friction']}\n")
+        f.write(f"- Joint Damping: {env_params['joint_damping']}\n")
+        f.write(f"- Joint Stiffness: {env_params['joint_stiffness']}\n")
+        f.write(f"- Body Density: {env_params['body_density']}\n")
         
         # Other Notes section for manual additions
         f.write("\n## Other Notes\n")

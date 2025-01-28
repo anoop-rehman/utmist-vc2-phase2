@@ -120,8 +120,8 @@ class DMControlWrapper(gym.Env):
         timestep = self.env.step([action])
         
         # Track position for distance calculation
-        if 'bodies_pos' in timestep.observation[0]:
-            pos = timestep.observation[0]['bodies_pos'][0]  # Get root body position
+        if 'absolute_root_pos' in timestep.observation[0]:
+            pos = timestep.observation[0]['absolute_root_pos']
             self.position_history.append(pos)
             # Keep only window_size positions
             if len(self.position_history) > self.window_size:
@@ -147,8 +147,13 @@ class DMControlWrapper(gym.Env):
         # Initialize last_vel_to_ball
         _, self.last_vel_to_ball = calculate_reward(timestep, np.zeros(self.action_space.shape), 0.0)
         
-        # Increment episode count but don't print
+        # Print episode start info
         self.episode_count += 1
+        print(f"\nEpisode {self.episode_count} started:")
+        if 'absolute_root_pos' in timestep.observation[0]:
+            print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
+        if 'ball_ego_pos' in timestep.observation[0]:
+            print(f"  Ball position (ego): {timestep.observation[0]['ball_ego_pos']}")
         
         return obs
 
@@ -327,8 +332,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         reset_num_timesteps=False
     )
     
-    # Save final model with cumulative step count in filename
-    final_path = os.path.join(save_dir, f"final_model_{start_timesteps + total_timesteps}_steps")
+    # Save final model with actual step count in filename
+    actual_steps = start_timesteps + model._n_updates * model.n_steps
+    final_path = os.path.join(save_dir, f"final_model_{actual_steps}_steps")
     model.save(final_path)
     print(f"\nSaved final model to {final_path}")
     
@@ -341,14 +347,14 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     # After training is complete, record end time
     end_time = datetime.now()
     
-    # Generate model card with actual timing information
+    # Generate model card with actual timing information and steps
     generate_model_card(
         model=model,
         save_dir=save_dir,
         start_time=start_time,
         end_time=end_time,
         start_timesteps=start_timesteps or 0,
-        total_timesteps=total_timesteps,
+        total_timesteps=actual_steps - (start_timesteps or 0),  # Use actual steps trained in this session
         tensorboard_log=tensorboard_log,
         checkpoint_freq=checkpoint_freq,
         keep_checkpoints=keep_checkpoints,

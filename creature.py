@@ -192,10 +192,15 @@ class CreatureObservables(legacy_base.WalkerObservables):
           physics.bind(self._entity.bodies_pos_sensors).sensordata, -1)
     return observable.Generic(bodies_ego_pos)
 
+  @composer.observable
+  def absolute_root_pos(self):
+    """Absolute position of the root body in the global frame."""
+    return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xpos)
+
   @property
   def proprioception(self):
     return ([self.joints_pos, self.joints_vel,
              self.body_height, self.end_effectors_pos,
              self.appendages_pos, self.world_zaxis,
-             self.bodies_quats, self.bodies_pos] +
+             self.bodies_quats, self.bodies_pos, self.absolute_root_pos] +
             self._collect_from_attachments('proprioception'))

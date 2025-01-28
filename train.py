@@ -71,6 +71,7 @@ class DMControlWrapper(gym.Env):
         self.env = env
         self.reward = 0
         self.last_vel_to_ball = 0
+        self.episode_count = 0
         
         # Add position tracking
         self.position_history = []
@@ -131,10 +132,6 @@ class DMControlWrapper(gym.Env):
         reward, vel_to_ball = calculate_reward(timestep, action, distance)
         done = timestep.last()
         info = {}
-        
-        print("-------------------------------")
-        print("vel to ball:", vel_to_ball)
-        print("train reward:", reward)
 
         self.reward = reward
         self.last_vel_to_ball = vel_to_ball
@@ -149,6 +146,10 @@ class DMControlWrapper(gym.Env):
         
         # Initialize last_vel_to_ball
         _, self.last_vel_to_ball = calculate_reward(timestep, np.zeros(self.action_space.shape), 0.0)
+        
+        # Increment episode count but don't print
+        self.episode_count += 1
+        
         return obs
 
     def render(self, mode='human'):

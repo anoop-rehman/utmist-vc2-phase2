@@ -59,11 +59,9 @@ def create_policy(model):
         obs = process_observation(time_step)
         action, _states = model.predict(obs, deterministic=True)
         
-        # Calculate and print reward
-        reward, vel_to_ball = calculate_reward(time_step, action, 0.0)  # Pass 0.0 for distance since we don't track it in viewer
-        print(f"vel to ball: {vel_to_ball}")
-        print(f"train reward: {reward}")
-        print("-------------------------------")
+        # Print absolute creature position
+        if 'absolute_root_pos' in time_step.observation[0]:
+            print(f"Creature position: {time_step.observation[0]['absolute_root_pos']}")
 
         return [action]
     return policy

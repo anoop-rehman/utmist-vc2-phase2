@@ -16,7 +16,7 @@
     </asset>
 
     <worldbody>
-        <body name="seg0" pos="0.0 0.0 1.3171674">
+        <body name="seg0" pos="0 0 1.3171674">
             
             <camera name="floating" pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" />
 

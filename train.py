@@ -52,16 +52,17 @@ def calculate_reward(timestep, action, distance_in_window):
     """Calculate reward based on velocity to ball, control cost, and distance traveled."""
     vel_to_ball = timestep.observation[0]['stats_vel_to_ball'][0]
     
-    # Reduce control cost weight to encourage more movement
-    ctrl_cost_weight = 0.25  # Reduced from 0.5
-    ctrl_cost = ctrl_cost_weight * np.sum(np.square(action))
+    # Calculate control cost (reduced weight to 0.25)
+    ctrl_cost = 0.25 * np.sum(np.square(action))
     
-    # Add stillness penalty based on absolute velocity
-    stillness_penalty_weight = 0.5
-    stillness_penalty = stillness_penalty_weight * (1.0 / (1.0 + abs(vel_to_ball)))  # Higher penalty when velocity is close to 0
+    # Calculate stillness penalty based on distance traveled in window
+    # Scale distance to be between 0 and 1 using a sigmoid-like function
+    distance_factor = 2.0 / (1.0 + np.exp(-2.0 * distance_in_window)) - 1.0  # Maps any positive distance to (0,1)
+    stillness_penalty = 0.5 * (1.0 - distance_factor)  # Max penalty of 0.5 when no distance covered
     
     # Combine rewards: velocity to ball + baseline - control cost - stillness penalty
     reward = vel_to_ball + 1.0 - ctrl_cost - stillness_penalty
+    
     return reward, vel_to_ball
 
 class DMControlWrapper(gym.Env):
@@ -116,25 +117,22 @@ class DMControlWrapper(gym.Env):
     def step(self, action):
         timestep = self.env.step([action])
         
-        # Get current position (assuming it's in the observation)
-        current_position = timestep.observation[0]['walker/body_position'][0]
-        
-        # Update position history
-        self.position_history.append(current_position)
-        if len(self.position_history) > self.window_size:
-            self.position_history.pop(0)  # Remove oldest position
-        
-        # Calculate distance traveled in window
-        distance_in_window = self.get_distance_traveled()
+        # Track position for distance calculation
+        if 'bodies_pos' in timestep.observation[0]:
+            pos = timestep.observation[0]['bodies_pos'][0]  # Get root body position
+            self.position_history.append(pos)
+            # Keep only window_size positions
+            if len(self.position_history) > self.window_size:
+                self.position_history.pop(0)
         
         obs = process_observation(timestep)
-        reward, vel_to_ball = calculate_reward(timestep, action, distance_in_window)
+        distance = self.get_distance_traveled()
+        reward, vel_to_ball = calculate_reward(timestep, action, distance)
         done = timestep.last()
         info = {}
         
         print("-------------------------------")
         print("vel to ball:", vel_to_ball)
-        print("distance in window:", distance_in_window)
         print("train reward:", reward)
 
         self.reward = reward
@@ -145,10 +143,8 @@ class DMControlWrapper(gym.Env):
         timestep = self.env.reset()
         obs = process_observation(timestep)
         
-        # Reset position history
+        # Clear position history
         self.position_history = []
-        current_position = timestep.observation[0]['walker/body_position'][0]
-        self.position_history.append(current_position)
         
         # Initialize last_vel_to_ball
         _, self.last_vel_to_ball = calculate_reward(timestep, np.zeros(self.action_space.shape), 0.0)

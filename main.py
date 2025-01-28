@@ -58,11 +58,6 @@ def create_policy(model):
         # Process observation and get action
         obs = process_observation(time_step)
         action, _states = model.predict(obs, deterministic=True)
-        
-        # Print absolute creature position
-        if 'absolute_root_pos' in time_step.observation[0]:
-            print(f"Creature position: {time_step.observation[0]['absolute_root_pos']}")
-
         return [action]
     return policy
 

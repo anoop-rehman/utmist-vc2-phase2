@@ -60,10 +60,10 @@ def create_policy(model):
         action, _states = model.predict(obs, deterministic=True)
         
         # Calculate and print reward
-        reward, vel_to_ball = calculate_reward(time_step, action)
+        reward, vel_to_ball = calculate_reward(time_step, action, 0.0)  # Pass 0.0 for distance since we don't track it in viewer
+        print(f"vel to ball: {vel_to_ball}")
+        print(f"train reward: {reward}")
         print("-------------------------------")
-        print("vel to ball:", vel_to_ball)
-        print("test reward:", reward)
 
         return [action]
     return policy

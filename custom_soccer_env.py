@@ -9,7 +9,7 @@ from dm_control.locomotion.walkers import legacy_base
 from dm_control.locomotion.soccer.team import Team, Player
 from dm_control.locomotion.soccer.task import Task, MultiturnTask
 from dm_control.locomotion.soccer.soccer_ball import SoccerBall
-from dm_control.locomotion.soccer.pitch import Pitch, RandomizedPitch
+from dm_control.locomotion.soccer.pitch import RandomizedPitch
 from typing import List
 
 def create_soccer_env(
@@ -43,7 +43,7 @@ def create_soccer_env(
             A `composer.Environment` instance.
     """
     goal_size = None
-    field_size = (40, 30)  # Using a fixed middle size between min and max
+    field_size = (40, 30)  # Fixed field size
     ball = SoccerBall()
 
     task_factory = Task
@@ -61,8 +61,9 @@ def create_soccer_env(
     return composer.Environment(
         task=task_factory(
             players=players,
-            arena=Pitch(
-                size=field_size,
+            arena=RandomizedPitch(
+                min_size=field_size,
+                max_size=field_size,  # Same as min_size to get fixed dimensions
                 field_box=enable_field_box,
                 goal_size=goal_size),
             ball=ball,

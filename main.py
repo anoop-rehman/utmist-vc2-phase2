@@ -1,7 +1,7 @@
 from custom_soccer_env import create_soccer_env
 from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED
 from creature import Creature
-from train import train_creature, DMControlWrapper, process_observation, calculate_reward, setup_env
+from train import train_creature, DMControlWrapper, process_observation, calculate_reward, setup_env, default_hyperparameters
 from dm_control import viewer
 import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train or view a creature model')
     parser.add_argument('--load-model', type=str, help='Path to model to load')
     parser.add_argument('--view-only', action='store_true', help='Only view the model, no training')
-    parser.add_argument('--timesteps', type=int, default=20_000, help='Number of timesteps to train')
+    parser.add_argument('--n-updates', type=int, default=3, help=f'Number of policy updates to perform (each update = {default_hyperparameters["n_steps"]} timesteps)')
     parser.add_argument('--load-path', type=str, default=None, help='Path to load a saved model from')
     parser.add_argument('--checkpoint-freq', type=int, default=4000, help='How often to save checkpoints during training')
     parser.add_argument('--keep-checkpoints', action='store_true', help='Keep all checkpoints instead of deleting them')
@@ -85,14 +85,15 @@ if __name__ == "__main__":
         print("Launching viewer...")
         viewer.launch(env, policy=create_policy(model))
     else:
-        # Train model (either new or resumed)
-        print("Starting training...")
+        # Convert n_updates to timesteps using n_steps from hyperparameters
+        timesteps = args.n_updates * default_hyperparameters["n_steps"]
+        print(f"Starting training for {args.n_updates} updates ({timesteps} timesteps)...")
         if args.load_model:
             print(f"Resuming training from {args.load_model}")
         
         model = train_creature(
             env=vec_env,  # Use the wrapped environment
-            total_timesteps=args.timesteps,
+            total_timesteps=timesteps,
             checkpoint_freq=args.checkpoint_freq,
             load_path=args.load_model or args.load_path,  # Use load_model if provided, otherwise use load_path
             tensorboard_log=args.tensorboard_log,

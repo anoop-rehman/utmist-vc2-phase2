@@ -131,6 +131,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         checkpoint_stride: How many checkpoints were skipped between saves
         load_path: Path to the model loaded for continued training
     """
+    from train import default_hyperparameters
     card_path = os.path.join(save_dir, "model_card.md")
     
     # Calculate actual training duration
@@ -147,7 +148,8 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         
         # Training Command in its own subsection
         f.write("### Training Command\n")
-        command = f"python main.py --timesteps {total_timesteps}"
+        n_updates = total_timesteps // default_hyperparameters["n_steps"]  # Convert timesteps back to updates
+        command = f"python main.py --n-updates {n_updates}"
         if tensorboard_log and tensorboard_log != 'tensorboard_logs':  # Only include if not default
             command += f" --tensorboard-log {tensorboard_log}"
         if load_path:
@@ -161,9 +163,13 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write(f"- Start Time: {start_time.strftime('%I:%M:%S %p')} EST\n")
         f.write(f"- End Time: {end_time.strftime('%I:%M:%S %p')} EST\n")
         f.write(f"- Duration: {hours}h {minutes}m {seconds}s\n")
-        f.write(f"- Previous Steps (steps already trained before this session): {start_timesteps}\n")
-        f.write(f"- Training Steps (new steps trained in this session): {total_timesteps}\n")
-        f.write(f"- Total Steps (cumulative steps after training): {start_timesteps + total_timesteps}\n")
+        # Add policy updates info
+        prev_updates = start_timesteps // default_hyperparameters["n_steps"] if start_timesteps else 0
+        new_updates = total_timesteps // default_hyperparameters["n_steps"]
+        total_updates = prev_updates + new_updates
+        f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} environment timesteps)\n")
+        f.write(f"- Training Updates: {new_updates} ({total_timesteps} environment timesteps)\n")
+        f.write(f"- Total Updates: {total_updates} ({start_timesteps + total_timesteps} environment timesteps)\n")
         final_model_path = os.path.join(save_dir, f'final_model_{start_timesteps + total_timesteps}_steps.zip')
         f.write(f"- Final Model Path: `{final_model_path}`\n")
         if start_timesteps > 0:
@@ -229,7 +235,6 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         
         # Hyperparameters
         f.write("\n## Model Hyperparameters\n")
-        from train import default_hyperparameters
         for param, value in default_hyperparameters.items():
             if isinstance(value, dict):
                 f.write(f"- {param}:\n")

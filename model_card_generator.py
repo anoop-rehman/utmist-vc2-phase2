@@ -167,10 +167,10 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         prev_updates = start_timesteps // default_hyperparameters["n_steps"] if start_timesteps else 0
         new_updates = total_timesteps // default_hyperparameters["n_steps"]
         total_updates = prev_updates + new_updates
-        f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} environment timesteps)\n")
-        f.write(f"- Training Updates: {new_updates} ({total_timesteps} environment timesteps)\n")
-        f.write(f"- Total Updates: {total_updates} ({start_timesteps + total_timesteps} environment timesteps)\n")
-        final_model_path = os.path.join(save_dir, f'final_model_{start_timesteps + total_timesteps}_steps.zip')
+        f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} env timesteps)\n")
+        f.write(f"- Training Updates: {new_updates} ({total_timesteps} env timesteps)\n")
+        f.write(f"- Total Updates: {total_updates} ({start_timesteps + total_timesteps} env timesteps)\n")
+        final_model_path = os.path.join(save_dir, f'final_model_{total_updates}updates.zip')
         f.write(f"- Final Model Path: `{final_model_path}`\n")
         if start_timesteps > 0:
             if load_path:

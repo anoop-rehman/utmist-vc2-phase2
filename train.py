@@ -249,22 +249,23 @@ class CheckpointCallback(BaseCallback):
                 if current_checkpoint == self.start_timesteps + self.total_timesteps:
                     return True
                     
-                checkpoint_path = os.path.join(self.save_dir, f"model_{current_checkpoint}steps.zip")
+                n_updates = current_checkpoint // default_hyperparameters["n_steps"]
+                checkpoint_path = os.path.join(self.save_dir, f"model_{n_updates}updates.zip")
                 
                 # If not keeping checkpoints, delete the previous one
                 if not self.keep_checkpoints:
-                    prev_checkpoint = current_checkpoint - (self.checkpoint_freq * self.checkpoint_stride)
-                    if prev_checkpoint > 0:
-                        prev_path = os.path.join(self.save_dir, f"model_{prev_checkpoint}steps.zip")
+                    prev_updates = (current_checkpoint - (self.checkpoint_freq * self.checkpoint_stride)) // default_hyperparameters["n_steps"]
+                    if prev_updates > 0:
+                        prev_path = os.path.join(self.save_dir, f"model_{prev_updates}updates.zip")
                         if os.path.exists(prev_path):
                             os.remove(prev_path)
                             if self.verbose > 0:
-                                print(f"\nRemoved checkpoint at {prev_checkpoint} steps")
+                                print(f"\nRemoved checkpoint at {prev_updates} updates")
                 
                 # Save the current checkpoint
                 self.model.save(checkpoint_path)
                 if self.verbose > 0:
-                    print(f"\nSaved checkpoint at {current_checkpoint} steps")
+                    print(f"\nSaved checkpoint at {n_updates} updates")
         
         return True
 
@@ -290,20 +291,23 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         save_dir = os.path.join("trained_creatures", get_default_folder())
     os.makedirs(save_dir, exist_ok=True)
     
-    # Load or create model
+    # Store the previous model's folder for cleanup
+    prev_model_folder = None
     if load_path:
         print(f"\nLoading model from {load_path}")
         model = PPO.load(load_path)
         model.set_env(env)
+        prev_model_folder = os.path.dirname(load_path)
         # Set tensorboard log directory for loaded model
         if tensorboard_log:
             model.tensorboard_log = tensorboard_log
-        if start_timesteps is None and "steps" in load_path:
+        if start_timesteps is None and "updates" in load_path:
             try:
-                start_timesteps = int(load_path.split("steps")[0].split("_")[-1])
-                print(f"Continuing from {start_timesteps} steps")
+                prev_updates = int(load_path.split("updates")[0].split("_")[-1])
+                start_timesteps = prev_updates * default_hyperparameters["n_steps"]
+                print(f"Continuing from {prev_updates} updates ({start_timesteps} timesteps)")
             except:
-                print("Could not parse starting timesteps from load_path")
+                print("Could not parse starting updates from load_path")
                 start_timesteps = 0
     else:
         print("\nCreating new model")
@@ -334,14 +338,44 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     )
     
     # Save final model with environment steps in filename
-    # Use the actual requested timesteps instead of calculating from updates
     env_steps = start_timesteps + total_timesteps
-    training_iterations = total_timesteps * model.n_epochs  # Each env step is trained on n_epochs times
-    final_path = os.path.join(save_dir, f"final_model_{env_steps}_steps")
+    training_iterations = total_timesteps * model.n_epochs
+    total_updates = env_steps // default_hyperparameters["n_steps"]
+    final_path = os.path.join(save_dir, f"final_model_{total_updates}updates.zip")
     model.save(final_path)
-    print(f"\nSaved final model to {final_path}")
-    print(f"Environment Steps: {env_steps}")
-    print(f"Training Iterations: {training_iterations} ({model.n_epochs} epochs per step)")
+    
+    # Verify the saved model
+    if os.path.exists(final_path):
+        file_size = os.path.getsize(final_path)
+        expected_min_size = 100 * 1024  # 100KB minimum
+        if file_size > expected_min_size:
+            print(f"\nSaved final model to {final_path} (size: {file_size/1024:.1f}KB)")
+            print(f"Environment Steps: {env_steps}")
+            print(f"Training Iterations: {training_iterations} ({model.n_epochs} epochs per step)")
+            
+            # Clean up intermediate checkpoints unless keep_checkpoints is True
+            if not keep_checkpoints:
+                for filename in os.listdir(save_dir):
+                    if filename.startswith("model_") and filename.endswith("updates.zip"):
+                        checkpoint_path = os.path.join(save_dir, filename)
+                        try:
+                            os.remove(checkpoint_path)
+                            print(f"Cleaned up checkpoint: {filename}")
+                        except Exception as e:
+                            print(f"Note: Could not clean up checkpoint {filename}: {e}")
+            
+            # Clean up previous model folder if it exists and is different from current
+            if prev_model_folder and prev_model_folder != save_dir:
+                import shutil
+                try:
+                    shutil.rmtree(prev_model_folder)
+                    print(f"Cleaned up previous model folder: {prev_model_folder}")
+                except Exception as e:
+                    print(f"Note: Could not clean up previous model folder: {e}")
+        else:
+            print(f"\nWarning: Final model file seems too small ({file_size/1024:.1f}KB). Previous model folder kept.")
+    else:
+        print(f"\nWarning: Failed to save final model to {final_path}. Previous model folder kept.")
     
     # Store the folder name in the model for reference
     model.last_save_folder = os.path.basename(save_dir)

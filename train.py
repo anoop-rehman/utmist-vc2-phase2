@@ -176,6 +176,7 @@ class TrainingCallback(BaseCallback):
 class TensorboardCallback(BaseCallback):
     def __init__(self, start_timesteps=0, verbose=0):
         super().__init__(verbose)
+        # start_timesteps represents the number of environment steps already done
         self.start_timesteps = start_timesteps
         self.episode_rewards = []
         self.episode_velocities = []
@@ -186,22 +187,22 @@ class TensorboardCallback(BaseCallback):
         reward = env.reward
         vel_to_ball = env.last_vel_to_ball
         
-        # Log step metrics
-        global_step = self.start_timesteps + self.n_calls
-        self.logger.record('train/reward', reward, global_step)
-        self.logger.record('train/velocity_to_ball', vel_to_ball, global_step)
+        # Log step metrics against environment steps (not training iterations)
+        env_steps = self.start_timesteps + self.num_timesteps
+        self.logger.record('train/reward', reward, env_steps)
+        self.logger.record('train/velocity_to_ball', vel_to_ball, env_steps)
         
         # Track episode metrics
         if self.locals.get('done'):
             self.episode_rewards.append(reward)
             self.episode_velocities.append(vel_to_ball)
             
-            # Log episode metrics
+            # Log episode metrics against environment steps
             if len(self.episode_rewards) > 0:
-                self.logger.record('train/episode_reward_mean', np.mean(self.episode_rewards[-100:]), global_step)
-                self.logger.record('train/episode_reward_max', np.max(self.episode_rewards[-100:]), global_step)
-                self.logger.record('train/episode_reward_min', np.min(self.episode_rewards[-100:]), global_step)
-                self.logger.record('train/episode_velocity_mean', np.mean(self.episode_velocities[-100:]), global_step)
+                self.logger.record('train/episode_reward_mean', np.mean(self.episode_rewards[-100:]), env_steps)
+                self.logger.record('train/episode_reward_max', np.max(self.episode_rewards[-100:]), env_steps)
+                self.logger.record('train/episode_reward_min', np.min(self.episode_rewards[-100:]), env_steps)
+                self.logger.record('train/episode_velocity_mean', np.mean(self.episode_velocities[-100:]), env_steps)
         
         return True
 
@@ -332,11 +333,16 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         reset_num_timesteps=False
     )
     
-    # Save final model with actual step count in filename
-    actual_steps = start_timesteps + model._n_updates * model.n_steps
-    final_path = os.path.join(save_dir, f"final_model_{actual_steps}_steps")
+    # Save final model with environment steps in filename
+    # Calculate actual environment steps (without counting training epochs)
+    env_updates = model._n_updates // model.n_epochs  # Divide by n_epochs to get actual environment updates
+    env_steps = start_timesteps + env_updates * model.n_steps
+    training_iterations = env_steps * model.n_epochs  # Each env step is trained on n_epochs times
+    final_path = os.path.join(save_dir, f"final_model_{env_steps}_steps")
     model.save(final_path)
     print(f"\nSaved final model to {final_path}")
+    print(f"Environment Steps: {env_steps}")
+    print(f"Training Iterations: {training_iterations} ({model.n_epochs} epochs per step)")
     
     # Store the folder name in the model for reference
     model.last_save_folder = os.path.basename(save_dir)
@@ -354,7 +360,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         start_time=start_time,
         end_time=end_time,
         start_timesteps=start_timesteps or 0,
-        total_timesteps=actual_steps - (start_timesteps or 0),  # Use actual steps trained in this session
+        total_timesteps=env_steps - (start_timesteps or 0),  # Use env_steps for model card
         tensorboard_log=tensorboard_log,
         checkpoint_freq=checkpoint_freq,
         keep_checkpoints=keep_checkpoints,

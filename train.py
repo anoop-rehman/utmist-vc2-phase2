@@ -1,5 +1,6 @@
 import numpy as np
 import gym
+import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -8,16 +9,16 @@ import os
 from datetime import datetime
 from model_card_generator import generate_model_card
 
-# Default hyperparameters
-PPO_PARAMS = {
-    "learning_rate": 3e-4,
-    "n_steps": 2048,
-    "batch_size": 64,
-    "n_epochs": 10,
-    "gamma": 0.99,
-    "gae_lambda": 0.95,
-    "clip_range": 0.2
-}
+# Default hyperparameters for the PPO model.
+default_hyperparameters = dict(
+    learning_rate=3e-4,
+    n_steps=8192,
+    batch_size=64,
+    n_epochs=10,
+    gamma=0.99,
+    gae_lambda=0.95,
+    clip_range=0.2,
+)
 
 def setup_env(env):
     """Wrap environment and create vectorized env."""
@@ -28,14 +29,14 @@ def create_ppo_model(vec_env, tensorboard_log, load_path=None):
     """Create or load a PPO model with standard parameters."""
     if load_path:
         print(f"Loading pre-trained model from {load_path}")
-        return PPO.load(load_path, env=vec_env, tensorboard_log=tensorboard_log, **PPO_PARAMS)
+        return PPO.load(load_path, env=vec_env, tensorboard_log=tensorboard_log, **default_hyperparameters)
     
     return PPO(
         "MlpPolicy",
         vec_env,
         verbose=1,
         tensorboard_log=tensorboard_log,
-        **PPO_PARAMS
+        **default_hyperparameters
     )
 
 def get_default_folder():
@@ -52,13 +53,13 @@ def calculate_reward(timestep, action, distance_in_window):
     """Calculate reward based on velocity to ball, control cost, and distance traveled."""
     vel_to_ball = timestep.observation[0]['stats_vel_to_ball'][0]
     
-    # Calculate control cost (reduced weight to 0.25)
-    ctrl_cost = 0.25 * np.sum(np.square(action))
+    # Scale down control cost to be less punishing
+    ctrl_cost = 0.1 * np.sum(np.square(action))
     
     # Calculate stillness penalty based on distance traveled in window
     # Scale distance to be between 0 and 1 using a sigmoid-like function
     distance_factor = 2.0 / (1.0 + np.exp(-2.0 * distance_in_window)) - 1.0  # Maps any positive distance to (0,1)
-    stillness_penalty = 0.5 * (1.0 - distance_factor)  # Max penalty of 0.5 when no distance covered
+    stillness_penalty = 0.25 * (1.0 - distance_factor)  # Max penalty of 0.25 when no distance covered
     
     # Combine rewards: velocity to ball + baseline - control cost - stillness penalty
     reward = vel_to_ball + 1.0 - ctrl_cost - stillness_penalty
@@ -299,7 +300,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
                 start_timesteps = 0
     else:
         print("\nCreating new model")
-        model = PPO("MlpPolicy", env, tensorboard_log=tensorboard_log, **PPO_PARAMS)
+        model = PPO("MlpPolicy", env, tensorboard_log=tensorboard_log, **default_hyperparameters)
         start_timesteps = start_timesteps or 0
     
     # Setup callbacks

@@ -15,7 +15,7 @@ from typing import List
 def create_soccer_env(
     home_players: List[legacy_base.Walker],
     away_players: List[legacy_base.Walker],
-    time_limit=45.,
+    time_limit=4.,
     random_state=None,
     disable_walker_contacts=False,
     enable_field_box=False,

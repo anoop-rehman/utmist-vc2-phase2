@@ -172,9 +172,14 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         
         # Hyperparameters
         f.write("\n## Hyperparameters\n")
-        from train import PPO_PARAMS
-        for param, value in PPO_PARAMS.items():
-            f.write(f"- {param}: {value}\n")
+        from train import default_hyperparameters
+        for param, value in default_hyperparameters.items():
+            if isinstance(value, dict):
+                f.write(f"- {param}:\n")
+                for k, v in value.items():
+                    f.write(f"  - {k}: {v}\n")
+            else:
+                f.write(f"- {param}: {value}\n")
         
         # Other Notes section for manual additions
         f.write("\n## Other Notes\n")

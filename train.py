@@ -4,6 +4,7 @@ import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.utils import explained_variance
 from gym import spaces
 import os
 from datetime import datetime
@@ -176,10 +177,10 @@ class TrainingCallback(BaseCallback):
 class TensorboardCallback(BaseCallback):
     def __init__(self, start_timesteps=0, verbose=0):
         super().__init__(verbose)
-        # start_timesteps represents the number of environment steps already done
         self.start_timesteps = start_timesteps
         self.episode_rewards = []
         self.episode_velocities = []
+        self.last_obs = None
         
     def _on_step(self):
         # Get current reward and velocity from the wrapped environment
@@ -187,23 +188,58 @@ class TensorboardCallback(BaseCallback):
         reward = env.reward
         vel_to_ball = env.last_vel_to_ball
         
-        # Log step metrics against environment steps (not training iterations)
+        # Get current environment steps
         env_steps = self.start_timesteps + self.num_timesteps
-        self.logger.record('train/reward', reward, env_steps)
-        self.logger.record('train/velocity_to_ball', vel_to_ball, env_steps)
+        
+        # Log step-level metrics
+        self.logger.record('train/reward', reward)
+        self.logger.record('train/velocity_to_ball', vel_to_ball)
+        
+        # Log training metrics from the model
+        if hasattr(self.model, 'logger') and self.model.logger is not None:
+            for key, value in self.model.logger.name_to_value.items():
+                self.logger.record(key, value)
         
         # Track episode metrics
         if self.locals.get('done'):
             self.episode_rewards.append(reward)
             self.episode_velocities.append(vel_to_ball)
             
-            # Log episode metrics against environment steps
+            # Calculate episode statistics
             if len(self.episode_rewards) > 0:
-                self.logger.record('train/episode_reward_mean', np.mean(self.episode_rewards[-100:]), env_steps)
-                self.logger.record('train/episode_reward_max', np.max(self.episode_rewards[-100:]), env_steps)
-                self.logger.record('train/episode_reward_min', np.min(self.episode_rewards[-100:]), env_steps)
-                self.logger.record('train/episode_velocity_mean', np.mean(self.episode_velocities[-100:]), env_steps)
+                recent_rewards = self.episode_rewards[-100:]  # Last 100 episodes
+                recent_velocities = self.episode_velocities[-100:]
+                
+                # Log episode metrics
+                self.logger.record('train/episode_reward_mean', np.mean(recent_rewards))
+                self.logger.record('train/episode_reward_min', np.min(recent_rewards))
+                self.logger.record('train/episode_reward_max', np.max(recent_rewards))
+                self.logger.record('train/episode_velocity_mean', np.mean(recent_velocities))
+                self.logger.record('train/episode_length', self.n_calls)
+                
+                # Log policy metrics if available
+                if hasattr(self.model, 'policy'):
+                    explained_var = explained_variance(
+                        self.model.rollout_buffer.values.flatten(),
+                        self.model.rollout_buffer.returns.flatten()
+                    )
+                    self.logger.record('train/explained_variance', explained_var)
+                    
+                    if hasattr(self.model, 'clip_range'):
+                        current_clip_range = self.model.clip_range(1) if callable(self.model.clip_range) else self.model.clip_range
+                        self.logger.record('train/clip_fraction', float(current_clip_range))
+                    
+                    if hasattr(self.model, 'entropy_loss'):
+                        self.logger.record('train/entropy_loss', self.model.entropy_loss)
+                        
+                    if hasattr(self.model, 'policy_loss'):
+                        self.logger.record('train/policy_loss', self.model.policy_loss)
+                        
+                    if hasattr(self.model, 'value_loss'):
+                        self.logger.record('train/value_loss', self.model.value_loss)
         
+        # Make sure to dump all metrics to tensorboard
+        self.logger.dump(env_steps)
         return True
 
 class CheckpointCallback(BaseCallback):

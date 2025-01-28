@@ -334,10 +334,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     )
     
     # Save final model with environment steps in filename
-    # Calculate actual environment steps (without counting training epochs)
-    env_updates = model._n_updates // model.n_epochs  # Divide by n_epochs to get actual environment updates
-    env_steps = start_timesteps + env_updates * model.n_steps
-    training_iterations = env_steps * model.n_epochs  # Each env step is trained on n_epochs times
+    # Use the actual requested timesteps instead of calculating from updates
+    env_steps = start_timesteps + total_timesteps
+    training_iterations = total_timesteps * model.n_epochs  # Each env step is trained on n_epochs times
     final_path = os.path.join(save_dir, f"final_model_{env_steps}_steps")
     model.save(final_path)
     print(f"\nSaved final model to {final_path}")

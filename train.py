@@ -21,9 +21,14 @@ default_hyperparameters = dict(
     clip_range=0.2,
 )
 
-def setup_env(env):
-    """Wrap environment and create vectorized env."""
-    wrapped_env = DMControlWrapper(env)
+def setup_env(env, phase="combined"):
+    """Wrap environment based on training phase."""
+    if phase == "walking":
+        wrapped_env = WalkingPhaseWrapper(env)
+    elif phase == "rotation":
+        wrapped_env = RotationPhaseWrapper(env)
+    else:
+        wrapped_env = DMControlWrapper(env)  # Original combined phase
     return DummyVecEnv([lambda: wrapped_env])
 
 def create_ppo_model(vec_env, tensorboard_log, load_path=None):
@@ -160,6 +165,79 @@ class DMControlWrapper(gym.Env):
 
     def render(self, mode='human'):
         pass
+
+class WalkingPhaseWrapper(DMControlWrapper):
+    """Environment wrapper for the walking phase of training."""
+    def __init__(self, env):
+        super().__init__(env)
+        
+    def step(self, action):
+        timestep = self.env.step([action])
+        
+        # Track position for distance calculation
+        if 'absolute_root_pos' in timestep.observation[0]:
+            pos = timestep.observation[0]['absolute_root_pos']
+            self.position_history.append(pos)
+            if len(self.position_history) > self.window_size:
+                self.position_history.pop(0)
+        
+        obs = process_observation(timestep)
+        distance = self.get_distance_traveled()
+        
+        # Calculate forward velocity from the environment
+        forward_velocity = timestep.observation[0]['stats_vel_forward'][0]
+        
+        # Reward is based on forward velocity and control cost
+        ctrl_cost = 0.1 * np.sum(np.square(action))
+        distance_factor = 2.0 / (1.0 + np.exp(-2.0 * distance)) - 1.0
+        stillness_penalty = 0.25 * (1.0 - distance_factor)
+        
+        # Focus on forward movement
+        reward = forward_velocity + 1.0 - ctrl_cost - stillness_penalty
+        
+        done = timestep.last()
+        info = {}
+
+        self.reward = reward
+        self.last_vel_to_ball = forward_velocity  # Store for logging
+        return obs, reward, done, info
+
+class RotationPhaseWrapper(DMControlWrapper):
+    """Environment wrapper for the rotation phase of training."""
+    def __init__(self, env):
+        super().__init__(env)
+        
+    def step(self, action):
+        timestep = self.env.step([action])
+        
+        # Track position for distance calculation
+        if 'absolute_root_pos' in timestep.observation[0]:
+            pos = timestep.observation[0]['absolute_root_pos']
+            self.position_history.append(pos)
+            if len(self.position_history) > self.window_size:
+                self.position_history.pop(0)
+        
+        obs = process_observation(timestep)
+        distance = self.get_distance_traveled()
+        
+        # Get rotation alignment with ball
+        ball_pos = timestep.observation[0]['ball_ego_pos']
+        rotation_alignment = -abs(np.arctan2(ball_pos[1], ball_pos[0]))  # Negative arctan to reward facing the ball
+        
+        # Calculate control costs
+        ctrl_cost = 0.1 * np.sum(np.square(action))
+        distance_factor = 2.0 / (1.0 + np.exp(-2.0 * distance)) - 1.0
+        stillness_penalty = 0.25 * (1.0 - distance_factor)
+        
+        # Focus on rotation alignment
+        reward = rotation_alignment + 1.0 - ctrl_cost - stillness_penalty
+        
+        done = timestep.last()
+        info = {}
+
+        self.reward = reward
+        self.last_vel_to_ball = rotation_alignment  # Store for logging
+        return obs, reward, done, info
 
 class TrainingCallback(BaseCallback):
     def __init__(self, verbose=0):
@@ -437,4 +515,4 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         load_path=load_path
     )
     
-    return model
+    return model 

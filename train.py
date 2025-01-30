@@ -129,7 +129,6 @@ class DMControlWrapper(gym.Env):
         if 'absolute_root_pos' in timestep.observation[0]:
             pos = timestep.observation[0]['absolute_root_pos']
             self.position_history.append(pos)
-            # Keep only window_size positions
             if len(self.position_history) > self.window_size:
                 self.position_history.pop(0)
         
@@ -170,6 +169,9 @@ class WalkingPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the walking phase of training."""
     def __init__(self, env):
         super().__init__(env)
+        self.last_position = None
+        # Get the physics timestep from the environment
+        self.dt = env.physics.timestep()
         
     def step(self, action):
         timestep = self.env.step([action])
@@ -180,12 +182,17 @@ class WalkingPhaseWrapper(DMControlWrapper):
             self.position_history.append(pos)
             if len(self.position_history) > self.window_size:
                 self.position_history.pop(0)
+            
+            # Calculate forward velocity from position change
+            if self.last_position is not None:
+                # Calculate velocity as change in position over time using actual timestep
+                forward_velocity = (pos[0][0] - self.last_position[0][0]) / self.dt  # x-axis velocity
+            else:
+                forward_velocity = 0.0
+            self.last_position = pos
         
         obs = process_observation(timestep)
         distance = self.get_distance_traveled()
-        
-        # Calculate forward velocity from the environment
-        forward_velocity = timestep.observation[0]['stats_vel_forward'][0]
         
         # Reward is based on forward velocity and control cost
         ctrl_cost = 0.1 * np.sum(np.square(action))
@@ -201,6 +208,27 @@ class WalkingPhaseWrapper(DMControlWrapper):
         self.reward = reward
         self.last_vel_to_ball = forward_velocity  # Store for logging
         return obs, reward, done, info
+        
+    def reset(self):
+        timestep = self.env.reset()
+        obs = process_observation(timestep)
+        
+        # Clear position history and last position
+        self.position_history = []
+        self.last_position = None
+        if 'absolute_root_pos' in timestep.observation[0]:
+            self.last_position = timestep.observation[0]['absolute_root_pos']
+        
+        # Initialize last_vel_to_ball as 0 for the first step
+        self.last_vel_to_ball = 0.0
+        
+        # Print episode start info
+        self.episode_count += 1
+        print(f"\nEpisode {self.episode_count} started:")
+        if 'absolute_root_pos' in timestep.observation[0]:
+            print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
+        
+        return obs
 
 class RotationPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the rotation phase of training."""
@@ -221,7 +249,10 @@ class RotationPhaseWrapper(DMControlWrapper):
         distance = self.get_distance_traveled()
         
         # Get rotation alignment with ball
-        ball_pos = timestep.observation[0]['ball_ego_pos']
+        ball_pos = timestep.observation[0]['ball_ego_position']
+        print(f"Ball position shape: {ball_pos.shape}, content: {ball_pos}")  # Debug print
+        # Ensure ball_pos is a 3D vector
+        ball_pos = ball_pos.reshape(-1)  # Flatten to 1D array
         rotation_alignment = -abs(np.arctan2(ball_pos[1], ball_pos[0]))  # Negative arctan to reward facing the ball
         
         # Calculate control costs
@@ -238,6 +269,33 @@ class RotationPhaseWrapper(DMControlWrapper):
         self.reward = reward
         self.last_vel_to_ball = rotation_alignment  # Store for logging
         return obs, reward, done, info
+        
+    def reset(self):
+        timestep = self.env.reset()
+        obs = process_observation(timestep)
+        
+        # Clear position history
+        self.position_history = []
+        
+        # Initialize rotation alignment using ball position
+        if 'ball_ego_position' in timestep.observation[0]:
+            ball_pos = timestep.observation[0]['ball_ego_position']
+            print(f"Reset: Ball position shape: {ball_pos.shape}, content: {ball_pos}")  # Debug print
+            # Ensure ball_pos is a 3D vector
+            ball_pos = ball_pos.reshape(-1)  # Flatten to 1D array
+            self.last_vel_to_ball = -abs(np.arctan2(ball_pos[1], ball_pos[0]))
+        else:
+            self.last_vel_to_ball = 0.0
+        
+        # Print episode start info
+        self.episode_count += 1
+        print(f"\nEpisode {self.episode_count} started:")
+        if 'absolute_root_pos' in timestep.observation[0]:
+            print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
+        if 'ball_ego_position' in timestep.observation[0]:
+            print(f"  Ball position (ego): {timestep.observation[0]['ball_ego_position']}")
+        
+        return obs
 
 class TrainingCallback(BaseCallback):
     def __init__(self, verbose=0):

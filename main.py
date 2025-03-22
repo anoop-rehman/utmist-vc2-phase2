@@ -40,15 +40,16 @@ class TensorboardCallback(BaseCallback):
         
         return True
 
-def create_env():
-    """Create the creature and environment."""
+def create_env(training_phase="combined", view_only=False):
+    """Create the environment for training or viewing."""
     home_player = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_BLUE)
     return create_soccer_env(
         home_players=[home_player],
         away_players=[],
-        time_limit=60.0,
-        disable_walker_contacts=False,
-        enable_field_box=True,
+        time_limit=8.0,
+        disable_walker_contacts=True,
+        enable_field_box=False,
+        keep_aspect_ratio=False,
         terminate_on_goal=False
     )
 
@@ -65,19 +66,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train or view a creature model')
     parser.add_argument('--load-model', type=str, help='Path to model to load')
     parser.add_argument('--view-only', action='store_true', help='Only view the model, no training')
+    parser.add_argument('--training-phase', type=str, default="combined", choices=["walking", "rotation", "combined"], help='Training phase to use')
     parser.add_argument('--n-updates', type=int, default=3, help=f'Number of policy updates to perform (each update = {default_hyperparameters["n_steps"]} timesteps)')
     parser.add_argument('--load-path', type=str, default=None, help='Path to load a saved model from')
-    parser.add_argument('--checkpoint-freq', type=int, default=default_hyperparameters["n_steps"], help='How often to save checkpoints during training')
+    parser.add_argument('--checkpoint-freq', type=int, default=default_hyperparameters["n_steps"], help='How often to save checkpoints during training (defaults to one checkpoint per update)')
     parser.add_argument('--keep-checkpoints', action='store_true', help='Keep all checkpoints instead of deleting them')
-    parser.add_argument('--checkpoint-stride', type=int, default=1, help='Save every Nth checkpoint')
+    parser.add_argument('--checkpoint-stride', type=int, default=1, help='Save every Nth checkpoint (e.g. 3 means save every third update)')
     parser.add_argument('--tensorboard-log', type=str, default='tensorboard_logs', help='TensorBoard log directory')
     parser.add_argument('--start-timesteps', type=int, default=None, help='Starting timestep count (for resuming training)')
-    parser.add_argument('--training-phase', type=str, choices=['walking', 'rotation', 'combined'], default='combined',
-                      help='Which training phase to run (walking, rotation, or combined)')
     args = parser.parse_args()
 
-    # Create environment with appropriate wrapper based on training phase
-    env = create_env()
+    # Create environment
+    env = create_env(training_phase=args.training_phase, view_only=args.view_only)
     vec_env = setup_env(env, phase=args.training_phase)
 
     if args.view_only and args.load_model:
@@ -89,15 +89,15 @@ if __name__ == "__main__":
     else:
         # Convert n_updates to timesteps using n_steps from hyperparameters
         timesteps = args.n_updates * default_hyperparameters["n_steps"]
-        print(f"Starting {args.training_phase} phase training for {args.n_updates} updates ({timesteps} timesteps)...")
+        print(f"Starting training for {args.n_updates} updates ({timesteps} timesteps)...")
         if args.load_model:
             print(f"Resuming training from {args.load_model}")
         
         model = train_creature(
-            env=vec_env,
+            env=vec_env,  # Use the wrapped environment
             total_timesteps=timesteps,
             checkpoint_freq=args.checkpoint_freq,
-            load_path=args.load_model or args.load_path,
+            load_path=args.load_model or args.load_path,  # Use load_model if provided, otherwise use load_path
             tensorboard_log=args.tensorboard_log,
             keep_checkpoints=args.keep_checkpoints,
             checkpoint_stride=args.checkpoint_stride,

@@ -74,6 +74,7 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint-stride', type=int, default=1, help='Save every Nth checkpoint (e.g. 3 means save every third update)')
     parser.add_argument('--tensorboard-log', type=str, default='tensorboard_logs', help='TensorBoard log directory')
     parser.add_argument('--start-timesteps', type=int, default=None, help='Starting timestep count (for resuming training)')
+    parser.add_argument('--enable-viewer', action='store_true', help='Enable the DM Control viewer (requires a GUI environment)')
     args = parser.parse_args()
 
     # Create environment
@@ -85,8 +86,8 @@ if __name__ == "__main__":
         print(f"\nLoading model from {args.load_model} for viewing...")
         model = PPO.load(args.load_model, env=vec_env)
         print("Launching viewer...")
-        # Comment out viewer launch when running on RunPod headless environment
-        # viewer.launch(env, policy=create_policy(model))
+        # Always launch viewer in view-only mode
+        viewer.launch(env, policy=create_policy(model))
     else:
         # Convert n_updates to timesteps using n_steps from hyperparameters
         timesteps = args.n_updates * default_hyperparameters["n_steps"]
@@ -105,7 +106,9 @@ if __name__ == "__main__":
             start_timesteps=args.start_timesteps
         )
 
-        # Launch viewer after training
-        # print("\nLaunching viewer with trained model...")
-        # Comment out viewer launch when running on RunPod headless environment
-        # viewer.launch(env, policy=create_policy(model))
+        # Launch viewer after training if enabled
+        if args.enable_viewer:
+            print("\nLaunching viewer with trained model...")
+            viewer.launch(env, policy=create_policy(model))
+        else:
+            print("\nViewer disabled. Run with --enable-viewer to launch the viewer after training.")

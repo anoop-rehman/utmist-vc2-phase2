@@ -250,7 +250,6 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         # Get rotation alignment with ball
         ball_pos = timestep.observation[0]['ball_ego_position']
-        print(f"Ball position shape: {ball_pos.shape}, content: {ball_pos}")  # Debug print
         # Ensure ball_pos is a 3D vector
         ball_pos = ball_pos.reshape(-1)  # Flatten to 1D array
         rotation_alignment = -abs(np.arctan2(ball_pos[1], ball_pos[0]))  # Negative arctan to reward facing the ball
@@ -280,7 +279,6 @@ class RotationPhaseWrapper(DMControlWrapper):
         # Initialize rotation alignment using ball position
         if 'ball_ego_position' in timestep.observation[0]:
             ball_pos = timestep.observation[0]['ball_ego_position']
-            print(f"Reset: Ball position shape: {ball_pos.shape}, content: {ball_pos}")  # Debug print
             # Ensure ball_pos is a 3D vector
             ball_pos = ball_pos.reshape(-1)  # Flatten to 1D array
             self.last_vel_to_ball = -abs(np.arctan2(ball_pos[1], ball_pos[0]))

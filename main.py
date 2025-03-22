@@ -85,7 +85,8 @@ if __name__ == "__main__":
         print(f"\nLoading model from {args.load_model} for viewing...")
         model = PPO.load(args.load_model, env=vec_env)
         print("Launching viewer...")
-        viewer.launch(env, policy=create_policy(model))
+        # Comment out viewer launch when running on RunPod headless environment
+        # viewer.launch(env, policy=create_policy(model))
     else:
         # Convert n_updates to timesteps using n_steps from hyperparameters
         timesteps = args.n_updates * default_hyperparameters["n_steps"]
@@ -105,5 +106,6 @@ if __name__ == "__main__":
         )
 
         # Launch viewer after training
-        print("\nLaunching viewer with trained model...")
-        viewer.launch(env, policy=create_policy(model))
+        # print("\nLaunching viewer with trained model...")
+        # Comment out viewer launch when running on RunPod headless environment
+        # viewer.launch(env, policy=create_policy(model))

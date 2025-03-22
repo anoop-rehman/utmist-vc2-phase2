@@ -1,6 +1,7 @@
 import inspect
 import os
 from datetime import datetime
+import pytz
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 import xml.etree.ElementTree as ET
 from custom_soccer_env import create_soccer_env
@@ -140,6 +141,29 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
     minutes = (duration.seconds % 3600) // 60
     seconds = duration.seconds % 60
     
+    # Convert times to EST
+    eastern_tz = pytz.timezone('US/Eastern')
+    
+    # Convert start time to EST (handling both naive and aware datetime objects)
+    if start_time.tzinfo is None:
+        # If naive datetime, assume it's in local time and convert to EST
+        local_tz = datetime.now().astimezone().tzinfo
+        start_time_local = start_time.replace(tzinfo=local_tz)
+        start_time_est = start_time_local.astimezone(eastern_tz)
+    else:
+        # If already timezone-aware, just convert to EST
+        start_time_est = start_time.astimezone(eastern_tz)
+        
+    # Convert end time to EST (handling both naive and aware datetime objects)
+    if end_time.tzinfo is None:
+        # If naive datetime, assume it's in local time and convert to EST
+        local_tz = datetime.now().astimezone().tzinfo
+        end_time_local = end_time.replace(tzinfo=local_tz)
+        end_time_est = end_time_local.astimezone(eastern_tz)
+    else:
+        # If already timezone-aware, just convert to EST
+        end_time_est = end_time.astimezone(eastern_tz)
+    
     with open(card_path, "w") as f:
         f.write("# Model Card\n\n")
         
@@ -160,8 +184,8 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         
         # Rest of training info
         f.write("### Details\n")
-        f.write(f"- Start Time: {start_time.strftime('%I:%M:%S %p')} EST\n")
-        f.write(f"- End Time: {end_time.strftime('%I:%M:%S %p')} EST\n")
+        f.write(f"- Start Time: {start_time_est.strftime('%I:%M:%S %p')} EST\n")
+        f.write(f"- End Time: {end_time_est.strftime('%I:%M:%S %p')} EST\n")
         f.write(f"- Duration: {hours}h {minutes}m {seconds}s\n")
         # Add policy updates info
         prev_updates = start_timesteps // default_hyperparameters["n_steps"] if start_timesteps else 0

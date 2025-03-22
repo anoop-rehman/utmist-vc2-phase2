@@ -72,6 +72,7 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint-freq', type=int, default=default_hyperparameters["n_steps"], help='How often to save checkpoints during training (defaults to one checkpoint per update)')
     parser.add_argument('--keep-checkpoints', action='store_true', help='Keep all checkpoints instead of deleting them')
     parser.add_argument('--checkpoint-stride', type=int, default=1, help='Save every Nth checkpoint (e.g. 3 means save every third update)')
+    parser.add_argument('--keep-previous-model', action='store_true', help='Keep the previous model folder instead of deleting it')
     parser.add_argument('--tensorboard-log', type=str, default='tensorboard_logs', help='TensorBoard log directory')
     parser.add_argument('--start-timesteps', type=int, default=None, help='Starting timestep count (for resuming training)')
     parser.add_argument('--enable-viewer', action='store_true', help='Enable the DM Control viewer (requires a GUI environment)')
@@ -103,7 +104,8 @@ if __name__ == "__main__":
             tensorboard_log=args.tensorboard_log,
             keep_checkpoints=args.keep_checkpoints,
             checkpoint_stride=args.checkpoint_stride,
-            start_timesteps=args.start_timesteps
+            start_timesteps=args.start_timesteps,
+            keep_previous_model=args.keep_previous_model
         )
 
         # Launch viewer after training if enabled

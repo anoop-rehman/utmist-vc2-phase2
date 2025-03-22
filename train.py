@@ -439,7 +439,7 @@ class CheckpointCallback(BaseCallback):
         
         return True
 
-def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1):
+def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False):
     """Train a creature using PPO.
     
     Args:
@@ -452,6 +452,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         start_timesteps: Starting timestep count (for resuming training)
         keep_checkpoints: Whether to keep all checkpoints
         checkpoint_stride: How many checkpoints to skip between saves
+        keep_previous_model: Whether to keep the previous model folder
     """
     # Record start time
     start_time = datetime.now()
@@ -465,8 +466,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     prev_model_folder = None
     if load_path:
         print(f"\nLoading model from {load_path}")
-        model = PPO.load(load_path)
-        model.set_env(env)
+        model = PPO.load(load_path, env=env)
         prev_model_folder = os.path.dirname(load_path)
         # Set tensorboard log directory for loaded model
         if tensorboard_log:
@@ -535,13 +535,15 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
                             print(f"Note: Could not clean up checkpoint {filename}: {e}")
             
             # Clean up previous model folder if it exists and is different from current
-            if prev_model_folder and prev_model_folder != save_dir:
+            if prev_model_folder and prev_model_folder != save_dir and not keep_previous_model:
                 import shutil
                 try:
                     shutil.rmtree(prev_model_folder)
                     print(f"Cleaned up previous model folder: {prev_model_folder}")
                 except Exception as e:
                     print(f"Note: Could not clean up previous model folder: {e}")
+            elif prev_model_folder and prev_model_folder != save_dir and keep_previous_model:
+                print(f"Keeping previous model folder: {prev_model_folder}")
         else:
             print(f"\nWarning: Final model file seems too small ({file_size/1024:.1f}KB). Previous model folder kept.")
     else:

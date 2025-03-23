@@ -31,12 +31,13 @@ def create_policy(model):
     position_history = []
     velocity_history = []
     last_position = None
+    start_position = None  # Add start position for displacement calculation
     history_buffer_size = 5
     velocity_buffer_size = 5
     dt = 0.025  # Default physics timestep, adjust if needed
     
     def policy(time_step):
-        nonlocal phase, position_history, velocity_history, last_position
+        nonlocal phase, position_history, velocity_history, last_position, start_position
         
         # Process base observation
         orig_obs = process_observation(time_step)
@@ -55,6 +56,10 @@ def create_policy(model):
         # Track position for history
         if 'absolute_root_pos' in time_step.observation[0]:
             pos = time_step.observation[0]['absolute_root_pos']
+            
+            # Initialize start position if needed
+            if start_position is None:
+                start_position = pos.copy()
             
             # Update position history
             position_history.append(pos.copy())

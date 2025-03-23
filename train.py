@@ -173,6 +173,7 @@ class WalkingPhaseWrapper(DMControlWrapper):
         # Initialize with parent but we'll override the observation space
         super().__init__(env)
         self.last_position = None
+        self.start_position = None  # Track starting position for displacement calculations
         # Get the physics timestep from the environment
         self.dt = env.physics.timestep()
         
@@ -232,6 +233,7 @@ class WalkingPhaseWrapper(DMControlWrapper):
         self.position_history = []
         self.velocity_history = []
         self.last_position = None
+        self.start_position = None  # Reset start position
         
         # Create initial observation with phase variables
         additional_obs = []
@@ -246,10 +248,11 @@ class WalkingPhaseWrapper(DMControlWrapper):
         # Add empty velocity history
         additional_obs.extend([0.0] * self.velocity_buffer_size)
         
-        # Initialize position history and last_position if available
+        # Initialize position history and position tracking
         if 'absolute_root_pos' in timestep.observation[0]:
             pos = timestep.observation[0]['absolute_root_pos']
             self.last_position = pos.copy()
+            self.start_position = pos.copy()  # Set start position for displacement calculations
             self.position_history.append(pos.copy())
         
         # Combine original observation with additional features
@@ -289,7 +292,7 @@ class WalkingPhaseWrapper(DMControlWrapper):
             if len(self.position_history) > self.history_buffer_size:
                 self.position_history.pop(0)
             
-            # Calculate forward velocity from position change
+            # Calculate forward velocity from position change (for logging purposes)
             if self.last_position is not None:
                 # Calculate velocity as change in position over time using actual timestep
                 forward_velocity = (pos[0][0] - self.last_position[0][0]) / self.dt  # x-axis velocity
@@ -301,8 +304,17 @@ class WalkingPhaseWrapper(DMControlWrapper):
             else:
                 forward_velocity = 0.0
             self.last_position = pos.copy()
+
+            # Calculate displacement from origin (for reward)
+            if self.start_position is not None:
+                # Direct displacement along x-axis only (forward movement)
+                displacement = pos[0][0] - self.start_position[0][0]
+            else:
+                displacement = 0.0
+                self.start_position = pos.copy()
         else:
             forward_velocity = 0.0
+            displacement = 0.0
         
         # Process the original observation
         orig_obs = process_observation(timestep)
@@ -355,19 +367,15 @@ class WalkingPhaseWrapper(DMControlWrapper):
         # Combine original observation with additional features
         obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
         
-        # Simple reward based primarily on forward distance traveled
-        # Calculate average velocity for smoother reward
-        avg_velocity = np.mean(self.velocity_history) if self.velocity_history else forward_velocity
-        
-        # Pure distance-based reward with minimal control penalty
+        # Simple reward based on displacement from origin with minimal control penalty
         ctrl_cost = 0.05 * np.sum(np.square(action))  # Reduced control cost
-        reward = avg_velocity + 0.5 - ctrl_cost  # Simple baseline reward
+        reward = displacement + 0.5 - ctrl_cost  # Baseline reward + displacement - control cost
         
         done = timestep.last()
         info = {}
 
         self.reward = reward
-        self.last_vel_to_ball = forward_velocity  # Store for logging
+        self.last_vel_to_ball = forward_velocity  # Keep tracking velocity for logging
         return obs, reward, done, info
 
 class RotationPhaseWrapper(DMControlWrapper):

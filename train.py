@@ -3,6 +3,7 @@ import gym
 import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.utils import explained_variance
 from gym import spaces
@@ -10,6 +11,27 @@ import os
 from datetime import datetime
 from model_card_generator import generate_model_card
 import pytz
+import shutil
+from typing import Dict, Any
+
+# Add tensorboard callback class
+class TensorboardCallback(BaseCallback):
+    """
+    Custom callback for plotting additional values in tensorboard.
+    """
+    def __init__(self, verbose=0):
+        super(TensorboardCallback, self).__init__(verbose)
+        
+    def _on_step(self) -> bool:
+        # Log scalar value (here a random variable)
+        for i, wrapper in enumerate(self.model.get_env().envs):
+            if hasattr(wrapper, 'reward'):
+                reward_value = wrapper.reward
+                self.logger.record(f'env_{i}/reward', reward_value)
+            if hasattr(wrapper, 'last_vel_to_ball'):
+                vel_value = wrapper.last_vel_to_ball
+                self.logger.record(f'env_{i}/velocity_metric', vel_value)
+        return True
 
 # Add quaternion utility function
 def quaternion_to_forward_vector(quaternion):
@@ -36,6 +58,88 @@ default_hyperparameters = dict(
     gae_lambda=0.95,
     clip_range=0.2,
 )
+
+# Add train_creature function
+def train_creature(env, total_timesteps, checkpoint_freq=8192, load_path=None, tensorboard_log="tensorboard_logs", 
+                  keep_checkpoints=False, checkpoint_stride=1, start_timesteps=None, keep_previous_model=False):
+    """Train a creature with PPO and save checkpoints."""
+    # Create folders for checkpoints/logs
+    save_folder = f"trained_creatures/{get_default_folder()}"
+    checkpoint_folder = f"{save_folder}/checkpoints"
+    final_model_path = f"{save_folder}/final_model"
+    
+    # Clear previous model from same run if needed
+    if os.path.exists(save_folder) and not keep_previous_model:
+        try:
+            shutil.rmtree(save_folder)
+            print(f"Cleared previous model folder: {save_folder}")
+        except Exception as e:
+            print(f"Error clearing model folder: {e}")
+    
+    # Create folders
+    os.makedirs(save_folder, exist_ok=True)
+    os.makedirs(checkpoint_folder, exist_ok=True)
+    print(f"Saving model to {save_folder}")
+    
+    # Configure callbacks
+    checkpoint_callback = CheckpointCallback(
+        save_freq=checkpoint_freq,
+        save_path=checkpoint_folder,
+        name_prefix="model",
+        save_replay_buffer=False,
+        save_vecnormalize=False,
+        verbose=1
+    )
+    
+    # Create model
+    model = create_ppo_model(env, tensorboard_log, load_path)
+    
+    # Setup callback
+    callbacks = [checkpoint_callback, TensorboardCallback()]
+    
+    # Train model
+    model.learn(
+        total_timesteps=total_timesteps, 
+        callback=callbacks,
+        reset_num_timesteps=start_timesteps is None,  # Only reset if not continuing training
+        tb_log_name=save_folder.replace("/", "_")
+    )
+    
+    # Save final model
+    final_model_name = f"{final_model_path}_{model.num_timesteps//default_hyperparameters['n_steps']}updates"
+    model.save(final_model_name)
+    print(f"\nFinal model saved to {final_model_name}.zip")
+    
+    # Clean up checkpoints if not keeping them
+    if not keep_checkpoints and os.path.exists(checkpoint_folder):
+        checkpoint_files = [f for f in os.listdir(checkpoint_folder) if f.endswith('.zip')]
+        checkpoint_files.sort()
+        
+        # Keep only every Nth checkpoint where N is checkpoint_stride
+        files_to_delete = []
+        for i, file in enumerate(checkpoint_files):
+            if (i + 1) % checkpoint_stride != 0:  # Keep 1st, (1+stride)th, etc.
+                files_to_delete.append(file)
+        
+        # Delete unwanted checkpoints
+        for file in files_to_delete:
+            try:
+                os.remove(os.path.join(checkpoint_folder, file))
+            except Exception as e:
+                print(f"Error removing checkpoint {file}: {e}")
+        
+        print(f"Cleaned up {len(files_to_delete)} checkpoints, keeping {len(checkpoint_files) - len(files_to_delete)}")
+    
+    # Generate a model card
+    model_info = {
+        "name": save_folder,
+        "timesteps": model.num_timesteps,
+        "hyperparameters": default_hyperparameters,
+        "updates": model.num_timesteps // default_hyperparameters["n_steps"]
+    }
+    generate_model_card(model_info, save_folder)
+    
+    return model
 
 def setup_env(env, phase="combined"):
     """Wrap environment based on training phase."""

@@ -25,11 +25,97 @@ def create_env(training_phase="combined", view_only=False):
 
 def create_policy(model):
     """Create a policy function for the viewer."""
+    
+    # Track state for phase and history
+    phase = 0.0
+    position_history = []
+    velocity_history = []
+    last_position = None
+    history_buffer_size = 5
+    velocity_buffer_size = 5
+    dt = 0.025  # Default physics timestep, adjust if needed
+    
     def policy(time_step):
-        # Process observation and get action
-        obs = process_observation(time_step)
-        action, _states = model.predict(obs, deterministic=True)
+        nonlocal phase, position_history, velocity_history, last_position
+        
+        # Process base observation
+        orig_obs = process_observation(time_step)
+        
+        # Update phase variable
+        phase = (phase + dt) % 1.0
+        phase_sin = np.sin(2 * np.pi * phase)
+        phase_cos = np.cos(2 * np.pi * phase)
+        
+        # Process position history
+        additional_obs = []
+        
+        # Add phase variables
+        additional_obs.extend([phase_sin, phase_cos])
+        
+        # Track position for history
+        if 'absolute_root_pos' in time_step.observation[0]:
+            pos = time_step.observation[0]['absolute_root_pos']
+            
+            # Update position history
+            position_history.append(pos.copy())
+            if len(position_history) > history_buffer_size:
+                position_history.pop(0)
+            
+            # Calculate forward velocity from position change
+            if last_position is not None:
+                forward_velocity = (pos[0][0] - last_position[0][0]) / dt
+                
+                # Update velocity history
+                velocity_history.append(forward_velocity)
+                if len(velocity_history) > velocity_buffer_size:
+                    velocity_history.pop(0)
+            else:
+                forward_velocity = 0.0
+            last_position = pos.copy()
+        else:
+            forward_velocity = 0.0
+            
+        # Add position history (differences from current)
+        if len(position_history) > 1:
+            current_pos = position_history[-1]
+            history_entries = min(len(position_history) - 1, history_buffer_size - 1)
+            
+            for i in range(history_entries):
+                past_pos = position_history[-(i+2)]
+                rel_pos = current_pos - past_pos
+                additional_obs.extend(rel_pos.flatten())
+                
+            # Fill remaining history slots if needed
+            remaining_slots = (history_buffer_size - 1) - history_entries
+            for _ in range(remaining_slots):
+                additional_obs.extend([0.0, 0.0, 0.0])
+        else:
+            # No history yet, fill with zeros
+            for _ in range(history_buffer_size - 1):
+                additional_obs.extend([0.0, 0.0, 0.0])
+                
+        # Add velocity history
+        vel_entries = min(len(velocity_history), velocity_buffer_size)
+        if vel_entries > 0:
+            additional_obs.extend(velocity_history[-vel_entries:])
+            
+        # Fill remaining velocity slots if needed
+        remaining_vel_slots = velocity_buffer_size - vel_entries
+        if remaining_vel_slots > 0:
+            additional_obs.extend([0.0] * remaining_vel_slots)
+            
+        # Create the complete observation for the model
+        full_obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
+        
+        # Verify shape matches expected dimensions
+        expected_size = 211  # 192 base + 19 additional features
+        if full_obs.shape[0] != expected_size:
+            print(f"WARNING: Observation size mismatch: {full_obs.shape[0]} vs expected {expected_size}")
+            
+        # Get action from model
+        action, _states = model.predict(full_obs, deterministic=True)
         return [action]
+    
     return policy
 
 if __name__ == "__main__":

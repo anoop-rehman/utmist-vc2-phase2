@@ -422,6 +422,8 @@ class RotationPhaseWrapper(DMControlWrapper):
         super().__init__(env)
         # Track initial and current orientation
         self.initial_orientation = None
+        # Add verbose flag for debugging (defaults to False)
+        self.verbose = False
         
     def step(self, action):
         timestep = self.env.step([action])
@@ -434,21 +436,17 @@ class RotationPhaseWrapper(DMControlWrapper):
                 self.position_history.pop(0)
         
         obs = process_observation(timestep)
-        distance = self.get_distance_traveled()
         
         # Calculate orientation alignment reward
         alignment_reward = 0.0
         if 'absolute_root_rot' in timestep.observation[0]:
             root_rot = timestep.observation[0]['absolute_root_rot']
             alignment_reward = self.calculate_alignment_reward(root_rot)
+        else:
+            print("absolute_root_rot not found in timestep.observation[0]!")
         
-        # Calculate control costs
-        ctrl_cost = 0.1 * np.sum(np.square(action))
-        distance_factor = 2.0 / (1.0 + np.exp(-2.0 * distance)) - 1.0
-        stillness_penalty = 0.25 * (1.0 - distance_factor)
-        
-        # Focus on rotation alignment - scale it to make it more significant
-        reward = alignment_reward * 3.0 + 0.5 - ctrl_cost - stillness_penalty
+        # Use alignment reward directly without scaling or penalties
+        reward = alignment_reward
         
         done = timestep.last()
         info = {}

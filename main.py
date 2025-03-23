@@ -30,18 +30,14 @@ def create_policy(model):
     phase = 0.0
     position_history = []
     velocity_history = []
-    orientation_history = []  # Add orientation history
     last_position = None
-    last_orientation = None   # Add last orientation
     start_position = None  # Add start position for displacement calculation
     history_buffer_size = 5
     velocity_buffer_size = 5
-    orientation_buffer_size = 5  # Add orientation buffer size
     dt = 0.025  # Default physics timestep, adjust if needed
     
     def policy(time_step):
-        nonlocal phase, position_history, velocity_history, orientation_history
-        nonlocal last_position, last_orientation, start_position
+        nonlocal phase, position_history, velocity_history, last_position, start_position
         
         # Process base observation
         orig_obs = process_observation(time_step)
@@ -84,43 +80,6 @@ def create_policy(model):
         else:
             forward_velocity = 0.0
             
-        # Track orientation for history
-        if 'absolute_root_rot' in time_step.observation[0]:
-            rot = time_step.observation[0]['absolute_root_rot']
-            
-            # Update orientation history
-            orientation_history.append(rot.copy())
-            if len(orientation_history) > orientation_buffer_size:
-                orientation_history.pop(0)
-                
-            last_orientation = rot.copy()
-            
-            # Calculate orientation alignment (useful for debugging)
-            if len(orientation_history) > 0:
-                w, x, y, z = rot.flatten()
-                # Convert to local z-axis in global coordinates
-                z_axis_x = 2 * (x*z + w*y)
-                z_axis_y = 2 * (y*z - w*x)
-                z_axis_z = 1 - 2 * (x*x + y*y)
-                
-                # Calculate alignment with global x-axis
-                global_x = np.array([1, 0, 0])
-                local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
-                local_z = local_z / (np.linalg.norm(local_z) + 1e-10)  # Avoid division by zero
-                alignment = np.dot(local_z, global_x)
-                
-                # Debug information - print every 20 steps
-                if time_step.step_count % 20 == 0:
-                    print(f"\nOrientation Debug (step {time_step.step_count}):")
-                    print(f"  Quaternion (wxyz): [{w:.3f}, {x:.3f}, {y:.3f}, {z:.3f}]")
-                    print(f"  Local z-axis in global coords: [{z_axis_x:.3f}, {z_axis_y:.3f}, {z_axis_z:.3f}]")
-                    print(f"  Alignment with global x-axis: {alignment:.3f}")
-                    
-                    # If position is available, print it too for context
-                    if 'absolute_root_pos' in time_step.observation[0]:
-                        pos = time_step.observation[0]['absolute_root_pos']
-                        print(f"  Position: [{pos[0][0]:.3f}, {pos[0][1]:.3f}, {pos[0][2]:.3f}]")
-        
         # Add position history (differences from current)
         if len(position_history) > 1:
             current_pos = position_history[-1]
@@ -150,34 +109,13 @@ def create_policy(model):
         if remaining_vel_slots > 0:
             additional_obs.extend([0.0] * remaining_vel_slots)
             
-        # Add orientation alignment (x-axis dot product) if available
-        if len(orientation_history) > 0 and last_orientation is not None:
-            w, x, y, z = last_orientation.flatten()
-            # Convert to local z-axis in global coordinates
-            z_axis_x = 2 * (x*z + w*y)
-            z_axis_y = 2 * (y*z - w*x)
-            z_axis_z = 1 - 2 * (x*x + y*y)
-            
-            # Calculate alignment with global x-axis
-            global_x = np.array([1, 0, 0])
-            local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
-            local_z = local_z / (np.linalg.norm(local_z) + 1e-10)
-            alignment = np.dot(local_z, global_x)
-            
-            # Add alignment score
-            additional_obs.append(alignment)
-        else:
-            # No orientation data yet
-            additional_obs.append(0.0)
-            
         # Create the complete observation for the model
         full_obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
         
         # Verify shape matches expected dimensions
-        expected_size = 212  # 192 base + 19 additional features + 1 alignment feature
+        expected_size = 211  # 192 base + 19 additional features
         if full_obs.shape[0] != expected_size:
             print(f"WARNING: Observation size mismatch: {full_obs.shape[0]} vs expected {expected_size}")
-            print(f"Base observation size: {len(orig_obs)}, Additional features: {len(additional_obs)}")
             
         # Get action from model
         action, _states = model.predict(full_obs, deterministic=True)

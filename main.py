@@ -16,7 +16,7 @@ def create_env(training_phase="combined", view_only=False):
     return create_soccer_env(
         home_players=[home_player],
         away_players=[],
-        time_limit=8.0,
+        time_limit=16.0,
         disable_walker_contacts=True,
         enable_field_box=False,
         keep_aspect_ratio=False,

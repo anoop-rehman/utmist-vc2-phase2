@@ -170,56 +170,96 @@ class DMControlWrapper(gym.Env):
 class WalkingPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the walking phase of training."""
     def __init__(self, env):
+        # Initialize with parent but we'll override the observation space
         super().__init__(env)
         self.last_position = None
         # Get the physics timestep from the environment
         self.dt = env.physics.timestep()
         
-    def step(self, action):
-        timestep = self.env.step([action])
+        # Initialize phase variable for cyclic movement tracking
+        self.phase = 0.0
         
-        # Track position for distance calculation
-        if 'absolute_root_pos' in timestep.observation[0]:
-            pos = timestep.observation[0]['absolute_root_pos']
-            self.position_history.append(pos)
-            if len(self.position_history) > self.window_size:
-                self.position_history.pop(0)
-            
-            # Calculate forward velocity from position change
-            if self.last_position is not None:
-                # Calculate velocity as change in position over time using actual timestep
-                forward_velocity = (pos[0][0] - self.last_position[0][0]) / self.dt  # x-axis velocity
-            else:
-                forward_velocity = 0.0
-            self.last_position = pos
+        # History buffer to store previous positions
+        self.position_history = []
+        self.history_buffer_size = 5  # Store last 5 positions
         
-        obs = process_observation(timestep)
-        distance = self.get_distance_traveled()
+        # To calculate velocity averages
+        self.velocity_history = []
+        self.velocity_buffer_size = 5
         
-        # Reward is based on forward velocity and control cost
-        ctrl_cost = 0.1 * np.sum(np.square(action))
-        distance_factor = 2.0 / (1.0 + np.exp(-2.0 * distance)) - 1.0
-        stillness_penalty = 0.25 * (1.0 - distance_factor)
+        # Calculate additional observation size
+        # 2 phase variables (sin, cos)
+        self.phase_size = 2
+        # Position history: (history_buffer_size-1) positions × 3 dimensions per position
+        self.pos_history_size = (self.history_buffer_size - 1) * 3  
+        # Velocity history: velocity_buffer_size values
+        self.vel_history_size = self.velocity_buffer_size
         
-        # Focus on forward movement
-        reward = forward_velocity + 1.0 - ctrl_cost - stillness_penalty
+        # Total additional size
+        self.additional_obs_size = self.phase_size + self.pos_history_size + self.vel_history_size
         
-        done = timestep.last()
-        info = {}
-
-        self.reward = reward
-        self.last_vel_to_ball = forward_velocity  # Store for logging
-        return obs, reward, done, info
+        # Redefine observation space to include our additional features
+        # First get a sample observation from parent
+        timestep = env.reset()
+        self.base_obs = process_observation(timestep)
+        self.base_obs_size = self.base_obs.shape[0]
         
+        # Define new observation space with extended size
+        self.observation_space = spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(self.base_obs_size + self.additional_obs_size,),
+            dtype=np.float32
+        )
+        
+        print(f"Observation space shape: {self.observation_space.shape}")
+        print(f"Base observation size: {self.base_obs_size}")
+        print(f"Additional features size: {self.additional_obs_size}")
+        print(f"Total expected size: {self.base_obs_size + self.additional_obs_size}")
+    
     def reset(self):
         timestep = self.env.reset()
-        obs = process_observation(timestep)
         
-        # Clear position history and last position
+        # Reset phase
+        self.phase = 0.0
+        phase_sin = np.sin(2 * np.pi * self.phase)
+        phase_cos = np.cos(2 * np.pi * self.phase)
+        
+        # Get initial observation
+        orig_obs = process_observation(timestep)
+        
+        # Clear histories
         self.position_history = []
+        self.velocity_history = []
         self.last_position = None
+        
+        # Create initial observation with phase variables
+        additional_obs = []
+        
+        # Add phase variables
+        additional_obs.extend([phase_sin, phase_cos])
+        
+        # Add empty position history placeholders - exactly (history_buffer_size-1) positions × 3 values
+        for _ in range(self.history_buffer_size - 1):
+            additional_obs.extend([0.0, 0.0, 0.0])  # x, y, z placeholders
+        
+        # Add empty velocity history
+        additional_obs.extend([0.0] * self.velocity_buffer_size)
+        
+        # Initialize position history and last_position if available
         if 'absolute_root_pos' in timestep.observation[0]:
-            self.last_position = timestep.observation[0]['absolute_root_pos']
+            pos = timestep.observation[0]['absolute_root_pos']
+            self.last_position = pos.copy()
+            self.position_history.append(pos.copy())
+        
+        # Combine original observation with additional features
+        obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
+        
+        # Verify shape
+        if obs.shape[0] != self.observation_space.shape[0]:
+            print(f"WARNING: Observation shape mismatch: {obs.shape} vs expected {self.observation_space.shape}")
+            print(f"Original observation shape: {orig_obs.shape}")
+            print(f"Additional observation shape: {len(additional_obs)}")
         
         # Initialize last_vel_to_ball as 0 for the first step
         self.last_vel_to_ball = 0.0
@@ -231,6 +271,104 @@ class WalkingPhaseWrapper(DMControlWrapper):
             print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
         
         return obs
+        
+    def step(self, action):
+        timestep = self.env.step([action])
+        
+        # Update phase variable
+        self.phase = (self.phase + self.dt) % 1.0
+        phase_sin = np.sin(2 * np.pi * self.phase)
+        phase_cos = np.cos(2 * np.pi * self.phase)
+        
+        # Track position for distance calculation
+        if 'absolute_root_pos' in timestep.observation[0]:
+            pos = timestep.observation[0]['absolute_root_pos']
+            
+            # Update position history
+            self.position_history.append(pos.copy())
+            if len(self.position_history) > self.history_buffer_size:
+                self.position_history.pop(0)
+            
+            # Calculate forward velocity from position change
+            if self.last_position is not None:
+                # Calculate velocity as change in position over time using actual timestep
+                forward_velocity = (pos[0][0] - self.last_position[0][0]) / self.dt  # x-axis velocity
+                
+                # Update velocity history
+                self.velocity_history.append(forward_velocity)
+                if len(self.velocity_history) > self.velocity_buffer_size:
+                    self.velocity_history.pop(0)
+            else:
+                forward_velocity = 0.0
+            self.last_position = pos.copy()
+        else:
+            forward_velocity = 0.0
+        
+        # Process the original observation
+        orig_obs = process_observation(timestep)
+        
+        # Create additional observation components
+        additional_obs = []
+        
+        # Add phase variables
+        additional_obs.extend([phase_sin, phase_cos])
+        
+        # Add position history (differences from current) - (history_buffer_size-1) × 3 values
+        if len(self.position_history) > 1:
+            current_pos = self.position_history[-1]
+            history_entries = min(len(self.position_history) - 1, self.history_buffer_size - 1)
+            
+            for i in range(history_entries):
+                past_pos = self.position_history[-(i+2)]  # Go backwards from second-to-last
+                # Calculate relative position (flattened)
+                rel_pos = current_pos - past_pos
+                additional_obs.extend(rel_pos.flatten())
+                
+            # Fill remaining history slots if needed
+            remaining_slots = (self.history_buffer_size - 1) - history_entries
+            for _ in range(remaining_slots):
+                additional_obs.extend([0.0, 0.0, 0.0])  # x, y, z placeholders
+        else:
+            # No history yet, fill with zeros
+            for _ in range(self.history_buffer_size - 1):
+                additional_obs.extend([0.0, 0.0, 0.0])
+        
+        # Add velocity history
+        vel_entries = min(len(self.velocity_history), self.velocity_buffer_size)
+        if vel_entries > 0:
+            additional_obs.extend(self.velocity_history[-vel_entries:])
+            
+        # Fill remaining velocity slots if needed
+        remaining_vel_slots = self.velocity_buffer_size - vel_entries
+        if remaining_vel_slots > 0:
+            additional_obs.extend([0.0] * remaining_vel_slots)
+        
+        # Verify and ensure consistent observation size
+        if len(additional_obs) != self.additional_obs_size:
+            print(f"WARNING: Additional obs size mismatch: {len(additional_obs)} vs expected {self.additional_obs_size}")
+            # Ensure correct size by truncating or padding
+            if len(additional_obs) > self.additional_obs_size:
+                additional_obs = additional_obs[:self.additional_obs_size]
+            else:
+                additional_obs.extend([0.0] * (self.additional_obs_size - len(additional_obs)))
+        
+        # Combine original observation with additional features
+        obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
+        
+        # Simple reward based primarily on forward distance traveled
+        # Calculate average velocity for smoother reward
+        avg_velocity = np.mean(self.velocity_history) if self.velocity_history else forward_velocity
+        
+        # Pure distance-based reward with minimal control penalty
+        ctrl_cost = 0.05 * np.sum(np.square(action))  # Reduced control cost
+        reward = avg_velocity + 0.5 - ctrl_cost  # Simple baseline reward
+        
+        done = timestep.last()
+        info = {}
+
+        self.reward = reward
+        self.last_vel_to_ball = forward_velocity  # Store for logging
+        return obs, reward, done, info
 
 class RotationPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the rotation phase of training."""

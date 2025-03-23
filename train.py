@@ -11,6 +11,21 @@ from datetime import datetime
 from model_card_generator import generate_model_card
 import pytz
 
+# Add quaternion utility function
+def quaternion_to_forward_vector(quaternion):
+    """Convert a quaternion to a forward vector (x-axis in local coordinates)."""
+    # Extract quaternion components
+    w, x, y, z = quaternion.flatten()
+    
+    # Forward vector is the x-axis (1,0,0) rotated by the quaternion
+    forward_x = 1 - 2 * (y*y + z*z)
+    forward_y = 2 * (x*y + w*z)
+    forward_z = 2 * (x*z - w*y)
+    
+    # Return normalized vector
+    forward = np.array([forward_x, forward_y, forward_z])
+    return forward / np.linalg.norm(forward)
+
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
@@ -283,9 +298,29 @@ class WalkingPhaseWrapper(DMControlWrapper):
         phase_sin = np.sin(2 * np.pi * self.phase)
         phase_cos = np.cos(2 * np.pi * self.phase)
         
+        # Local variables to track forward movement
+        forward_displacement = 0.0
+        
         # Track position for distance calculation
         if 'absolute_root_pos' in timestep.observation[0]:
             pos = timestep.observation[0]['absolute_root_pos']
+            
+            # Get orientation quaternion
+            if 'absolute_root_rot' in timestep.observation[0]:
+                rot = timestep.observation[0]['absolute_root_rot']
+                
+                # Convert to forward direction vector
+                forward_vec = quaternion_to_forward_vector(rot)
+                
+                # If we have a starting position, calculate displacement along forward direction
+                if self.start_position is not None:
+                    # Calculate displacement vector (global coordinates)
+                    displacement_vec = pos - self.start_position
+                    
+                    # Project displacement onto creature's forward direction
+                    forward_displacement = np.dot(displacement_vec.flatten(), forward_vec)
+                else:
+                    self.start_position = pos.copy()
             
             # Update position history
             self.position_history.append(pos.copy())
@@ -305,16 +340,17 @@ class WalkingPhaseWrapper(DMControlWrapper):
                 forward_velocity = 0.0
             self.last_position = pos.copy()
 
-            # Calculate displacement from origin (for reward)
-            if self.start_position is not None:
-                # Direct displacement along x-axis only (forward movement)
-                displacement = pos[0][0] - self.start_position[0][0]
-            else:
-                displacement = 0.0
-                self.start_position = pos.copy()
+            # If orientation not available, fallback to global displacement
+            if 'absolute_root_rot' not in timestep.observation[0]:
+                # Calculate displacement from origin
+                if self.start_position is not None:
+                    displacement_vec = pos - self.start_position
+                    forward_displacement = np.linalg.norm(displacement_vec)
+                else:
+                    self.start_position = pos.copy()
         else:
             forward_velocity = 0.0
-            displacement = 0.0
+            forward_displacement = 0.0
         
         # Process the original observation
         orig_obs = process_observation(timestep)
@@ -367,9 +403,11 @@ class WalkingPhaseWrapper(DMControlWrapper):
         # Combine original observation with additional features
         obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
         
-        # Simple reward based on displacement from origin with minimal control penalty
+        # Scale up forward displacement reward with minimal control penalty
         ctrl_cost = 0.05 * np.sum(np.square(action))  # Reduced control cost
-        reward = displacement + 0.5 - ctrl_cost  # Baseline reward + displacement - control cost
+        
+        # Increase reward magnitude for forward movement
+        reward = forward_displacement * 2.0 + 0.5 - ctrl_cost
         
         done = timestep.last()
         info = {}
@@ -382,6 +420,8 @@ class RotationPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the rotation phase of training."""
     def __init__(self, env):
         super().__init__(env)
+        # Track initial and current orientation
+        self.initial_orientation = None
         
     def step(self, action):
         timestep = self.env.step([action])
@@ -396,26 +436,54 @@ class RotationPhaseWrapper(DMControlWrapper):
         obs = process_observation(timestep)
         distance = self.get_distance_traveled()
         
-        # Get rotation alignment with ball
-        ball_pos = timestep.observation[0]['ball_ego_position']
-        # Ensure ball_pos is a 3D vector
-        ball_pos = ball_pos.reshape(-1)  # Flatten to 1D array
-        rotation_alignment = -abs(np.arctan2(ball_pos[1], ball_pos[0]))  # Negative arctan to reward facing the ball
+        # Calculate orientation alignment reward
+        alignment_reward = 0.0
+        if 'absolute_root_rot' in timestep.observation[0]:
+            root_rot = timestep.observation[0]['absolute_root_rot']
+            alignment_reward = self.calculate_alignment_reward(root_rot)
         
         # Calculate control costs
         ctrl_cost = 0.1 * np.sum(np.square(action))
         distance_factor = 2.0 / (1.0 + np.exp(-2.0 * distance)) - 1.0
         stillness_penalty = 0.25 * (1.0 - distance_factor)
         
-        # Focus on rotation alignment
-        reward = rotation_alignment + 1.0 - ctrl_cost - stillness_penalty
+        # Focus on rotation alignment - scale it to make it more significant
+        reward = alignment_reward * 3.0 + 0.5 - ctrl_cost - stillness_penalty
         
         done = timestep.last()
         info = {}
 
         self.reward = reward
-        self.last_vel_to_ball = rotation_alignment  # Store for logging
+        self.last_vel_to_ball = alignment_reward  # Store for logging
         return obs, reward, done, info
+    
+    def calculate_alignment_reward(self, root_rot):
+        """Calculate reward based on aligning local z-axis with global x-axis."""
+        # Convert quaternion to get how the local z-axis (0,0,1) is oriented in global coordinates
+        w, x, y, z = root_rot.flatten()
+        
+        # Calculate how the local z-axis (0,0,1) is oriented in global coordinates
+        z_axis_x = 2 * (x*z + w*y)
+        z_axis_y = 2 * (y*z - w*x)
+        z_axis_z = 1 - 2 * (x*x + y*y)
+        
+        local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
+        local_z = local_z / np.linalg.norm(local_z)  # Normalize
+        
+        # Global x-axis is (1,0,0)
+        global_x = np.array([1, 0, 0])
+        
+        # Dot product measures alignment (-1 to 1)
+        alignment = np.dot(local_z, global_x)
+        
+        # Transform to 0-2 range, with 2 being perfect alignment
+        reward = alignment + 1
+        
+        # Print alignment in verbose mode for debugging
+        if self.verbose:
+            print(f"Local z: {local_z}, Alignment: {alignment:.4f}, Reward: {reward:.4f}")
+        
+        return reward
         
     def reset(self):
         timestep = self.env.reset()
@@ -424,13 +492,14 @@ class RotationPhaseWrapper(DMControlWrapper):
         # Clear position history
         self.position_history = []
         
-        # Initialize rotation alignment using ball position
-        if 'ball_ego_position' in timestep.observation[0]:
-            ball_pos = timestep.observation[0]['ball_ego_position']
-            # Ensure ball_pos is a 3D vector
-            ball_pos = ball_pos.reshape(-1)  # Flatten to 1D array
-            self.last_vel_to_ball = -abs(np.arctan2(ball_pos[1], ball_pos[0]))
+        # Store initial orientation
+        if 'absolute_root_rot' in timestep.observation[0]:
+            self.initial_orientation = timestep.observation[0]['absolute_root_rot'].copy()
+            # Calculate and log initial alignment
+            initial_alignment = self.calculate_alignment_reward(self.initial_orientation)
+            self.last_vel_to_ball = initial_alignment
         else:
+            self.initial_orientation = None
             self.last_vel_to_ball = 0.0
         
         # Print episode start info
@@ -438,8 +507,8 @@ class RotationPhaseWrapper(DMControlWrapper):
         print(f"\nEpisode {self.episode_count} started:")
         if 'absolute_root_pos' in timestep.observation[0]:
             print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
-        if 'ball_ego_position' in timestep.observation[0]:
-            print(f"  Ball position (ego): {timestep.observation[0]['ball_ego_position']}")
+        if 'absolute_root_rot' in timestep.observation[0]:
+            print(f"  Initial alignment reward: {self.last_vel_to_ball:.4f}")
         
         return obs
 

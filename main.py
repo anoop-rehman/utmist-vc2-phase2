@@ -1,7 +1,7 @@
 from custom_soccer_env import create_soccer_env
 from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED
 from creature import Creature
-from train import train_creature, DMControlWrapper, process_observation, calculate_reward, setup_env, default_hyperparameters
+from train import train_creature, DMControlWrapper, process_observation, calculate_reward, setup_env, default_hyperparameters, TensorboardCallback
 from dm_control import viewer
 import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -9,36 +9,6 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 import os
 import argparse
-
-# Add this new callback class for real-time plotting
-class TensorboardCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super().__init__(verbose)
-        self.episode_rewards = []
-        self.episode_velocities = []
-        
-    def _on_step(self):
-        # Get current reward and velocity
-        reward = self.training_env.get_attr('reward')[0]
-        vel_to_ball = self.training_env.get_attr('env')[0].last_vel_to_ball if hasattr(self.training_env.get_attr('env')[0], 'last_vel_to_ball') else 0
-        
-        # Log raw step metrics
-        self.logger.record('train/raw_reward', reward)
-        self.logger.record('train/raw_velocity_to_ball', vel_to_ball)
-        
-        # Track episode metrics
-        if self.locals.get('done'):
-            self.episode_rewards.append(reward)
-            self.episode_velocities.append(vel_to_ball)
-            
-            # Log smoothed episode metrics
-            if len(self.episode_rewards) > 0:
-                self.logger.record('train/episode_reward_mean', np.mean(self.episode_rewards[-100:]))
-                self.logger.record('train/episode_reward_max', np.max(self.episode_rewards[-100:]))
-                self.logger.record('train/episode_reward_min', np.min(self.episode_rewards[-100:]))
-                self.logger.record('train/episode_velocity_mean', np.mean(self.episode_velocities[-100:]))
-        
-        return True
 
 def create_env(training_phase="combined", view_only=False):
     """Create the environment for training or viewing."""

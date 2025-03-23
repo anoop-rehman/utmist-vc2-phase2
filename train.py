@@ -324,8 +324,9 @@ class TensorboardCallback(BaseCallback):
         reward = env.reward
         vel_to_ball = env.last_vel_to_ball
         
-        # Get current environment steps
-        env_steps = self.start_timesteps + self.num_timesteps
+        # Get current environment steps - but use ONLY num_timesteps for TensorBoard logging
+        # This is what fixes the gap issue
+        env_steps = self.num_timesteps
         
         # Log step-level metrics
         self.logger.record('train/reward', reward)
@@ -375,7 +376,7 @@ class TensorboardCallback(BaseCallback):
                         self.logger.record('train/value_loss', self.model.value_loss)
         
         # Make sure to dump all metrics to tensorboard
-        self.logger.dump(env_steps)
+        self.logger.dump(self.num_timesteps)
         return True
 
 class CheckpointCallback(BaseCallback):
@@ -506,7 +507,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         total_timesteps=total_timesteps,
         callback=callbacks,
         tb_log_name=os.path.basename(save_dir),
-        reset_num_timesteps=False
+        reset_num_timesteps=False  # Continue timesteps from previous run
     )
     
     # Save final model with environment steps in filename

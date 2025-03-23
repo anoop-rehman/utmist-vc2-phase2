@@ -9,6 +9,7 @@ from gym import spaces
 import os
 from datetime import datetime
 from model_card_generator import generate_model_card
+import pytz
 
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
@@ -46,9 +47,10 @@ def create_ppo_model(vec_env, tensorboard_log, load_path=None):
     )
 
 def get_default_folder():
-    """Generate a default folder name using datetime."""
-    now = datetime.now()
-    return now.strftime("%Y%m%d__%I_%M_%S%p").lower()
+    """Generate a default folder name using datetime in EST timezone."""
+    eastern_tz = pytz.timezone('US/Eastern')
+    now = datetime.now(tz=eastern_tz)
+    return now.strftime("%Y%m%d__%p_%I_%M_%S").lower()
 
 def process_observation(timestep):
     """Convert DM Control observation to the format expected by the model."""

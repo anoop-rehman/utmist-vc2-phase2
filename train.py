@@ -468,11 +468,8 @@ class RotationPhaseWrapper(DMControlWrapper):
         local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
         local_z = local_z / np.linalg.norm(local_z)  # Normalize
         
-        # Global x-axis is (1,0,0)
-        global_x = np.array([1, 0, 0])
-        
-        # Dot product measures alignment (-1 to 1)
-        alignment = np.dot(local_z, global_x)
+        # Alignment is simply the x-component of local_z since global_x is (1,0,0)
+        alignment = local_z[0]
         
         # Transform to 0-2 range, with 2 being perfect alignment
         reward = alignment + 1

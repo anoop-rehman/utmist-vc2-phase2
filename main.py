@@ -16,14 +16,14 @@ def create_env(training_phase="combined", view_only=False):
     return create_soccer_env(
         home_players=[home_player],
         away_players=[],
-        time_limit=16.0,
+        time_limit=24.0,
         disable_walker_contacts=True,
         enable_field_box=False,
         keep_aspect_ratio=False,
         terminate_on_goal=False
     )
 
-def create_policy(model):
+def create_policy(model, training_phase="combined"):
     """Create a policy function for the viewer."""
     
     # Track state for phase and history
@@ -36,87 +36,120 @@ def create_policy(model):
     velocity_buffer_size = 5
     dt = 0.025  # Default physics timestep, adjust if needed
     
+    # Frame counter for limiting debug output frequency
+    frame_counter = 0
+    
     def policy(time_step):
-        nonlocal phase, position_history, velocity_history, last_position, start_position
+        nonlocal phase, position_history, velocity_history, last_position, start_position, frame_counter
         
         # Process base observation
         orig_obs = process_observation(time_step)
         
-        # Update phase variable
-        phase = (phase + dt) % 1.0
-        phase_sin = np.sin(2 * np.pi * phase)
-        phase_cos = np.cos(2 * np.pi * phase)
-        
-        # Process position history
-        additional_obs = []
-        
-        # Add phase variables
-        additional_obs.extend([phase_sin, phase_cos])
-        
-        # Track position for history
-        if 'absolute_root_pos' in time_step.observation[0]:
-            pos = time_step.observation[0]['absolute_root_pos']
-            
-            # Initialize start position if needed
-            if start_position is None:
-                start_position = pos.copy()
-            
-            # Update position history
-            position_history.append(pos.copy())
-            if len(position_history) > history_buffer_size:
-                position_history.pop(0)
-            
-            # Calculate forward velocity from position change
-            if last_position is not None:
-                forward_velocity = (pos[0][0] - last_position[0][0]) / dt
+        # Display rotation alignment information when in rotation phase
+        if training_phase == "rotation" and 'absolute_root_rot' in time_step.observation[0]:
+            frame_counter += 1
+            # Only display every 10 frames to avoid console spam
+            if frame_counter % 10 == 0:
+                root_rot = time_step.observation[0]['absolute_root_rot']
                 
-                # Update velocity history
-                velocity_history.append(forward_velocity)
-                if len(velocity_history) > velocity_buffer_size:
-                    velocity_history.pop(0)
+                # Calculate how the local z-axis (0,0,1) is oriented in global coordinates
+                w, x, y, z = root_rot.flatten()
+                z_axis_x = 2 * (x*z + w*y)
+                z_axis_y = 2 * (y*z - w*x)
+                z_axis_z = 1 - 2 * (x*x + y*y)
+                
+                local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
+                local_z = local_z / np.linalg.norm(local_z)  # Normalize
+                
+                # Alignment is simply the x-component of local_z since global_x is (1,0,0)
+                alignment = local_z[0]
+                
+                # Calculate reward (same as in RotationPhaseWrapper)
+                reward = alignment + 1
+                
+                print(f"Root z-axis: [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
+                      f"Alignment with x: {alignment:.3f}, Reward: {reward:.3f}")
+        
+        # Only add the additional observation components for walking phase
+        if training_phase == "walking":
+            # Update phase variable
+            phase = (phase + dt) % 1.0
+            phase_sin = np.sin(2 * np.pi * phase)
+            phase_cos = np.cos(2 * np.pi * phase)
+            
+            # Process position history
+            additional_obs = []
+            
+            # Add phase variables
+            additional_obs.extend([phase_sin, phase_cos])
+            
+            # Track position for history
+            if 'absolute_root_pos' in time_step.observation[0]:
+                pos = time_step.observation[0]['absolute_root_pos']
+                
+                # Initialize start position if needed
+                if start_position is None:
+                    start_position = pos.copy()
+                
+                # Update position history
+                position_history.append(pos.copy())
+                if len(position_history) > history_buffer_size:
+                    position_history.pop(0)
+                
+                # Calculate forward velocity from position change
+                if last_position is not None:
+                    forward_velocity = (pos[0][0] - last_position[0][0]) / dt
+                    
+                    # Update velocity history
+                    velocity_history.append(forward_velocity)
+                    if len(velocity_history) > velocity_buffer_size:
+                        velocity_history.pop(0)
+                else:
+                    forward_velocity = 0.0
+                last_position = pos.copy()
             else:
                 forward_velocity = 0.0
-            last_position = pos.copy()
-        else:
-            forward_velocity = 0.0
-            
-        # Add position history (differences from current)
-        if len(position_history) > 1:
-            current_pos = position_history[-1]
-            history_entries = min(len(position_history) - 1, history_buffer_size - 1)
-            
-            for i in range(history_entries):
-                past_pos = position_history[-(i+2)]
-                rel_pos = current_pos - past_pos
-                additional_obs.extend(rel_pos.flatten())
                 
-            # Fill remaining history slots if needed
-            remaining_slots = (history_buffer_size - 1) - history_entries
-            for _ in range(remaining_slots):
-                additional_obs.extend([0.0, 0.0, 0.0])
-        else:
-            # No history yet, fill with zeros
-            for _ in range(history_buffer_size - 1):
-                additional_obs.extend([0.0, 0.0, 0.0])
+            # Add position history (differences from current)
+            if len(position_history) > 1:
+                current_pos = position_history[-1]
+                history_entries = min(len(position_history) - 1, history_buffer_size - 1)
                 
-        # Add velocity history
-        vel_entries = min(len(velocity_history), velocity_buffer_size)
-        if vel_entries > 0:
-            additional_obs.extend(velocity_history[-vel_entries:])
+                for i in range(history_entries):
+                    past_pos = position_history[-(i+2)]
+                    rel_pos = current_pos - past_pos
+                    additional_obs.extend(rel_pos.flatten())
+                    
+                # Fill remaining history slots if needed
+                remaining_slots = (history_buffer_size - 1) - history_entries
+                for _ in range(remaining_slots):
+                    additional_obs.extend([0.0, 0.0, 0.0])
+            else:
+                # No history yet, fill with zeros
+                for _ in range(history_buffer_size - 1):
+                    additional_obs.extend([0.0, 0.0, 0.0])
+                    
+            # Add velocity history
+            vel_entries = min(len(velocity_history), velocity_buffer_size)
+            if vel_entries > 0:
+                additional_obs.extend(velocity_history[-vel_entries:])
+                
+            # Fill remaining velocity slots if needed
+            remaining_vel_slots = velocity_buffer_size - vel_entries
+            if remaining_vel_slots > 0:
+                additional_obs.extend([0.0] * remaining_vel_slots)
+                
+            # Create the complete observation for the model
+            full_obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
             
-        # Fill remaining velocity slots if needed
-        remaining_vel_slots = velocity_buffer_size - vel_entries
-        if remaining_vel_slots > 0:
-            additional_obs.extend([0.0] * remaining_vel_slots)
-            
-        # Create the complete observation for the model
-        full_obs = np.concatenate([orig_obs, np.array(additional_obs, dtype=np.float32)])
-        
-        # Verify shape matches expected dimensions
-        expected_size = 211  # 192 base + 19 additional features
-        if full_obs.shape[0] != expected_size:
-            print(f"WARNING: Observation size mismatch: {full_obs.shape[0]} vs expected {expected_size}")
-            
+            # Verify shape matches expected dimensions
+            expected_size = 211  # 192 base + 19 additional features
+            if full_obs.shape[0] != expected_size:
+                print(f"WARNING: Observation size mismatch: {full_obs.shape[0]} vs expected {expected_size}")
+        else:
+            # For rotation phase or combined phase, just use the original observation
+            full_obs = orig_obs
+                
         # Get action from model
         action, _states = model.predict(full_obs, deterministic=True)
         return [action]
@@ -149,7 +182,7 @@ if __name__ == "__main__":
         model = PPO.load(args.load_model, env=vec_env)
         print("Launching viewer...")
         # Always launch viewer in view-only mode
-        viewer.launch(env, policy=create_policy(model))
+        viewer.launch(env, policy=create_policy(model, args.training_phase))
     else:
         # Convert n_updates to timesteps using n_steps from hyperparameters
         timesteps = args.n_updates * default_hyperparameters["n_steps"]
@@ -172,6 +205,6 @@ if __name__ == "__main__":
         # Launch viewer after training if enabled
         if args.enable_viewer:
             print("\nLaunching viewer with trained model...")
-            viewer.launch(env, policy=create_policy(model))
+            viewer.launch(env, policy=create_policy(model, args.training_phase))
         else:
             print("\nViewer disabled. Run with --enable-viewer to launch the viewer after training.")

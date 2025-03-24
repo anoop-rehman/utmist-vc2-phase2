@@ -64,8 +64,8 @@ def create_policy(model, training_phase="combined"):
                 # Alignment is simply the x-component of local_z since global_x is (1,0,0)
                 alignment = local_z[0]
                 
-                # Calculate reward (same as in RotationPhaseWrapper)
-                reward = alignment + 1
+                # Use raw alignment value (-1 to 1) to match RotationPhaseWrapper
+                reward = alignment
                 
                 print(f"Root z-axis: [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
                       f"Alignment with x: {alignment:.3f}, Reward: {reward:.3f}")

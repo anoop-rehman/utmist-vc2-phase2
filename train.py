@@ -422,15 +422,17 @@ class RotationPhaseWrapper(DMControlWrapper):
         super().__init__(env)
         # Track initial and current orientation
         self.initial_orientation = None
-        # Add verbose flag for debugging (defaults to False)
-        self.verbose = False
+        # Enable verbose mode for debugging
+        self.verbose = True
         
     def step(self, action):
         timestep = self.env.step([action])
         
         # Track position for distance calculation
+        current_pos = None
         if 'absolute_root_pos' in timestep.observation[0]:
             pos = timestep.observation[0]['absolute_root_pos']
+            current_pos = pos.copy()
             self.position_history.append(pos)
             if len(self.position_history) > self.window_size:
                 self.position_history.pop(0)
@@ -445,14 +447,33 @@ class RotationPhaseWrapper(DMControlWrapper):
         else:
             print("absolute_root_rot not found in timestep.observation[0]!")
         
-        # Use alignment reward directly without scaling or penalties
-        reward = alignment_reward
+        # Calculate stillness penalty
+        stillness_penalty = 0.0
+        if len(self.position_history) >= 2 and current_pos is not None:
+            # Calculate speed as distance moved in the last step divided by timestep
+            last_pos = self.position_history[-2]
+            delta_pos = np.linalg.norm(current_pos - last_pos)
+            dt = self.env.physics.timestep()
+            speed = delta_pos / dt
+            
+            # Apply penalty if speed is below threshold
+            speed_threshold = 0.1  # Minimum desired speed
+            if speed < speed_threshold:
+                # Penalty increases as speed approaches zero
+                stillness_factor = (speed_threshold - speed) / speed_threshold
+                stillness_penalty = 0.5 * stillness_factor  # Max penalty of 0.5
+                
+            if self.verbose and self.episode_count % 10 == 0:
+                print(f"Speed: {speed:.4f}, Stillness Penalty: {stillness_penalty:.4f}")
+        
+        # Combine alignment reward with stillness penalty
+        reward = alignment_reward - stillness_penalty
         
         done = timestep.last()
         info = {}
 
         self.reward = reward
-        self.last_vel_to_ball = alignment_reward  # Store for logging
+        self.last_vel_to_ball = alignment_reward  # Store raw alignment for logging
         return obs, reward, done, info
     
     def calculate_alignment_reward(self, root_rot):
@@ -469,16 +490,14 @@ class RotationPhaseWrapper(DMControlWrapper):
         local_z = local_z / np.linalg.norm(local_z)  # Normalize
         
         # Alignment is simply the x-component of local_z since global_x is (1,0,0)
+        # Using raw alignment with range from -1 to 1
         alignment = local_z[0]
-        
-        # Transform to 0-2 range, with 2 being perfect alignment
-        reward = alignment + 1
         
         # Print alignment in verbose mode for debugging
         if self.verbose:
-            print(f"Local z: {local_z}, Alignment: {alignment:.4f}, Reward: {reward:.4f}")
+            print(f"Local z: {local_z}, Alignment: {alignment:.4f}, Reward: {alignment:.4f}")
         
-        return reward
+        return alignment
         
     def reset(self):
         timestep = self.env.reset()
@@ -486,6 +505,41 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         # Clear position history
         self.position_history = []
+        
+        # Randomize the creature's orientation by applying a random rotation
+        # This is done via the internal physics engine
+        if hasattr(self.env, 'physics'):
+            try:
+                # Try to get the root body of the creature
+                # In DM Control soccer environment, the creature is the first walker
+                if hasattr(self.env, '_task') and hasattr(self.env._task, 'players'):
+                    # Access the first player's root body
+                    player = self.env._task.players[0]
+                    root_body = self.env.physics.bind(player.walker.root_body)
+                    
+                    # Generate a random quaternion for orientation
+                    # Method: Generate random rotation axis and angle
+                    axis = np.random.randn(3)
+                    axis = axis / np.linalg.norm(axis)  # Normalize to unit vector
+                    angle = np.random.uniform(0, 2 * np.pi)  # Random angle between 0 and 2π
+                    
+                    # Convert to quaternion (w,x,y,z format)
+                    quat = np.zeros(4)
+                    quat[0] = np.cos(angle/2)  # w component
+                    quat[1:] = axis * np.sin(angle/2)  # x,y,z components
+                    
+                    # Apply the rotation to the root body
+                    root_body.xquat = quat
+                    
+                    # Run a single physics step to apply the changes
+                    self.env.physics.step()
+                    
+                    if self.verbose:
+                        print(f"Applied random rotation: axis={axis}, angle={angle:.2f} rad")
+                else:
+                    print("Warning: Could not access creature's body for orientation randomization")
+            except Exception as e:
+                print(f"Error randomizing orientation: {e}")
         
         # Store initial orientation
         if 'absolute_root_rot' in timestep.observation[0]:
@@ -504,6 +558,15 @@ class RotationPhaseWrapper(DMControlWrapper):
             print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
         if 'absolute_root_rot' in timestep.observation[0]:
             print(f"  Initial alignment reward: {self.last_vel_to_ball:.4f}")
+        
+        # We need to re-process the observation after applying the random rotation
+        if hasattr(self.env, 'physics') and hasattr(self.env, '_task') and hasattr(self.env._task, 'players'):
+            try:
+                # Get fresh observation after randomization
+                timestep = self.env.physics.get_state()
+                obs = process_observation(timestep)
+            except Exception as e:
+                print(f"Error getting fresh observation: {e}")
         
         return obs
 
@@ -524,9 +587,21 @@ class TensorboardCallback(BaseCallback):
     def __init__(self, start_timesteps=0, verbose=0):
         super().__init__(verbose)
         self.start_timesteps = start_timesteps
+        
+        # For tracking complete episodes
         self.episode_rewards = []
         self.episode_velocities = []
+        
+        # For tracking current episode
+        self.current_episode_rewards = []
+        self.current_episode_velocities = []
+        self.episode_count = 0
         self.last_obs = None
+        
+    def _on_training_start(self):
+        # Initialize episode tracking
+        self.current_episode_rewards = []
+        self.current_episode_velocities = []
         
     def _on_step(self):
         # Get current reward and velocity from the wrapped environment
@@ -534,8 +609,11 @@ class TensorboardCallback(BaseCallback):
         reward = env.reward
         vel_to_ball = env.last_vel_to_ball
         
-        # Get current environment steps - but use ONLY num_timesteps for TensorBoard logging
-        # This is what fixes the gap issue
+        # Track current episode stats
+        self.current_episode_rewards.append(reward)
+        self.current_episode_velocities.append(vel_to_ball)
+        
+        # Get current environment steps
         env_steps = self.num_timesteps
         
         # Log step-level metrics
@@ -547,43 +625,60 @@ class TensorboardCallback(BaseCallback):
             for key, value in self.model.logger.name_to_value.items():
                 self.logger.record(key, value)
         
-        # Track episode metrics
+        # Handle episode completion
         if self.locals.get('done'):
-            self.episode_rewards.append(reward)
-            self.episode_velocities.append(vel_to_ball)
+            self.episode_count += 1
             
-            # Calculate episode statistics
-            if len(self.episode_rewards) > 0:
-                recent_rewards = self.episode_rewards[-100:]  # Last 100 episodes
-                recent_velocities = self.episode_velocities[-100:]
-                
-                # Log episode metrics
-                self.logger.record('train/episode_reward_mean', np.mean(recent_rewards))
-                self.logger.record('train/episode_reward_min', np.min(recent_rewards))
-                self.logger.record('train/episode_reward_max', np.max(recent_rewards))
-                self.logger.record('train/episode_velocity_mean', np.mean(recent_velocities))
-                self.logger.record('train/episode_length', self.n_calls)
-                
-                # Log policy metrics if available
+            # Calculate statistics for this episode
+            episode_reward_sum = sum(self.current_episode_rewards)
+            episode_reward_mean = np.mean(self.current_episode_rewards)
+            episode_reward_min = np.min(self.current_episode_rewards)
+            episode_reward_max = np.max(self.current_episode_rewards)
+            episode_velocity_mean = np.mean(self.current_episode_velocities)
+            
+            # Store episode summary metrics
+            self.episode_rewards.append(episode_reward_sum)
+            self.episode_velocities.append(episode_velocity_mean)
+            
+            # Log this episode's statistics
+            self.logger.record('train/episode_reward_sum', episode_reward_sum)
+            self.logger.record('train/episode_reward_mean', episode_reward_mean)
+            self.logger.record('train/episode_reward_min', episode_reward_min)
+            self.logger.record('train/episode_reward_max', episode_reward_max)
+            self.logger.record('train/episode_velocity_mean', episode_velocity_mean)
+            self.logger.record('train/episode_length', len(self.current_episode_rewards))
+            
+            if self.episode_count % 10 == 0:
+                print(f"\nEpisode {self.episode_count} stats:")
+                print(f"  Reward: sum={episode_reward_sum:.4f}, mean={episode_reward_mean:.4f}, min={episode_reward_min:.4f}, max={episode_reward_max:.4f}")
+                print(f"  Length: {len(self.current_episode_rewards)} steps")
                 if hasattr(self.model, 'policy'):
-                    explained_var = explained_variance(
-                        self.model.rollout_buffer.values.flatten(),
-                        self.model.rollout_buffer.returns.flatten()
-                    )
-                    self.logger.record('train/explained_variance', explained_var)
+                    print(f"  Value Loss: {self.model.value_loss if hasattr(self.model, 'value_loss') else 'N/A'}")
+            
+            # Log policy metrics if available
+            if hasattr(self.model, 'policy'):
+                explained_var = explained_variance(
+                    self.model.rollout_buffer.values.flatten(),
+                    self.model.rollout_buffer.returns.flatten()
+                )
+                self.logger.record('train/explained_variance', explained_var)
+                
+                if hasattr(self.model, 'clip_range'):
+                    current_clip_range = self.model.clip_range(1) if callable(self.model.clip_range) else self.model.clip_range
+                    self.logger.record('train/clip_fraction', float(current_clip_range))
+                
+                if hasattr(self.model, 'entropy_loss'):
+                    self.logger.record('train/entropy_loss', self.model.entropy_loss)
                     
-                    if hasattr(self.model, 'clip_range'):
-                        current_clip_range = self.model.clip_range(1) if callable(self.model.clip_range) else self.model.clip_range
-                        self.logger.record('train/clip_fraction', float(current_clip_range))
+                if hasattr(self.model, 'policy_loss'):
+                    self.logger.record('train/policy_loss', self.model.policy_loss)
                     
-                    if hasattr(self.model, 'entropy_loss'):
-                        self.logger.record('train/entropy_loss', self.model.entropy_loss)
-                        
-                    if hasattr(self.model, 'policy_loss'):
-                        self.logger.record('train/policy_loss', self.model.policy_loss)
-                        
-                    if hasattr(self.model, 'value_loss'):
-                        self.logger.record('train/value_loss', self.model.value_loss)
+                if hasattr(self.model, 'value_loss'):
+                    self.logger.record('train/value_loss', self.model.value_loss)
+            
+            # Reset episode tracking for the next episode
+            self.current_episode_rewards = []
+            self.current_episode_velocities = []
         
         # Make sure to dump all metrics to tensorboard
         self.logger.dump(self.num_timesteps)

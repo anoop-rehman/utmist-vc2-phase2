@@ -34,18 +34,18 @@
             <site name="rf_xnyp" class="rangefinder" pos="-0.25 0.25 0.11" zaxis="-1 1 0" />
 
             <!-- sites that visualize the x-y axis of the ant body, good for debugging -->
-            <site name="x_pos" type="capsule" pos="0.5 0 0" size=".05 .5" zaxis="1 0 0"
+            <!-- <site name="x_pos" type="capsule" pos="0.5 0 0" size=".05 .5" zaxis="1 0 0"
                 rgba="1 0 0 1" group="5" />
             <site name="x_neg" type="capsule" pos="-0.5 0 0" size=".05 .5" zaxis="-1 0 0"
                 rgba="0 0 1 1" group="5" />
             <site name="y_pos" type="capsule" pos="0 0.5 0" size=".05 .5" zaxis="0 1 0"
                 rgba="1 1 1 1" group="5" />
             <site name="y_neg" type="capsule" pos="0 -0.5 0" size=".05 .5" zaxis="0 -1 0"
-                rgba="0 0 0 1" group="5" />
+                rgba="0 0 0 1" group="5" /> -->
             <site name="z_pos" type="capsule" pos="0 0 0.5" size=".05 .5" zaxis="0 0 1"
                 rgba="0 1 0 1" group="5" />
-            <site name="z_neg" type="capsule" pos="0 0 -0.5" size=".05 .5" zaxis="0 0 -1"
-                rgba="0 1 1 1" group="5" />
+            <!-- <site name="z_neg" type="capsule" pos="0 0 -0.5" size=".05 .5" zaxis="0 0 -1" -->
+                <!-- rgba="0 1 1 1" group="5" /> -->
             <site name="port_site" pos=".5 0 0" size="0.5" rgba="1 0 0 1" group="5" />
             <site name="starboard_site" pos="-.5 0 0" size="0.5" rgba="0 1 0 1" group="5" />
                     

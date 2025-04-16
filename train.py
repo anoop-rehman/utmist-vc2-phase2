@@ -420,9 +420,9 @@ class RotationPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the rotation phase of training."""
     def __init__(self, env):
         super().__init__(env)
-        # Track initial and current orientation
+        # Add quaternion history
+        self.quaternion_history = []
         self.initial_orientation = None
-        # Enable verbose mode for debugging
         self.verbose = True
         
     def step(self, action):
@@ -439,66 +439,56 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         obs = process_observation(timestep)
         
-        # Calculate orientation alignment reward
-        alignment_reward = 0.0
+        # Track orientation history
         if 'absolute_root_rot' in timestep.observation[0]:
-            root_rot = timestep.observation[0]['absolute_root_rot']
-            alignment_reward = self.calculate_alignment_reward(root_rot)
-        else:
-            print("absolute_root_rot not found in timestep.observation[0]!")
+            quat = timestep.observation[0]['absolute_root_rot'].copy()
+            self.quaternion_history.append(quat)
+            # Keep history manageable
+            if len(self.quaternion_history) > 20:  # 20-step window
+                self.quaternion_history.pop(0)
         
-        # Calculate stillness penalty
-        stillness_penalty = 0.0
-        if len(self.position_history) >= 2 and current_pos is not None:
-            # Calculate speed as distance moved in the last step divided by timestep
-            last_pos = self.position_history[-2]
-            delta_pos = np.linalg.norm(current_pos - last_pos)
-            dt = self.env.physics.timestep()
-            speed = delta_pos / dt
+        # Calculate angular movement over window
+        angular_movement = 0.0
+        if len(self.quaternion_history) >= 2:
+            # Get current and past quaternions
+            current_quat = self.quaternion_history[-1]
+            past_quat = self.quaternion_history[max(0, len(self.quaternion_history)-10)]  # 10 steps back
             
-            # Apply penalty if speed is below threshold
-            speed_threshold = 0.1  # Minimum desired speed
-            if speed < speed_threshold:
-                # Penalty increases as speed approaches zero
-                stillness_factor = (speed_threshold - speed) / speed_threshold
-                stillness_penalty = 0.5 * stillness_factor  # Max penalty of 0.5
+            # Calculate angular difference between quaternions
+            dot_product = np.sum(current_quat * past_quat)
+            dot_product = np.clip(dot_product, -1.0, 1.0)  # Ensure valid range for acos
+            angle_diff = 2.0 * np.arccos(abs(dot_product))  # In radians
+            
+            # Convert to degrees for more intuitive values
+            angular_movement = np.degrees(angle_diff)
+            
+            # Apply stillness penalty based on angular movement AND current alignment
+            angle_threshold = 5.0  # Degrees of expected rotation in window
+            if angular_movement < angle_threshold:
+                stillness_factor = (angle_threshold - angular_movement) / angle_threshold
                 
-            if self.verbose and self.episode_count % 10 == 0:
-                print(f"Speed: {speed:.4f}, Stillness Penalty: {stillness_penalty:.4f}")
+                # Scale penalty based on alignment quality
+                # Perfect alignment (1.0) -> near zero penalty
+                # Poor alignment (0.0 or negative) -> full penalty
+                alignment_quality = max(0.0, self.calculate_alignment_reward(current_quat))  # Only consider positive alignment
+                penalty_scaling = 1.0 - (alignment_quality * alignment_quality)  # Squared for sharper dropoff
+                
+                # Apply scaled penalty
+                angular_stillness_penalty = 2.0 * stillness_factor * penalty_scaling
         
-        # Combine alignment reward with stillness penalty
-        reward = alignment_reward - stillness_penalty
+        # Calculate alignment reward
+        alignment_reward = self.calculate_alignment_reward(current_quat)
+        
+        # Combine alignment reward with angular stillness penalty
+        reward = alignment_reward - angular_stillness_penalty
         
         done = timestep.last()
         info = {}
 
         self.reward = reward
-        self.last_vel_to_ball = alignment_reward  # Store raw alignment for logging
+        self.last_vel_to_ball = alignment_reward  # For consistency with previous code
         return obs, reward, done, info
     
-    def calculate_alignment_reward(self, root_rot):
-        """Calculate reward based on aligning local z-axis with global x-axis."""
-        # Convert quaternion to get how the local z-axis (0,0,1) is oriented in global coordinates
-        w, x, y, z = root_rot.flatten()
-        
-        # Calculate how the local z-axis (0,0,1) is oriented in global coordinates
-        z_axis_x = 2 * (x*z + w*y)
-        z_axis_y = 2 * (y*z - w*x)
-        z_axis_z = 1 - 2 * (x*x + y*y)
-        
-        local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
-        local_z = local_z / np.linalg.norm(local_z)  # Normalize
-        
-        # Alignment is simply the x-component of local_z since global_x is (1,0,0)
-        # Using raw alignment with range from -1 to 1
-        alignment = local_z[0]
-        
-        # Print alignment in verbose mode for debugging
-        if self.verbose:
-            print(f"Local z: {local_z}, Alignment: {alignment:.4f}, Reward: {alignment:.4f}")
-        
-        return alignment
-        
     def reset(self):
         timestep = self.env.reset()
         obs = process_observation(timestep)
@@ -569,6 +559,30 @@ class RotationPhaseWrapper(DMControlWrapper):
                 print(f"Error getting fresh observation: {e}")
         
         return obs
+
+    def calculate_alignment_reward(self, root_rot):
+        """Calculate reward based on aligning local z-axis with global x-axis."""
+        # Convert quaternion to get how the local z-axis (0,0,1) is oriented in global coordinates
+        w, x, y, z = root_rot.flatten()
+        
+        # Calculate how the local z-axis (0,0,1) is oriented in global coordinates
+        z_axis_x = 2 * (x*z + w*y)
+        z_axis_y = 2 * (y*z - w*x)
+        z_axis_z = 1 - 2 * (x*x + y*y)
+        
+        local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
+        local_z = local_z / np.linalg.norm(local_z)  # Normalize
+        
+        # Alignment is simply the x-component of local_z since global_x is (1,0,0)
+        # Using raw alignment with range from -1 to 1
+        alignment = local_z[0]
+        
+        # Print alignment in verbose mode for debugging
+        if self.verbose:
+            print(f"Root z-axis: [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
+                  f"Alignment with x: {alignment:.3f}, Reward: {alignment:.3f}")
+        
+        return alignment
 
 class TrainingCallback(BaseCallback):
     def __init__(self, verbose=0):

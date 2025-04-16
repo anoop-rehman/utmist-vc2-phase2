@@ -439,45 +439,51 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         obs = process_observation(timestep)
         
+        # Initialize variables
+        angular_movement = 0.0
+        angular_stillness_penalty = 0.0
+        
         # Track orientation history
         if 'absolute_root_rot' in timestep.observation[0]:
-            quat = timestep.observation[0]['absolute_root_rot'].copy()
-            self.quaternion_history.append(quat)
+            current_quat = timestep.observation[0]['absolute_root_rot'].copy()
+            self.quaternion_history.append(current_quat)
             # Keep history manageable
             if len(self.quaternion_history) > 20:  # 20-step window
                 self.quaternion_history.pop(0)
-        
-        # Calculate angular movement over window
-        angular_movement = 0.0
-        if len(self.quaternion_history) >= 2:
-            # Get current and past quaternions
-            current_quat = self.quaternion_history[-1]
-            past_quat = self.quaternion_history[max(0, len(self.quaternion_history)-10)]  # 10 steps back
             
-            # Calculate angular difference between quaternions
-            dot_product = np.sum(current_quat * past_quat)
-            dot_product = np.clip(dot_product, -1.0, 1.0)  # Ensure valid range for acos
-            angle_diff = 2.0 * np.arccos(abs(dot_product))  # In radians
-            
-            # Convert to degrees for more intuitive values
-            angular_movement = np.degrees(angle_diff)
-            
-            # Apply stillness penalty based on angular movement AND current alignment
-            angle_threshold = 5.0  # Degrees of expected rotation in window
-            if angular_movement < angle_threshold:
-                stillness_factor = (angle_threshold - angular_movement) / angle_threshold
+            # Calculate angular movement over window
+            if len(self.quaternion_history) >= 2:
+                # Get past quaternion
+                past_quat = self.quaternion_history[max(0, len(self.quaternion_history)-10)]  # 10 steps back
                 
-                # Scale penalty based on alignment quality
-                # Perfect alignment (1.0) -> near zero penalty
-                # Poor alignment (0.0 or negative) -> full penalty
-                alignment_quality = max(0.0, self.calculate_alignment_reward(current_quat))  # Only consider positive alignment
-                penalty_scaling = 1.0 - (alignment_quality * alignment_quality)  # Squared for sharper dropoff
+                # Calculate angular difference between quaternions
+                dot_product = np.sum(current_quat * past_quat)
+                dot_product = np.clip(dot_product, -1.0, 1.0)  # Ensure valid range for acos
+                angle_diff = 2.0 * np.arccos(abs(dot_product))  # In radians
                 
-                # Apply scaled penalty
-                angular_stillness_penalty = 2.0 * stillness_factor * penalty_scaling
-        
-        # Calculate alignment reward
-        alignment_reward = self.calculate_alignment_reward(current_quat)
+                # Convert to degrees for more intuitive values
+                angular_movement = np.degrees(angle_diff)
+                
+                # Calculate alignment reward
+                alignment_reward = self.calculate_alignment_reward(current_quat)
+                
+                # Apply stillness penalty based on angular movement AND current alignment
+                angle_threshold = 5.0  # Degrees of expected rotation in window
+                if angular_movement < angle_threshold:
+                    stillness_factor = (angle_threshold - angular_movement) / angle_threshold
+                    
+                    # Scale penalty based on alignment quality
+                    alignment_quality = max(0.0, alignment_reward)  # Only consider positive alignment
+                    penalty_scaling = 1.0 - (alignment_quality * alignment_quality)  # Squared for sharper dropoff
+                    
+                    # Apply scaled penalty
+                    angular_stillness_penalty = 2.0 * stillness_factor * penalty_scaling
+            else:
+                # Not enough history yet, just calculate alignment without stillness penalty
+                alignment_reward = self.calculate_alignment_reward(current_quat)
+        else:
+            print("absolute_root_rot not found in timestep.observation[0]!")
+            alignment_reward = 0.0
         
         # Combine alignment reward with angular stillness penalty
         reward = alignment_reward - angular_stillness_penalty

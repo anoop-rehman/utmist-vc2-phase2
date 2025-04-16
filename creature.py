@@ -162,7 +162,7 @@ class CreatureObservables(legacy_base.WalkerObservables):
 
   @composer.observable
   def bodies_quats(self):
-    """Orientations of the bodies as quaternions, in the egocentric frame."""
+    """Orientations of the bodies as Euler angles (roll, pitch, yaw), in the egocentric frame."""
     bodies = self._entity.bodies
     self._entity.bodies_quats_sensors[:] = []
     for body in bodies:
@@ -172,8 +172,26 @@ class CreatureObservables(legacy_base.WalkerObservables):
               objtype='xbody', objname=body,
               reftype='xbody', refname=self._entity.root_body))
     def bodies_ego_orientation(physics):
-      return np.reshape(
-          physics.bind(self._entity.bodies_quats_sensors).sensordata, -1)
+      quats = physics.bind(self._entity.bodies_quats_sensors).sensordata
+      quats_reshaped = np.reshape(quats, (-1, 4))
+      
+      # Convert quaternions to Euler angles (roll, pitch, yaw)
+      euler_angles = []
+      for quat in quats_reshaped:
+        w, x, y, z = quat
+        
+        # Roll (rotation around x)
+        roll = np.arctan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
+        
+        # Pitch (rotation around y)
+        pitch = np.arcsin(2*(w*y - z*x))
+        
+        # Yaw (rotation around z)
+        yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+        
+        euler_angles.extend([roll, pitch, yaw])
+      
+      return np.array(euler_angles, dtype=np.float32)
     return observable.Generic(bodies_ego_orientation)
 
   @composer.observable
@@ -199,8 +217,22 @@ class CreatureObservables(legacy_base.WalkerObservables):
 
   @composer.observable
   def absolute_root_rot(self):
-    """Absolute orientation (quaternion) of the root body in the global frame."""
-    return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xquat)
+    """Absolute orientation of the root body in the global frame as Euler angles."""
+    def root_orientation_euler(physics):
+      quat = physics.bind(self._entity.root_body).xquat
+      w, x, y, z = quat
+      
+      # Roll (rotation around x)
+      roll = np.arctan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
+      
+      # Pitch (rotation around y)
+      pitch = np.arcsin(2*(w*y - z*x))
+      
+      # Yaw (rotation around z)
+      yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+      
+      return np.array([roll, pitch, yaw], dtype=np.float32)
+    return observable.Generic(root_orientation_euler)
 
   @property
   def proprioception(self):

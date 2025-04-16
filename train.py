@@ -29,7 +29,7 @@ def quaternion_to_forward_vector(quaternion):
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
-    n_steps=8192,
+    n_steps=960,
     batch_size=64,
     n_epochs=10,
     gamma=0.99,
@@ -70,6 +70,28 @@ def get_default_folder():
 def process_observation(timestep):
     """Convert DM Control observation to the format expected by the model."""
     obs_dict = timestep.observation[0]
+    
+    # Add a counter to track number of calls (static variable)
+    if not hasattr(process_observation, "counter"):
+        process_observation.counter = 0
+    
+    # Print observations every 40 steps
+    should_print = process_observation.counter % 40 == 0
+    process_observation.should_print = should_print  # Set a flag for other functions
+    
+    if should_print:
+        print(f"\n--- Observation {process_observation.counter} ---")
+        print("Observation keys:", list(obs_dict.keys()))
+        
+        # Print full values for each key
+        for k, v in obs_dict.items():
+            if hasattr(v, 'shape'):
+                print(f"{k}: shape={v.shape}, value={v.flatten()}")
+            else:
+                print(f"{k}: {v}")
+    
+    process_observation.counter += 1
+    
     return np.concatenate([v.flatten() for v in obs_dict.values()])
 
 def calculate_reward(timestep, action, distance_in_window):
@@ -566,27 +588,53 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         return obs
 
-    def calculate_alignment_reward(self, root_rot):
-        """Calculate reward based on aligning local z-axis with global x-axis."""
-        # Convert quaternion to get how the local z-axis (0,0,1) is oriented in global coordinates
-        w, x, y, z = root_rot.flatten()
+    def calculate_alignment_reward(self, euler_angles):
+        """Calculate reward based on aligning local z-axis with global x-axis using Euler angles."""
+        # Unpack Euler angles
+        roll, pitch, yaw = euler_angles.flatten()
         
-        # Calculate how the local z-axis (0,0,1) is oriented in global coordinates
-        z_axis_x = 2 * (x*z + w*y)
-        z_axis_y = 2 * (y*z - w*x)
-        z_axis_z = 1 - 2 * (x*x + y*y)
+        # Calculate the orientation of the local z-axis (0,0,1) in global coordinates
+        # Using rotation matrix multiplication with Euler angles
         
-        local_z = np.array([z_axis_x, z_axis_y, z_axis_z])
-        local_z = local_z / np.linalg.norm(local_z)  # Normalize
+        # Calculate rotation matrices for each angle
+        # Roll (around x-axis)
+        cos_r, sin_r = np.cos(roll), np.sin(roll)
+        R_x = np.array([
+            [1, 0, 0],
+            [0, cos_r, -sin_r],
+            [0, sin_r, cos_r]
+        ])
         
-        # Alignment is simply the x-component of local_z since global_x is (1,0,0)
-        # Using raw alignment with range from -1 to 1
+        # Pitch (around y-axis)
+        cos_p, sin_p = np.cos(pitch), np.sin(pitch)
+        R_y = np.array([
+            [cos_p, 0, sin_p],
+            [0, 1, 0],
+            [-sin_p, 0, cos_p]
+        ])
+        
+        # Yaw (around z-axis)
+        cos_y, sin_y = np.cos(yaw), np.sin(yaw)
+        R_z = np.array([
+            [cos_y, -sin_y, 0],
+            [sin_y, cos_y, 0],
+            [0, 0, 1]
+        ])
+        
+        # Combined rotation matrix (order: yaw → pitch → roll)
+        R = np.dot(R_z, np.dot(R_y, R_x))
+        
+        # Transform the local z-axis [0,0,1]
+        local_z = np.dot(R, np.array([0, 0, 1]))
+        
+        # Alignment is the x-component of the transformed z-axis
         alignment = local_z[0]
         
-        # Print alignment in verbose mode for debugging
-        if self.verbose:
+        # Print alignment in verbose mode for debugging - only every 40 steps
+        if self.verbose and hasattr(process_observation, "should_print") and process_observation.should_print:
             print(f"Root z-axis: [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
                   f"Alignment with x: {alignment:.3f}, Reward: {alignment:.3f}")
+            print(f"Euler angles (roll, pitch, yaw): [{roll:.3f}, {pitch:.3f}, {yaw:.3f}]")
         
         return alignment
 

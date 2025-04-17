@@ -79,12 +79,21 @@ def process_observation(timestep):
     should_print = process_observation.counter % 40 == 0
     process_observation.should_print = should_print  # Set a flag for other functions
     
+    # Filter the observation - keep only the core components we want
+    filtered_dict = {}
+    core_observations = ['absolute_root_mat', 'bodies_pos', 'joints_pos']
+    
+    for key in core_observations:
+        if key in obs_dict:
+            filtered_dict[key] = obs_dict[key]
+    
+    # Only print the filtered observations
     if should_print:
-        print(f"\n--- Observation {process_observation.counter} ---")
-        print("Observation keys:", list(obs_dict.keys()))
+        print(f"\n--- Observation {process_observation.counter} (Filtered) ---")
+        print("Filtered observation keys:", list(filtered_dict.keys()))
         
-        # Print full values for each key
-        for k, v in obs_dict.items():
+        # Print filtered values
+        for k, v in filtered_dict.items():
             if hasattr(v, 'shape'):
                 print(f"{k}: shape={v.shape}, value={v.flatten()}")
             else:
@@ -92,7 +101,8 @@ def process_observation(timestep):
     
     process_observation.counter += 1
     
-    return np.concatenate([v.flatten() for v in obs_dict.values()])
+    # Use only the filtered observations
+    return np.concatenate([v.flatten() for v in filtered_dict.values()])
 
 def calculate_reward(timestep, action, distance_in_window):
     """Calculate reward based on velocity to ball, control cost, and distance traveled."""
@@ -133,10 +143,25 @@ class DMControlWrapper(gym.Env):
             dtype=np.float32
         )
         
-        # Calculate observation size and create a sample observation to verify shape
+        # Calculate observation size with filtered observations
         timestep = env.reset()
+        
+        # Get filtered keys for debugging
+        obs_dict = timestep.observation[0]
+        core_observations = ['absolute_root_mat', 'bodies_pos', 'joints_pos']
+        filtered_dict = {}
+        for key in core_observations:
+            if key in obs_dict:
+                filtered_dict[key] = obs_dict[key]
+                print(f"Keeping observation: {key} with shape {obs_dict[key].shape}")
+            else:
+                print(f"Warning: {key} not found in observation dictionary")
+        
         self.obs_concat = process_observation(timestep)
         obs_size = self.obs_concat.shape[0]
+        
+        print(f"Filtered observation space size: {obs_size}")
+        # Expected sizes: 9 (root_mat) + 27 (bodies_pos) + 8 (joints_pos) = 44
         
         # Define observation space with the correct size
         self.observation_space = spaces.Box(
@@ -237,10 +262,8 @@ class WalkingPhaseWrapper(DMControlWrapper):
         self.additional_obs_size = self.phase_size + self.pos_history_size + self.vel_history_size
         
         # Redefine observation space to include our additional features
-        # First get a sample observation from parent
-        timestep = env.reset()
-        self.base_obs = process_observation(timestep)
-        self.base_obs_size = self.base_obs.shape[0]
+        # First get base observation size (filtered)
+        self.base_obs_size = self.observation_space.shape[0]
         
         # Define new observation space with extended size
         self.observation_space = spaces.Box(
@@ -250,8 +273,8 @@ class WalkingPhaseWrapper(DMControlWrapper):
             dtype=np.float32
         )
         
-        print(f"Observation space shape: {self.observation_space.shape}")
-        print(f"Base observation size: {self.base_obs_size}")
+        print(f"WalkingPhaseWrapper observation space shape: {self.observation_space.shape}")
+        print(f"Base filtered observation size: {self.base_obs_size}")
         print(f"Additional features size: {self.additional_obs_size}")
         print(f"Total expected size: {self.base_obs_size + self.additional_obs_size}")
     
@@ -468,9 +491,13 @@ class RotationPhaseWrapper(DMControlWrapper):
         angular_movement = 0.0
         angular_stillness_penalty = 0.0
         
-        # Track orientation history
-        if 'absolute_root_zaxis' in timestep.observation[0]:
-            current_zaxis = timestep.observation[0]['absolute_root_zaxis'].copy()
+        # Track orientation history - now using rotation matrix instead of z-axis
+        if 'absolute_root_mat' in timestep.observation[0]:
+            # Extract the z-axis from the rotation matrix
+            rot_matrix = timestep.observation[0]['absolute_root_mat'].copy()
+            # In a flattened 3x3 matrix, the third column is the z-axis (indices 2, 5, 8)
+            current_zaxis = np.array([rot_matrix[0, 2], rot_matrix[0, 5], rot_matrix[0, 8]])
+            
             self.matrix_history.append(current_zaxis)
             # Keep history manageable
             if len(self.matrix_history) > 20:  # 20-step window
@@ -512,7 +539,7 @@ class RotationPhaseWrapper(DMControlWrapper):
                 # Not enough history yet, just calculate alignment without stillness penalty
                 alignment_reward = self.calculate_alignment_reward(current_zaxis)
         else:
-            print("absolute_root_zaxis not found in timestep.observation[0]!")
+            print("absolute_root_mat not found in timestep.observation[0]!")
             alignment_reward = 0.0
         
         # Combine alignment reward with angular stillness penalty
@@ -567,9 +594,11 @@ class RotationPhaseWrapper(DMControlWrapper):
             except Exception as e:
                 print(f"Error randomizing orientation: {e}")
         
-        # Store initial orientation
-        if 'absolute_root_zaxis' in timestep.observation[0]:
-            self.initial_orientation = timestep.observation[0]['absolute_root_zaxis'].copy()
+        # Store initial orientation - now using rotation matrix instead of z-axis
+        if 'absolute_root_mat' in timestep.observation[0]:
+            rot_matrix = timestep.observation[0]['absolute_root_mat'].copy()
+            # Extract z-axis from rotation matrix (third column)
+            self.initial_orientation = np.array([rot_matrix[0, 2], rot_matrix[0, 5], rot_matrix[0, 8]])
             # Calculate and log initial alignment
             initial_alignment = self.calculate_alignment_reward(self.initial_orientation)
             # Make sure this is a scalar value, not an array
@@ -583,7 +612,7 @@ class RotationPhaseWrapper(DMControlWrapper):
         print(f"\nEpisode {self.episode_count} started:")
         if 'absolute_root_pos' in timestep.observation[0]:
             print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
-        if 'absolute_root_zaxis' in timestep.observation[0]:
+        if 'absolute_root_mat' in timestep.observation[0]:
             # Convert numpy array to float for proper formatting
             print(f"  Initial alignment reward: {float(self.last_vel_to_ball):.4f}")
         

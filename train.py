@@ -29,7 +29,7 @@ def quaternion_to_forward_vector(quaternion):
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
-    n_steps=960,
+    n_steps=8192,
     batch_size=64,
     n_epochs=10,
     gamma=0.99,
@@ -608,6 +608,9 @@ class TensorboardCallback(BaseCallback):
         self.episode_count = 0
         self.last_obs = None
         
+        # Track total timesteps for interruption handling
+        self.current_total_timesteps = start_timesteps
+        
     def _on_training_start(self):
         # Initialize episode tracking
         self.current_episode_rewards = []
@@ -625,6 +628,9 @@ class TensorboardCallback(BaseCallback):
         
         # Get current environment steps
         env_steps = self.num_timesteps
+        
+        # Update total timesteps count (including initial steps)
+        self.current_total_timesteps = self.start_timesteps + self.num_timesteps
         
         # Log step-level metrics
         self.logger.record('train/reward', reward)
@@ -817,18 +823,46 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         tensorboard_callback
     ]
     
+    # Store the model for saving in case of interruption
+    # Note: We'll update this attribute in case of an interruption
+    model.actual_timesteps_trained = 0
+    
     # Train the model
-    model.learn(
-        total_timesteps=total_timesteps,
-        callback=callbacks,
-        tb_log_name=os.path.basename(save_dir),
-        reset_num_timesteps=False  # Continue timesteps from previous run
-    )
+    interrupted = False
+    try:
+        model.learn(
+            total_timesteps=total_timesteps,
+            callback=callbacks,
+            tb_log_name=os.path.basename(save_dir),
+            reset_num_timesteps=False  # Continue timesteps from previous run
+        )
+    except KeyboardInterrupt:
+        print("\n\nTraining interrupted by keyboard! Saving model and generating model card...")
+        interrupted = True
+        
+        # Get how many timesteps we've actually trained
+        # This will be more accurate than estimating
+        if hasattr(tensorboard_callback, 'current_total_timesteps'):
+            model.actual_timesteps_trained = tensorboard_callback.current_total_timesteps - start_timesteps
+            print(f"Trained for {model.actual_timesteps_trained} steps of planned {total_timesteps}")
+        else:
+            # If we can't get the exact number, estimate it
+            model.actual_timesteps_trained = total_timesteps // 2  # Rough estimate
+            print(f"Estimating ~{model.actual_timesteps_trained} steps out of planned {total_timesteps}")
+    
+    # Use correct number of timesteps
+    if interrupted:
+        env_steps = start_timesteps + model.actual_timesteps_trained
+        total_updates = env_steps // default_hyperparameters["n_steps"]
+        print(f"Training was interrupted after approximately {model.actual_timesteps_trained} steps.")
+        print(f"Total steps including previous training: {env_steps}")
+        print(f"Total updates: {total_updates}")
+    else:
+        env_steps = start_timesteps + total_timesteps
+        total_updates = env_steps // default_hyperparameters["n_steps"]
     
     # Save final model with environment steps in filename
-    env_steps = start_timesteps + total_timesteps
-    training_iterations = total_timesteps * model.n_epochs
-    total_updates = env_steps // default_hyperparameters["n_steps"]
+    training_iterations = (total_timesteps if not interrupted else model.actual_timesteps_trained) * model.n_epochs
     final_path = os.path.join(save_dir, f"final_model_{total_updates}updates.zip")
     model.save(final_path)
     
@@ -876,6 +910,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     # After training is complete, record end time
     end_time = datetime.now()
     
+    # Use the right number of timesteps for model card
+    actual_timesteps = model.actual_timesteps_trained if interrupted else total_timesteps
+    
     # Generate model card with actual timing information and steps
     generate_model_card(
         model=model,
@@ -883,12 +920,13 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         start_time=start_time,
         end_time=end_time,
         start_timesteps=start_timesteps or 0,
-        total_timesteps=env_steps - (start_timesteps or 0),  # Use env_steps for model card
+        total_timesteps=actual_timesteps,  # Use actual timesteps trained
         tensorboard_log=tensorboard_log,
         checkpoint_freq=checkpoint_freq,
         keep_checkpoints=keep_checkpoints,
         checkpoint_stride=checkpoint_stride,
-        load_path=load_path
+        load_path=load_path,
+        interrupted=interrupted  # Pass the interrupted flag
     )
     
     return model 

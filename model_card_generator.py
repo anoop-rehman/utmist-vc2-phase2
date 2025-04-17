@@ -116,7 +116,7 @@ def get_env_params():
         'body_density': density
     }
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, total_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None):
+def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, total_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False):
     """Generate a markdown file with model details.
     
     Args:
@@ -131,6 +131,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         keep_checkpoints: Whether all checkpoints were kept
         checkpoint_stride: How many checkpoints were skipped between saves
         load_path: Path to the model loaded for continued training
+        interrupted: Whether training was interrupted (e.g., by KeyboardInterrupt)
     """
     from train import default_hyperparameters
     card_path = os.path.join(save_dir, "model_card.md")
@@ -167,6 +168,11 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
     with open(card_path, "w") as f:
         f.write("# Model Card\n\n")
         
+        # Add interrupt warning if applicable
+        if interrupted:
+            f.write("⚠️ **TRAINING INTERRUPTED** ⚠️\n\n")
+            f.write("This training run was interrupted before completion. The model may not be fully trained.\n\n")
+        
         # Training Information
         f.write("## Training Information\n")
         
@@ -194,6 +200,13 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} env timesteps)\n")
         f.write(f"- Training Updates: {new_updates} ({total_timesteps} env timesteps)\n")
         f.write(f"- Total Updates: {total_updates} ({start_timesteps + total_timesteps} env timesteps)\n")
+        
+        # Add completion status
+        if interrupted:
+            f.write(f"- Training Status: **INTERRUPTED** after {total_timesteps} steps\n")
+        else:
+            f.write(f"- Training Status: COMPLETED\n")
+            
         final_model_path = os.path.join(save_dir, f'final_model_{total_updates}updates.zip')
         f.write(f"- Final Model Path: `{final_model_path}`\n")
         if start_timesteps > 0:

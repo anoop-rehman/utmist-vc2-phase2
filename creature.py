@@ -139,50 +139,40 @@ class Creature(legacy_base.Walker):
 class CreatureObservables(legacy_base.WalkerObservables):
   """Observables for the Creature."""
 
-  @composer.observable
-  def appendages_pos(self):
-    """Equivalent to `end_effectors_pos` with the head's position appended."""
-    appendages = self._entity.end_effectors
-    self._entity.appendages_sensors[:] = []
-    for body in appendages:
-      self._entity.appendages_sensors.append(
-          self._entity.mjcf_model.sensor.add(
-              'framepos', name=body.name + '_appendage',
-              objtype='xbody', objname=body,
-              reftype='xbody', refname=self._entity.root_body))
-    def appendages_ego_pos(physics):
-      return np.reshape(
-          physics.bind(self._entity.appendages_sensors).sensordata, -1)
-    return observable.Generic(appendages_ego_pos)
+  # @composer.observable
+  # def appendages_pos(self):
+  #   """Equivalent to `end_effectors_pos` with the head's position appended."""
+  #   appendages = self._entity.end_effectors
+  #   self._entity.appendages_sensors[:] = []
+  #   for body in appendages:
+  #     self._entity.appendages_sensors.append(
+  #         self._entity.mjcf_model.sensor.add(
+  #             'framepos', name=body.name + '_appendage',
+  #             objtype='xbody', objname=body,
+  #             reftype='xbody', refname=self._entity.root_body))
+  #   def appendages_ego_pos(physics):
+  #     return np.reshape(
+  #         physics.bind(self._entity.appendages_sensors).sensordata, -1)
+  #   return observable.Generic(appendages_ego_pos)
 
-  @composer.observable
-  def bodies_zaxes(self):
-    """Z-axes of bodies in multiple reference frames: world frame for root body, 
-    and relative to the root body frame for others."""
-    bodies = self._entity.bodies
-    self._entity.bodies_zaxis_sensors = []
-    
-    # For the root body, express z-axis in world frame
-    root_body = self.root_body
-    self._entity.bodies_zaxis_sensors.append(
-        self._entity.mjcf_model.sensor.add(
-            'framezaxis', name=root_body.name + '_world_zaxis',
-            objtype='xbody', objname=root_body))
-    
-    # For other bodies, express z-axis relative to root body
-    for body in bodies:
-      if body != root_body:
-        self._entity.bodies_zaxis_sensors.append(
-            self._entity.mjcf_model.sensor.add(
-                'framezaxis', name=body.name + '_rel_zaxis',
-                objtype='xbody', objname=body,
-                reftype='xbody', refname=root_body))
-            
-    def bodies_ego_zaxes(physics):
-      # Return z-axes directly
-      return physics.bind(self._entity.bodies_zaxis_sensors).sensordata
-    
-    return observable.Generic(bodies_ego_zaxes)
+  # @composer.observable
+  # def bodies_zaxes(self):
+  #   """Z-axes of all bodies in the world frame."""
+  #   bodies = self._entity.bodies
+  #   self._entity.bodies_zaxis_sensors = []
+  #   
+  #   for body in bodies:
+  #     # Create sensors for z-axis in world frame by omitting reftype and refname
+  #     self._entity.bodies_zaxis_sensors.append(
+  #         self._entity.mjcf_model.sensor.add(
+  #             'framezaxis', name=body.name + '_world_zaxis',
+  #             objtype='xbody', objname=body))
+  #             
+  #   def bodies_ego_zaxes(physics):
+  #     # Return z-axes directly
+  #     return physics.bind(self._entity.bodies_zaxis_sensors).sensordata
+  #   
+  #   return observable.Generic(bodies_ego_zaxes)
 
   @composer.observable
   def bodies_pos(self):
@@ -200,29 +190,34 @@ class CreatureObservables(legacy_base.WalkerObservables):
           physics.bind(self._entity.bodies_pos_sensors).sensordata, -1)
     return observable.Generic(bodies_ego_pos)
 
-  @composer.observable
-  def absolute_root_pos(self):
-    """Absolute position of the root body in the global frame."""
-    return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xpos)
+  # @composer.observable
+  # def absolute_root_pos(self):
+  #   """Absolute position of the root body in the global frame."""
+  #   return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xpos)
 
   @composer.observable
-  def absolute_root_zaxis(self):
-    """Z-axis of the root body in the global frame."""
-    def root_zaxis(physics):
-      # Get the rotation matrix
-      xmat = physics.bind(self._entity.root_body).xmat
-      
-      # Extract the z-axis (third column of the rotation matrix)
-      # In a flattened 3x3 matrix, the third column is at indices 2, 5, 8
-      z_axis = np.array([xmat[2], xmat[5], xmat[8]])
-      
-      return z_axis
-    return observable.Generic(root_zaxis)
+  def absolute_root_mat(self):
+    """3x3 rotation matrix of the root body in the global frame."""
+    def root_matrix(physics):
+      # Get the rotation matrix (3x3, flattened to length 9)
+      return physics.bind(self._entity.root_body).xmat
+    return observable.Generic(root_matrix)
+
+  # @composer.observable
+  # def absolute_root_zaxis(self):
+  #   """Z-axis of the root body in the global frame."""
+  #   def root_zaxis(physics):
+  #     # Get the rotation matrix
+  #     xmat = physics.bind(self._entity.root_body).xmat
+  #     
+  #     # Extract the z-axis (third column of the rotation matrix)
+  #     # In a flattened 3x3 matrix, the third column is at indices 2, 5, 8
+  #     z_axis = np.array([xmat[2], xmat[5], xmat[8]])
+  #     
+  #     return z_axis
+  #   return observable.Generic(root_zaxis)
 
   @property
   def proprioception(self):
-    return ([self.joints_pos, self.joints_vel,
-             self.body_height, self.end_effectors_pos,
-             self.appendages_pos, self.world_zaxis,
-             self.bodies_zaxes, self.bodies_pos, self.absolute_root_pos, self.absolute_root_zaxis] +
+    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat] +
             self._collect_from_attachments('proprioception'))

@@ -482,7 +482,10 @@ class RotationPhaseWrapper(DMControlWrapper):
                 past_zaxis = self.matrix_history[max(0, len(self.matrix_history)-10)]  # 10 steps back
                 
                 # Calculate angular difference between z-axes using dot product
-                dot_product = np.dot(current_zaxis, past_zaxis)
+                # Flatten arrays to ensure shape compatibility
+                current_zaxis_flat = current_zaxis.flatten()
+                past_zaxis_flat = past_zaxis.flatten()
+                dot_product = np.dot(current_zaxis_flat, past_zaxis_flat)
                 dot_product = np.clip(dot_product, -1.0, 1.0)  # Clamp to valid range
                 
                 # Convert to angle in radians
@@ -569,7 +572,8 @@ class RotationPhaseWrapper(DMControlWrapper):
             self.initial_orientation = timestep.observation[0]['absolute_root_zaxis'].copy()
             # Calculate and log initial alignment
             initial_alignment = self.calculate_alignment_reward(self.initial_orientation)
-            self.last_vel_to_ball = initial_alignment
+            # Make sure this is a scalar value, not an array
+            self.last_vel_to_ball = float(initial_alignment)
         else:
             self.initial_orientation = None
             self.last_vel_to_ball = 0.0
@@ -580,14 +584,20 @@ class RotationPhaseWrapper(DMControlWrapper):
         if 'absolute_root_pos' in timestep.observation[0]:
             print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
         if 'absolute_root_zaxis' in timestep.observation[0]:
-            print(f"  Initial alignment reward: {self.last_vel_to_ball:.4f}")
+            # Convert numpy array to float for proper formatting
+            print(f"  Initial alignment reward: {float(self.last_vel_to_ball):.4f}")
         
         # We need to re-process the observation after applying the random rotation
         if hasattr(self.env, 'physics') and hasattr(self.env, '_task') and hasattr(self.env._task, 'players'):
             try:
                 # Get fresh observation after randomization
-                timestep = self.env.physics.get_state()
-                obs = process_observation(timestep)
+                # Instead of using physics.get_state() directly, reset the environment to get a valid timestep
+                fresh_timestep = self.env.physics.step()  # Take a zero-action step
+                if hasattr(fresh_timestep, 'observation') and fresh_timestep.observation:
+                    obs = process_observation(fresh_timestep)
+                else:
+                    # If stepping doesn't return a valid timestep, use the existing observation
+                    print("Warning: Could not get fresh observation, using existing one")
             except Exception as e:
                 print(f"Error getting fresh observation: {e}")
         
@@ -596,12 +606,22 @@ class RotationPhaseWrapper(DMControlWrapper):
     def calculate_alignment_reward(self, zaxis):
         """Calculate reward based on aligning local z-axis with global x-axis."""
         # The z-axis is already in global coordinates
-        # Alignment is simply the x-component (index 0)
-        alignment = zaxis[0]
+        # Get the x-component of the z-axis vector (index 0)
+        # Handle different possible shapes of zaxis
+        if len(zaxis.shape) > 1:  # If shape is (1, 3)
+            alignment = float(zaxis[0, 0])  # Get first element of first row
+        else:  # If shape is (3,)
+            alignment = float(zaxis[0])  # Get first element
         
         # Print alignment in verbose mode for debugging - only every 40 steps
         if self.verbose and hasattr(process_observation, "should_print") and process_observation.should_print:
-            print(f"Root z-axis: [{zaxis[0]:.3f}, {zaxis[1]:.3f}, {zaxis[2]:.3f}], " +
+            # Format the zaxis vector for printing, handling different shapes
+            if len(zaxis.shape) > 1:
+                z0, z1, z2 = zaxis[0, 0], zaxis[0, 1], zaxis[0, 2]
+            else:
+                z0, z1, z2 = zaxis[0], zaxis[1], zaxis[2]
+                
+            print(f"Root z-axis: [{z0:.3f}, {z1:.3f}, {z2:.3f}], " +
                   f"Alignment with x: {alignment:.3f}, Reward: {alignment:.3f}")
         
         return alignment

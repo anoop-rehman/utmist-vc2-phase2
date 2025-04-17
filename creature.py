@@ -38,7 +38,6 @@ class Creature(legacy_base.Walker):
     super()._build(initializer=initializer)
     self._appendages_sensors = []
     self._bodies_pos_sensors = []
-    self._bodies_quats_sensors = []
     self._mjcf_root = mjcf.from_path(xml_config)
     if name:
       self._mjcf_root.model = name
@@ -136,10 +135,6 @@ class Creature(legacy_base.Walker):
   def bodies_pos_sensors(self):
     return self._bodies_pos_sensors
 
-  @property
-  def bodies_quats_sensors(self):
-    return self._bodies_quats_sensors
-
 
 class CreatureObservables(legacy_base.WalkerObservables):
   """Observables for the Creature."""
@@ -161,56 +156,24 @@ class CreatureObservables(legacy_base.WalkerObservables):
     return observable.Generic(appendages_ego_pos)
 
   @composer.observable
-  def bodies_mats(self):
-    """Orientations of the bodies as rotation matrices, in the egocentric frame."""
+  def bodies_zaxes(self):
+    """Z-axes of all bodies in the egocentric frame."""
     bodies = self._entity.bodies
-    self._entity.bodies_xaxis_sensors = []
-    self._entity.bodies_yaxis_sensors = []
     self._entity.bodies_zaxis_sensors = []
     
     for body in bodies:
-      # Create sensor for each axis
-      self._entity.bodies_xaxis_sensors.append(
-          self._entity.mjcf_model.sensor.add(
-              'framexaxis', name=body.name + '_ego_body_xaxis',
-              objtype='xbody', objname=body,
-              reftype='xbody', refname=self._entity.root_body))
-      
-      self._entity.bodies_yaxis_sensors.append(
-          self._entity.mjcf_model.sensor.add(
-              'frameyaxis', name=body.name + '_ego_body_yaxis',
-              objtype='xbody', objname=body,
-              reftype='xbody', refname=self._entity.root_body))
-      
+      # Only create sensors for z-axis
       self._entity.bodies_zaxis_sensors.append(
           self._entity.mjcf_model.sensor.add(
               'framezaxis', name=body.name + '_ego_body_zaxis',
               objtype='xbody', objname=body,
               reftype='xbody', refname=self._entity.root_body))
               
-    def bodies_ego_orientation(physics):
-      # Get each axis from sensors
-      x_axes = physics.bind(self._entity.bodies_xaxis_sensors).sensordata
-      y_axes = physics.bind(self._entity.bodies_yaxis_sensors).sensordata
-      z_axes = physics.bind(self._entity.bodies_zaxis_sensors).sensordata
-      
-      # Reshape to get the right dimensions
-      n_bodies = len(self._entity.bodies)
-      x_axes = x_axes.reshape(n_bodies, 3)
-      y_axes = y_axes.reshape(n_bodies, 3)
-      z_axes = z_axes.reshape(n_bodies, 3)
-      
-      # Construct rotation matrices (each body has a 3x3 matrix)
-      matrices = []
-      for i in range(n_bodies):
-        # Create matrix with each axis as a column
-        matrix = np.column_stack([x_axes[i], y_axes[i], z_axes[i]])
-        # Flatten the matrix and add to the output
-        matrices.extend(matrix.flatten())
-      
-      return np.array(matrices, dtype=np.float32)
+    def bodies_ego_zaxes(physics):
+      # Return z-axes directly
+      return physics.bind(self._entity.bodies_zaxis_sensors).sensordata
     
-    return observable.Generic(bodies_ego_orientation)
+    return observable.Generic(bodies_ego_zaxes)
 
   @composer.observable
   def bodies_pos(self):
@@ -246,26 +209,6 @@ class CreatureObservables(legacy_base.WalkerObservables):
       
       return z_axis
     return observable.Generic(root_zaxis)
-
-  @composer.observable
-  def bodies_zaxes(self):
-    """Z-axes of all bodies in the egocentric frame."""
-    bodies = self._entity.bodies
-    self._entity.bodies_zaxis_sensors = []
-    
-    for body in bodies:
-      # Only create sensors for z-axis
-      self._entity.bodies_zaxis_sensors.append(
-          self._entity.mjcf_model.sensor.add(
-              'framezaxis', name=body.name + '_ego_body_zaxis',
-              objtype='xbody', objname=body,
-              reftype='xbody', refname=self._entity.root_body))
-              
-    def bodies_ego_zaxes(physics):
-      # Return z-axes directly
-      return physics.bind(self._entity.bodies_zaxis_sensors).sensordata
-    
-    return observable.Generic(bodies_ego_zaxes)
 
   @property
   def proprioception(self):

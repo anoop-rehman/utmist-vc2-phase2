@@ -157,7 +157,7 @@ def get_env_params():
         'body_density': density
     }
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, total_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined"):
+def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, trained_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined"):
     """Generate a markdown file with model details.
     
     Args:
@@ -166,7 +166,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         start_time: Actual training start time
         end_time: Actual training end time
         start_timesteps: Starting timestep count
-        total_timesteps: Total timesteps trained for
+        trained_timesteps: Total timesteps trained for
         tensorboard_log: TensorBoard log directory
         checkpoint_freq: How often checkpoints were saved
         keep_checkpoints: Whether all checkpoints were kept
@@ -220,7 +220,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         
         # Training Command in its own subsection
         f.write("### Training Command\n")
-        n_updates = total_timesteps // default_hyperparameters["n_steps"]  # Convert timesteps back to updates
+        n_updates = trained_timesteps // default_hyperparameters["n_steps"]  # Convert timesteps back to updates
         command = f"python main.py --training-phase {training_phase} --n-updates {n_updates}"
         if tensorboard_log and tensorboard_log != 'tensorboard_logs':  # Only include if not default
             command += f" --tensorboard-log {tensorboard_log}"
@@ -238,24 +238,23 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Add policy updates info
         prev_updates = start_timesteps // default_hyperparameters["n_steps"] if start_timesteps else 0
         
-        # For total updates, calculate actual count based on total steps (not integer division)
-        total_steps = start_timesteps + total_timesteps
-        total_updates_actual = total_steps // default_hyperparameters["n_steps"]
-        
-        # Training updates is the difference between total and previous
-        training_updates = total_updates_actual - prev_updates
+        training_updates = trained_timesteps // default_hyperparameters["n_steps"]
+
+        total_timesteps = start_timesteps + trained_timesteps
+        total_updates = total_timesteps // default_hyperparameters["n_steps"]                
+
         
         f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} env timesteps)\n")
-        f.write(f"- Training Updates: {training_updates} ({total_timesteps} env timesteps)\n")
-        f.write(f"- Total Updates: {total_updates_actual} ({total_steps} env timesteps)\n")
+        f.write(f"- Training Updates: {training_updates} ({trained_timesteps} env timesteps)\n")
+        f.write(f"- Total Updates: {total_updates} ({total_timesteps} env timesteps)\n")
         
         # Add completion status
         if interrupted:
-            f.write(f"- Training Status: **INTERRUPTED** after {total_timesteps} steps\n")
+            f.write(f"- Training Status: **INTERRUPTED** after {trained_timesteps} steps\n")
         else:
             f.write(f"- Training Status: COMPLETED\n")
             
-        final_model_path = os.path.join(save_dir, f'final_model_{total_updates_actual}updates.zip')
+        final_model_path = os.path.join(save_dir, f'final_model_{total_updates}updates.zip')
         f.write(f"- Final Model Path: `{final_model_path}`\n")
         if start_timesteps > 0:
             if load_path:

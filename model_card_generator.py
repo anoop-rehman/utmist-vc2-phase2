@@ -36,26 +36,67 @@ def get_tensorboard_metrics(tensorboard_log, run_name):
         'worst_reward': min(rewards)
     }
 
-def get_reward_function_text():
-    """Extract the reward function implementation from train.py."""
+def get_reward_function_text(training_phase="combined"):
+    """Extract the appropriate reward function based on training phase."""
     with open("train.py", "r") as f:
         content = f.read()
     
-    # Find the calculate_reward function definition
-    start = content.find("def calculate_reward")
-    if start == -1:
-        return "Reward function not found in train.py"
-    
-    # Get the function body by finding the next function definition or class
-    end = content.find("\n\n", start)  # Look for double newline
-    if end == -1:  # If not found, try finding next def or class
-        end = min(x for x in [
-            content.find("\ndef", start + 1),
-            content.find("\nclass", start + 1),
-            len(content)
-        ] if x != -1)
-    
-    function_text = content[start:end].strip()
+    if training_phase == "combined":
+        # Keep existing behavior - find calculate_reward function
+        start = content.find("def calculate_reward")
+        if start == -1:
+            return "Reward function not found in train.py"
+        
+        # Get the function body by finding the next function definition or class
+        end = content.find("\n\n", start)  # Look for double newline
+        if end == -1:  # If not found, try finding next def or class
+            end = min(x for x in [
+                content.find("\ndef", start + 1),
+                content.find("\nclass", start + 1),
+                len(content)
+            ] if x != -1)
+        
+        function_text = content[start:end].strip()
+        
+    elif training_phase == "rotation":
+        # Find the step method in RotationPhaseWrapper
+        rotation_class_start = content.find("class RotationPhaseWrapper")
+        if rotation_class_start == -1:
+            return "RotationPhaseWrapper not found in train.py"
+            
+        step_method_start = content.find("    def step(self, action):", rotation_class_start)
+        if step_method_start == -1:
+            return "step method not found in RotationPhaseWrapper"
+            
+        # Find the end of the step method by looking for the next method at the same indentation level
+        step_method_end = content.find("\n    def ", step_method_start + 1)
+        if step_method_end == -1:  # If not found, try finding the end of the class
+            step_method_end = content.find("\nclass ", step_method_start + 1)
+            if step_method_end == -1:  # If still not found, use the end of the file
+                step_method_end = len(content)
+                
+        function_text = content[step_method_start:step_method_end].strip()
+        
+    elif training_phase == "walking":
+        # Find the step method in WalkingPhaseWrapper
+        walking_class_start = content.find("class WalkingPhaseWrapper")
+        if walking_class_start == -1:
+            return "WalkingPhaseWrapper not found in train.py"
+            
+        step_method_start = content.find("    def step(self, action):", walking_class_start)
+        if step_method_start == -1:
+            return "step method not found in WalkingPhaseWrapper"
+            
+        # Find the end of the step method by looking for the next method at the same indentation level
+        step_method_end = content.find("\n    def ", step_method_start + 1)
+        if step_method_end == -1:  # If not found, try finding the end of the class
+            step_method_end = content.find("\nclass ", step_method_start + 1)
+            if step_method_end == -1:  # If still not found, use the end of the file
+                step_method_end = len(content)
+                
+        function_text = content[step_method_start:step_method_end].strip()
+    else:
+        return f"Unknown training phase: {training_phase}"
     
     # Format the function text for markdown
     lines = function_text.split("\n")
@@ -116,7 +157,7 @@ def get_env_params():
         'body_density': density
     }
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, total_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False):
+def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, total_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined"):
     """Generate a markdown file with model details.
     
     Args:
@@ -132,6 +173,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         checkpoint_stride: How many checkpoints were skipped between saves
         load_path: Path to the model loaded for continued training
         interrupted: Whether training was interrupted (e.g., by KeyboardInterrupt)
+        training_phase: The training phase used ("combined", "walking", or "rotation")
     """
     from train import default_hyperparameters
     card_path = os.path.join(save_dir, "model_card.md")
@@ -179,7 +221,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Training Command in its own subsection
         f.write("### Training Command\n")
         n_updates = total_timesteps // default_hyperparameters["n_steps"]  # Convert timesteps back to updates
-        command = f"python main.py --n-updates {n_updates}"
+        command = f"python main.py --training-phase {training_phase} --n-updates {n_updates}"
         if tensorboard_log and tensorboard_log != 'tensorboard_logs':  # Only include if not default
             command += f" --tensorboard-log {tensorboard_log}"
         if load_path:
@@ -222,7 +264,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
             f.write(f"- TensorBoard Log: `{os.path.join(tensorboard_log, f'{run_name}_0')}`\n")
         
         # Reward Function
-        reward_func = get_reward_function_text()
+        reward_func = get_reward_function_text(training_phase)
         if reward_func:
             f.write("\n## Reward Function\n")
             f.write("```python\n")

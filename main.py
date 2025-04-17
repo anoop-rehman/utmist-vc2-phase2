@@ -46,20 +46,19 @@ def create_policy(model, training_phase="combined"):
         orig_obs = process_observation(time_step)
         
         # Display rotation alignment information when in rotation phase
-        if training_phase == "rotation" and 'absolute_root_zaxis' in time_step.observation[0]:
+        if training_phase == "rotation" and 'absolute_root_mat' in time_step.observation[0]:
             frame_counter += 1
             # Only display every 10 frames to avoid console spam
             if frame_counter % 10 == 0:
-                local_z = time_step.observation[0]['absolute_root_zaxis']
+                # Extract the z-axis from the rotation matrix
+                rot_matrix = time_step.observation[0]['absolute_root_mat']
+                # Get the x-component (alignment with x-axis)
+                alignment = float(rot_matrix[0, 2])
                 
-                # Alignment is x-component of local_z
-                alignment = local_z[0]
-                
-                # Use raw alignment value (-1 to 1) to match RotationPhaseWrapper
+                # Use raw alignment value (-1 to 1) 
                 reward = alignment
                 
-                print(f"Root z-axis: [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
-                      f"Alignment with x: {alignment:.3f}, Reward: {reward:.3f}")
+                print(f"Rotation reward (alignment with x): {alignment:.3f}")
         
         # Only add the additional observation components for walking phase
         if training_phase == "walking":
@@ -190,7 +189,8 @@ if __name__ == "__main__":
             keep_checkpoints=args.keep_checkpoints,
             checkpoint_stride=args.checkpoint_stride,
             start_timesteps=args.start_timesteps,
-            keep_previous_model=args.keep_previous_model
+            keep_previous_model=args.keep_previous_model,
+            training_phase=args.training_phase  # Pass the training phase
         )
 
         # Launch viewer after training if enabled

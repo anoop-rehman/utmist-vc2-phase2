@@ -763,7 +763,7 @@ class CheckpointCallback(BaseCallback):
         
         return True
 
-def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False):
+def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined"):
     """Train a creature using PPO.
     
     Args:
@@ -777,6 +777,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         keep_checkpoints: Whether to keep all checkpoints
         checkpoint_stride: How many checkpoints to skip between saves
         keep_previous_model: Whether to keep the previous model folder
+        training_phase: Which training phase is being used ("combined", "walking", or "rotation")
     """
     # Record start time
     start_time = datetime.now()
@@ -926,7 +927,8 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         keep_checkpoints=keep_checkpoints,
         checkpoint_stride=checkpoint_stride,
         load_path=load_path,
-        interrupted=interrupted  # Pass the interrupted flag
+        interrupted=interrupted,  # Pass the interrupted flag
+        training_phase=training_phase  # Pass the training phase
     )
     
     return model 

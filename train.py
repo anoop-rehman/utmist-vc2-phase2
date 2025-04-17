@@ -65,7 +65,21 @@ def get_default_folder():
     """Generate a default folder name using datetime in EST timezone."""
     eastern_tz = pytz.timezone('US/Eastern')
     now = datetime.now(tz=eastern_tz)
-    return now.strftime("%Y%m%d__%p_%I_%M_%S").lower()
+    
+    # Format with custom hour handling
+    year = now.strftime("%Y%m%d")
+    am_pm = now.strftime("%p").lower()
+    
+    # Convert 12-hour format to use 00 instead of 12
+    hour_12 = now.hour % 12
+    if hour_12 == 0:  # If it's noon or midnight
+        hour_12 = 0   # Use 00 instead of 12
+        
+    minute = now.strftime("%M")
+    second = now.strftime("%S")
+    
+    # Format with leading zeros
+    return f"{year}__{am_pm}_{hour_12:02d}_{minute}_{second}"
 
 def process_observation(timestep):
     """Convert DM Control observation to the format expected by the model."""
@@ -630,8 +644,7 @@ class TensorboardCallback(BaseCallback):
         env_steps = self.num_timesteps
         
         # Update total timesteps count (including initial steps)
-        # self.current_total_timesteps = self.start_timesteps + self.num_timesteps
-        self.current_total_timesteps = self.num_timesteps
+        self.current_total_timesteps = self.start_timesteps + self.num_timesteps
         
         # Log step-level metrics
         self.logger.record('train/reward', reward)
@@ -848,8 +861,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
             model.actual_timesteps_trained = tensorboard_callback.current_total_timesteps - start_timesteps
             print(f"Trained for {model.actual_timesteps_trained} steps of planned {total_timesteps}")
         else:
-            model.actual_timesteps_trained = total_timesteps
-            print("No tensorboard callback found, using total timesteps")
+            # If we can't get the exact number, estimate it
+            model.actual_timesteps_trained = total_timesteps // 2  # Rough estimate
+            print(f"Estimating ~{model.actual_timesteps_trained} steps out of planned {total_timesteps}")
     
     # Use correct number of timesteps
     if interrupted:
@@ -923,7 +937,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         start_time=start_time,
         end_time=end_time,
         start_timesteps=start_timesteps or 0,
-        trained_timesteps=actual_timesteps,  # Use actual timesteps trained
+        total_timesteps=actual_timesteps,  # Use actual timesteps trained
         tensorboard_log=tensorboard_log,
         checkpoint_freq=checkpoint_freq,
         keep_checkpoints=keep_checkpoints,

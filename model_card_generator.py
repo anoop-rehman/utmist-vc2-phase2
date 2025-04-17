@@ -238,16 +238,15 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Add policy updates info
         prev_updates = start_timesteps // default_hyperparameters["n_steps"] if start_timesteps else 0
         
-        # For total updates, calculate actual count based on total steps (not integer division)
-        total_steps = start_timesteps + total_timesteps
-        total_updates_actual = total_steps // default_hyperparameters["n_steps"]
-        
-        # Training updates is the difference between total and previous
-        training_updates = total_updates_actual - prev_updates
+        training_timesteps = total_timesteps - start_timesteps
+        training_updates = training_timesteps // default_hyperparameters["n_steps"]
+
+        total_updates = total_timesteps // default_hyperparameters["n_steps"]                
+
         
         f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} env timesteps)\n")
-        f.write(f"- Training Updates: {training_updates} ({total_timesteps} env timesteps)\n")
-        f.write(f"- Total Updates: {total_updates_actual} ({total_steps} env timesteps)\n")
+        f.write(f"- Training Updates: {training_updates} ({training_timesteps} env timesteps)\n")
+        f.write(f"- Total Updates: {total_updates} ({total_timesteps} env timesteps)\n")
         
         # Add completion status
         if interrupted:
@@ -255,7 +254,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         else:
             f.write(f"- Training Status: COMPLETED\n")
             
-        final_model_path = os.path.join(save_dir, f'final_model_{total_updates_actual}updates.zip')
+        final_model_path = os.path.join(save_dir, f'final_model_{total_updates}updates.zip')
         f.write(f"- Final Model Path: `{final_model_path}`\n")
         if start_timesteps > 0:
             if load_path:

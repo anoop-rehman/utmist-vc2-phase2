@@ -630,7 +630,8 @@ class TensorboardCallback(BaseCallback):
         env_steps = self.num_timesteps
         
         # Update total timesteps count (including initial steps)
-        self.current_total_timesteps = self.start_timesteps + self.num_timesteps
+        # self.current_total_timesteps = self.start_timesteps + self.num_timesteps
+        self.current_total_timesteps = self.num_timesteps
         
         # Log step-level metrics
         self.logger.record('train/reward', reward)
@@ -847,9 +848,8 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
             model.actual_timesteps_trained = tensorboard_callback.current_total_timesteps - start_timesteps
             print(f"Trained for {model.actual_timesteps_trained} steps of planned {total_timesteps}")
         else:
-            # If we can't get the exact number, estimate it
-            model.actual_timesteps_trained = total_timesteps // 2  # Rough estimate
-            print(f"Estimating ~{model.actual_timesteps_trained} steps out of planned {total_timesteps}")
+            model.actual_timesteps_trained = total_timesteps
+            print("No tensorboard callback found, using total timesteps")
     
     # Use correct number of timesteps
     if interrupted:

@@ -238,7 +238,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Add policy updates info
         prev_updates = start_timesteps // default_hyperparameters["n_steps"] if start_timesteps else 0
         
-        training_timesteps = total_timesteps - start_timesteps
+        training_timesteps = total_timesteps
         training_updates = training_timesteps // default_hyperparameters["n_steps"]
 
         total_updates = total_timesteps // default_hyperparameters["n_steps"]                

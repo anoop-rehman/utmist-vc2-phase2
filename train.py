@@ -923,7 +923,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         start_time=start_time,
         end_time=end_time,
         start_timesteps=start_timesteps or 0,
-        total_timesteps=actual_timesteps,  # Use actual timesteps trained
+        trained_timesteps=actual_timesteps,  # Use actual timesteps trained
         tensorboard_log=tensorboard_log,
         checkpoint_freq=checkpoint_freq,
         keep_checkpoints=keep_checkpoints,

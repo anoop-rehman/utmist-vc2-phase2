@@ -442,8 +442,8 @@ class RotationPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the rotation phase of training."""
     def __init__(self, env):
         super().__init__(env)
-        # Add quaternion history
-        self.quaternion_history = []
+        # Track orientation matrix history instead of quaternions
+        self.matrix_history = []
         self.initial_orientation = None
         self.verbose = True
         
@@ -461,33 +461,46 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         obs = process_observation(timestep)
         
+        # Store the observation dict for debugging
+        self.last_obs_dict = timestep.observation[0]
+        
         # Initialize variables
         angular_movement = 0.0
         angular_stillness_penalty = 0.0
         
         # Track orientation history
-        if 'absolute_root_rot' in timestep.observation[0]:
-            current_quat = timestep.observation[0]['absolute_root_rot'].copy()
-            self.quaternion_history.append(current_quat)
+        if 'absolute_root_mat' in timestep.observation[0]:
+            current_mat = timestep.observation[0]['absolute_root_mat'].copy()
+            self.matrix_history.append(current_mat)
             # Keep history manageable
-            if len(self.quaternion_history) > 20:  # 20-step window
-                self.quaternion_history.pop(0)
+            if len(self.matrix_history) > 20:  # 20-step window
+                self.matrix_history.pop(0)
             
             # Calculate angular movement over window
-            if len(self.quaternion_history) >= 2:
-                # Get past quaternion
-                past_quat = self.quaternion_history[max(0, len(self.quaternion_history)-10)]  # 10 steps back
+            if len(self.matrix_history) >= 2:
+                # Get past matrix
+                past_mat = self.matrix_history[max(0, len(self.matrix_history)-10)]  # 10 steps back
                 
-                # Calculate angular difference between quaternions
-                dot_product = np.sum(current_quat * past_quat)
-                dot_product = np.clip(dot_product, -1.0, 1.0)  # Ensure valid range for acos
-                angle_diff = 2.0 * np.arccos(abs(dot_product))  # In radians
+                # Calculate angular difference between matrices
+                # This uses the trace of R1^T * R2 to find rotation angle
+                current_mat_reshaped = current_mat.reshape(3, 3)
+                past_mat_reshaped = past_mat.reshape(3, 3)
+                
+                # Calculate R1^T * R2
+                rotation_diff = np.dot(current_mat_reshaped.T, past_mat_reshaped)
+                
+                # Trace of the matrix gives us 1 + 2*cos(theta)
+                trace = np.trace(rotation_diff)
+                trace = min(3.0, max(-1.0, trace))  # Clamp to valid range
+                
+                # Convert to angle in radians
+                angle_diff = np.arccos((trace - 1.0) / 2.0)
                 
                 # Convert to degrees for more intuitive values
                 angular_movement = np.degrees(angle_diff)
                 
                 # Calculate alignment reward
-                alignment_reward = self.calculate_alignment_reward(current_quat)
+                alignment_reward = self.calculate_alignment_reward(current_mat)
                 
                 # Apply stillness penalty based on angular movement AND current alignment
                 angle_threshold = 5.0  # Degrees of expected rotation in window
@@ -502,9 +515,9 @@ class RotationPhaseWrapper(DMControlWrapper):
                     angular_stillness_penalty = 2.0 * stillness_factor * penalty_scaling
             else:
                 # Not enough history yet, just calculate alignment without stillness penalty
-                alignment_reward = self.calculate_alignment_reward(current_quat)
+                alignment_reward = self.calculate_alignment_reward(current_mat)
         else:
-            print("absolute_root_rot not found in timestep.observation[0]!")
+            print("absolute_root_mat not found in timestep.observation[0]!")
             alignment_reward = 0.0
         
         # Combine alignment reward with angular stillness penalty
@@ -560,8 +573,8 @@ class RotationPhaseWrapper(DMControlWrapper):
                 print(f"Error randomizing orientation: {e}")
         
         # Store initial orientation
-        if 'absolute_root_rot' in timestep.observation[0]:
-            self.initial_orientation = timestep.observation[0]['absolute_root_rot'].copy()
+        if 'absolute_root_mat' in timestep.observation[0]:
+            self.initial_orientation = timestep.observation[0]['absolute_root_mat'].copy()
             # Calculate and log initial alignment
             initial_alignment = self.calculate_alignment_reward(self.initial_orientation)
             self.last_vel_to_ball = initial_alignment
@@ -574,7 +587,7 @@ class RotationPhaseWrapper(DMControlWrapper):
         print(f"\nEpisode {self.episode_count} started:")
         if 'absolute_root_pos' in timestep.observation[0]:
             print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
-        if 'absolute_root_rot' in timestep.observation[0]:
+        if 'absolute_root_mat' in timestep.observation[0]:
             print(f"  Initial alignment reward: {self.last_vel_to_ball:.4f}")
         
         # We need to re-process the observation after applying the random rotation
@@ -588,53 +601,21 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         return obs
 
-    def calculate_alignment_reward(self, euler_angles):
-        """Calculate reward based on aligning local z-axis with global x-axis using Euler angles."""
-        # Unpack Euler angles
-        roll, pitch, yaw = euler_angles.flatten()
+    def calculate_alignment_reward(self, rotation_matrix):
+        """Calculate reward based on aligning local z-axis with global x-axis using rotation matrix."""
+        # Reshape from flat array to 3x3 matrix 
+        mat = rotation_matrix.reshape(3, 3)
+
+        # The third column of the matrix is the local z-axis in global coordinates
+        local_z = mat[:, 2]  # Extract third column (index 2)
         
-        # Calculate the orientation of the local z-axis (0,0,1) in global coordinates
-        # Using rotation matrix multiplication with Euler angles
-        
-        # Calculate rotation matrices for each angle
-        # Roll (around x-axis)
-        cos_r, sin_r = np.cos(roll), np.sin(roll)
-        R_x = np.array([
-            [1, 0, 0],
-            [0, cos_r, -sin_r],
-            [0, sin_r, cos_r]
-        ])
-        
-        # Pitch (around y-axis)
-        cos_p, sin_p = np.cos(pitch), np.sin(pitch)
-        R_y = np.array([
-            [cos_p, 0, sin_p],
-            [0, 1, 0],
-            [-sin_p, 0, cos_p]
-        ])
-        
-        # Yaw (around z-axis)
-        cos_y, sin_y = np.cos(yaw), np.sin(yaw)
-        R_z = np.array([
-            [cos_y, -sin_y, 0],
-            [sin_y, cos_y, 0],
-            [0, 0, 1]
-        ])
-        
-        # Combined rotation matrix (order: yaw → pitch → roll)
-        R = np.dot(R_z, np.dot(R_y, R_x))
-        
-        # Transform the local z-axis [0,0,1]
-        local_z = np.dot(R, np.array([0, 0, 1]))
-        
-        # Alignment is the x-component of the transformed z-axis
+        # Alignment is simply the x-component of the local z-axis
         alignment = local_z[0]
         
         # Print alignment in verbose mode for debugging - only every 40 steps
         if self.verbose and hasattr(process_observation, "should_print") and process_observation.should_print:
-            print(f"Root z-axis: [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
+            print(f"Root z-axis (from matrix): [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
                   f"Alignment with x: {alignment:.3f}, Reward: {alignment:.3f}")
-            print(f"Euler angles (roll, pitch, yaw): [{roll:.3f}, {pitch:.3f}, {yaw:.3f}]")
         
         return alignment
 

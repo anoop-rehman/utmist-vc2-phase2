@@ -215,29 +215,34 @@ class CreatureObservables(legacy_base.WalkerObservables):
     """Absolute position of the root body in the global frame."""
     return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xpos)
 
+#   @composer.observable
+#   def absolute_root_rot(self):
+#     """Absolute orientation of the root body in the global frame as Euler angles."""
+#     def root_orientation_euler(physics):
+#       quat = physics.bind(self._entity.root_body).xquat
+#       w, x, y, z = quat
+      
+#       # Roll (rotation around x)
+#       roll = np.arctan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
+      
+#       # Pitch (rotation around y)
+#       pitch = np.arcsin(2*(w*y - z*x))
+      
+#       # Yaw (rotation around z)
+#       yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+      
+#       return np.array([roll, pitch, yaw], dtype=np.float32)
+#     return observable.Generic(root_orientation_euler)
+
   @composer.observable
-  def absolute_root_rot(self):
-    """Absolute orientation of the root body in the global frame as Euler angles."""
-    def root_orientation_euler(physics):
-      quat = physics.bind(self._entity.root_body).xquat
-      w, x, y, z = quat
-      
-      # Roll (rotation around x)
-      roll = np.arctan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
-      
-      # Pitch (rotation around y)
-      pitch = np.arcsin(2*(w*y - z*x))
-      
-      # Yaw (rotation around z)
-      yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
-      
-      return np.array([roll, pitch, yaw], dtype=np.float32)
-    return observable.Generic(root_orientation_euler)
+  def absolute_root_mat(self):
+    """Absolute orientation matrix of the root body in the global frame."""
+    return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xmat)
 
   @property
   def proprioception(self):
     return ([self.joints_pos, self.joints_vel,
              self.body_height, self.end_effectors_pos,
              self.appendages_pos, self.world_zaxis,
-             self.bodies_quats, self.bodies_pos, self.absolute_root_pos, self.absolute_root_rot] +
+             self.bodies_quats, self.bodies_pos, self.absolute_root_pos, self.absolute_root_mat] +
             self._collect_from_attachments('proprioception'))

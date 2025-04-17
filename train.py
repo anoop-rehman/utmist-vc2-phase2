@@ -65,7 +65,21 @@ def get_default_folder():
     """Generate a default folder name using datetime in EST timezone."""
     eastern_tz = pytz.timezone('US/Eastern')
     now = datetime.now(tz=eastern_tz)
-    return now.strftime("%Y%m%d__%p_%I_%M_%S").lower()
+    
+    # Format with custom hour handling
+    year = now.strftime("%Y%m%d")
+    am_pm = now.strftime("%p").lower()
+    
+    # Convert 12-hour format to use 00 instead of 12
+    hour_12 = now.hour % 12
+    if hour_12 == 0:  # If it's noon or midnight
+        hour_12 = 0   # Use 00 instead of 12
+        
+    minute = now.strftime("%M")
+    second = now.strftime("%S")
+    
+    # Format with leading zeros
+    return f"{year}__{am_pm}_{hour_12:02d}_{minute}_{second}"
 
 def process_observation(timestep):
     """Convert DM Control observation to the format expected by the model."""

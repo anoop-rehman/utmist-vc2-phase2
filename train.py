@@ -465,85 +465,38 @@ class RotationPhaseWrapper(DMControlWrapper):
     """Environment wrapper for the rotation phase of training."""
     def __init__(self, env):
         super().__init__(env)
-        # Track orientation matrix history instead of quaternions
-        self.matrix_history = []
+        # Track initial orientation for debuggging
         self.initial_orientation = None
         self.verbose = True
+        
+        print("\n==== Using simplified rotation reward (alignment only, -1 to 1 range) ====\n")
         
     def step(self, action):
         timestep = self.env.step([action])
         
-        # Track position for distance calculation
-        current_pos = None
-        if 'absolute_root_pos' in timestep.observation[0]:
-            pos = timestep.observation[0]['absolute_root_pos']
-            current_pos = pos.copy()
-            self.position_history.append(pos)
-            if len(self.position_history) > self.window_size:
-                self.position_history.pop(0)
-        
+        # Get observation 
         obs = process_observation(timestep)
         
-        # Store the observation dict for debugging
-        self.last_obs_dict = timestep.observation[0]
+        # Initialize reward to default value
+        alignment_reward = 0.0
         
-        # Initialize variables
-        angular_movement = 0.0
-        angular_stillness_penalty = 0.0
-        
-        # Track orientation history - now using rotation matrix instead of z-axis
+        # Extract alignment directly from rotation matrix
         if 'absolute_root_mat' in timestep.observation[0]:
-            # Extract the z-axis from the rotation matrix
+            # Get the rotation matrix
             rot_matrix = timestep.observation[0]['absolute_root_mat'].copy()
-            # In a flattened 3x3 matrix, the third column is the z-axis (indices 2, 5, 8)
-            current_zaxis = np.array([rot_matrix[0, 2], rot_matrix[0, 5], rot_matrix[0, 8]])
             
-            self.matrix_history.append(current_zaxis)
-            # Keep history manageable
-            if len(self.matrix_history) > 20:  # 20-step window
-                self.matrix_history.pop(0)
+            # The x-component of the z-axis is directly at index 2 of the flattened matrix
+            # This represents the alignment of the z-axis with the x-axis
+            alignment_reward = float(rot_matrix[0, 2])
             
-            # Calculate angular movement over window
-            if len(self.matrix_history) >= 2:
-                # Get past z-axis
-                past_zaxis = self.matrix_history[max(0, len(self.matrix_history)-10)]  # 10 steps back
-                
-                # Calculate angular difference between z-axes using dot product
-                # Flatten arrays to ensure shape compatibility
-                current_zaxis_flat = current_zaxis.flatten()
-                past_zaxis_flat = past_zaxis.flatten()
-                dot_product = np.dot(current_zaxis_flat, past_zaxis_flat)
-                dot_product = np.clip(dot_product, -1.0, 1.0)  # Clamp to valid range
-                
-                # Convert to angle in radians
-                angle_diff = np.arccos(dot_product)
-                
-                # Convert to degrees for more intuitive values
-                angular_movement = np.degrees(angle_diff)
-                
-                # Calculate alignment reward
-                alignment_reward = self.calculate_alignment_reward(current_zaxis)
-                
-                # Apply stillness penalty based on angular movement AND current alignment
-                angle_threshold = 5.0  # Degrees of expected rotation in window
-                if angular_movement < angle_threshold:
-                    stillness_factor = (angle_threshold - angular_movement) / angle_threshold
-                    
-                    # Scale penalty based on alignment quality
-                    alignment_quality = max(0.0, alignment_reward)  # Only consider positive alignment
-                    penalty_scaling = 1.0 - (alignment_quality * alignment_quality)  # Squared for sharper dropoff
-                    
-                    # Apply scaled penalty
-                    angular_stillness_penalty = 2.0 * stillness_factor * penalty_scaling
-            else:
-                # Not enough history yet, just calculate alignment without stillness penalty
-                alignment_reward = self.calculate_alignment_reward(current_zaxis)
+            # Print debug info periodically
+            if hasattr(process_observation, "should_print") and process_observation.should_print:
+                print(f"Rotation reward: z-axis x-component = {alignment_reward:.3f}")
         else:
             print("absolute_root_mat not found in timestep.observation[0]!")
-            alignment_reward = 0.0
         
-        # Combine alignment reward with angular stillness penalty
-        reward = alignment_reward - angular_stillness_penalty
+        # Use simple alignment reward directly
+        reward = alignment_reward
         
         done = timestep.last()
         info = {}
@@ -555,9 +508,6 @@ class RotationPhaseWrapper(DMControlWrapper):
     def reset(self):
         timestep = self.env.reset()
         obs = process_observation(timestep)
-        
-        # Clear position history
-        self.position_history = []
         
         # Randomize the creature's orientation by applying a random rotation
         # This is done via the internal physics engine
@@ -594,15 +544,13 @@ class RotationPhaseWrapper(DMControlWrapper):
             except Exception as e:
                 print(f"Error randomizing orientation: {e}")
         
-        # Store initial orientation - now using rotation matrix instead of z-axis
+        # Store initial orientation - now directly the alignment value
         if 'absolute_root_mat' in timestep.observation[0]:
             rot_matrix = timestep.observation[0]['absolute_root_mat'].copy()
-            # Extract z-axis from rotation matrix (third column)
-            self.initial_orientation = np.array([rot_matrix[0, 2], rot_matrix[0, 5], rot_matrix[0, 8]])
-            # Calculate and log initial alignment
-            initial_alignment = self.calculate_alignment_reward(self.initial_orientation)
-            # Make sure this is a scalar value, not an array
-            self.last_vel_to_ball = float(initial_alignment)
+            # Extract x-component of z-axis directly
+            initial_alignment = float(rot_matrix[0, 2])
+            self.initial_orientation = initial_alignment
+            self.last_vel_to_ball = initial_alignment
         else:
             self.initial_orientation = None
             self.last_vel_to_ball = 0.0
@@ -631,29 +579,6 @@ class RotationPhaseWrapper(DMControlWrapper):
                 print(f"Error getting fresh observation: {e}")
         
         return obs
-
-    def calculate_alignment_reward(self, zaxis):
-        """Calculate reward based on aligning local z-axis with global x-axis."""
-        # The z-axis is already in global coordinates
-        # Get the x-component of the z-axis vector (index 0)
-        # Handle different possible shapes of zaxis
-        if len(zaxis.shape) > 1:  # If shape is (1, 3)
-            alignment = float(zaxis[0, 0])  # Get first element of first row
-        else:  # If shape is (3,)
-            alignment = float(zaxis[0])  # Get first element
-        
-        # Print alignment in verbose mode for debugging - only every 40 steps
-        if self.verbose and hasattr(process_observation, "should_print") and process_observation.should_print:
-            # Format the zaxis vector for printing, handling different shapes
-            if len(zaxis.shape) > 1:
-                z0, z1, z2 = zaxis[0, 0], zaxis[0, 1], zaxis[0, 2]
-            else:
-                z0, z1, z2 = zaxis[0], zaxis[1], zaxis[2]
-                
-            print(f"Root z-axis: [{z0:.3f}, {z1:.3f}, {z2:.3f}], " +
-                  f"Alignment with x: {alignment:.3f}, Reward: {alignment:.3f}")
-        
-        return alignment
 
 class TrainingCallback(BaseCallback):
     def __init__(self, verbose=0):

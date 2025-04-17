@@ -854,12 +854,14 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     # Use correct number of timesteps
     if interrupted:
         env_steps = start_timesteps + model.actual_timesteps_trained
+        # Calculate total updates based on total steps (not separate divisions)
         total_updates = env_steps // default_hyperparameters["n_steps"]
         print(f"Training was interrupted after approximately {model.actual_timesteps_trained} steps.")
         print(f"Total steps including previous training: {env_steps}")
         print(f"Total updates: {total_updates}")
     else:
         env_steps = start_timesteps + total_timesteps
+        # Calculate total updates based on total steps
         total_updates = env_steps // default_hyperparameters["n_steps"]
     
     # Save final model with environment steps in filename

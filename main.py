@@ -46,17 +46,11 @@ def create_policy(model, training_phase="combined"):
         orig_obs = process_observation(time_step)
         
         # Display rotation alignment information when in rotation phase
-        if training_phase == "rotation" and 'absolute_root_mat' in time_step.observation[0]:
+        if training_phase == "rotation" and 'absolute_root_zaxis' in time_step.observation[0]:
             frame_counter += 1
             # Only display every 10 frames to avoid console spam
             if frame_counter % 10 == 0:
-                root_mat = time_step.observation[0]['absolute_root_mat']
-                
-                # Reshape the matrix to 3x3
-                root_mat_reshaped = root_mat.reshape(3, 3)
-                
-                # The third column is the local z-axis in global coordinates
-                local_z = root_mat_reshaped[:, 2]
+                local_z = time_step.observation[0]['absolute_root_zaxis']
                 
                 # Alignment is x-component of local_z
                 alignment = local_z[0]

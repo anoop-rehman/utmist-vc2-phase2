@@ -161,37 +161,55 @@ class CreatureObservables(legacy_base.WalkerObservables):
     return observable.Generic(appendages_ego_pos)
 
   @composer.observable
-  def bodies_quats(self):
-    """Orientations of the bodies as Euler angles (roll, pitch, yaw), in the egocentric frame."""
+  def bodies_mats(self):
+    """Orientations of the bodies as rotation matrices, in the egocentric frame."""
     bodies = self._entity.bodies
-    self._entity.bodies_quats_sensors[:] = []
+    self._entity.bodies_xaxis_sensors = []
+    self._entity.bodies_yaxis_sensors = []
+    self._entity.bodies_zaxis_sensors = []
+    
     for body in bodies:
-      self._entity.bodies_quats_sensors.append(
+      # Create sensor for each axis
+      self._entity.bodies_xaxis_sensors.append(
           self._entity.mjcf_model.sensor.add(
-              'framequat', name=body.name + '_ego_body_quat',
+              'framexaxis', name=body.name + '_ego_body_xaxis',
               objtype='xbody', objname=body,
               reftype='xbody', refname=self._entity.root_body))
+      
+      self._entity.bodies_yaxis_sensors.append(
+          self._entity.mjcf_model.sensor.add(
+              'frameyaxis', name=body.name + '_ego_body_yaxis',
+              objtype='xbody', objname=body,
+              reftype='xbody', refname=self._entity.root_body))
+      
+      self._entity.bodies_zaxis_sensors.append(
+          self._entity.mjcf_model.sensor.add(
+              'framezaxis', name=body.name + '_ego_body_zaxis',
+              objtype='xbody', objname=body,
+              reftype='xbody', refname=self._entity.root_body))
+              
     def bodies_ego_orientation(physics):
-      quats = physics.bind(self._entity.bodies_quats_sensors).sensordata
-      quats_reshaped = np.reshape(quats, (-1, 4))
+      # Get each axis from sensors
+      x_axes = physics.bind(self._entity.bodies_xaxis_sensors).sensordata
+      y_axes = physics.bind(self._entity.bodies_yaxis_sensors).sensordata
+      z_axes = physics.bind(self._entity.bodies_zaxis_sensors).sensordata
       
-      # Convert quaternions to Euler angles (roll, pitch, yaw)
-      euler_angles = []
-      for quat in quats_reshaped:
-        w, x, y, z = quat
-        
-        # Roll (rotation around x)
-        roll = np.arctan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
-        
-        # Pitch (rotation around y)
-        pitch = np.arcsin(2*(w*y - z*x))
-        
-        # Yaw (rotation around z)
-        yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
-        
-        euler_angles.extend([roll, pitch, yaw])
+      # Reshape to get the right dimensions
+      n_bodies = len(self._entity.bodies)
+      x_axes = x_axes.reshape(n_bodies, 3)
+      y_axes = y_axes.reshape(n_bodies, 3)
+      z_axes = z_axes.reshape(n_bodies, 3)
       
-      return np.array(euler_angles, dtype=np.float32)
+      # Construct rotation matrices (each body has a 3x3 matrix)
+      matrices = []
+      for i in range(n_bodies):
+        # Create matrix with each axis as a column
+        matrix = np.column_stack([x_axes[i], y_axes[i], z_axes[i]])
+        # Flatten the matrix and add to the output
+        matrices.extend(matrix.flatten())
+      
+      return np.array(matrices, dtype=np.float32)
+    
     return observable.Generic(bodies_ego_orientation)
 
   @composer.observable
@@ -215,34 +233,44 @@ class CreatureObservables(legacy_base.WalkerObservables):
     """Absolute position of the root body in the global frame."""
     return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xpos)
 
-#   @composer.observable
-#   def absolute_root_rot(self):
-#     """Absolute orientation of the root body in the global frame as Euler angles."""
-#     def root_orientation_euler(physics):
-#       quat = physics.bind(self._entity.root_body).xquat
-#       w, x, y, z = quat
+  @composer.observable
+  def absolute_root_zaxis(self):
+    """Z-axis of the root body in the global frame."""
+    def root_zaxis(physics):
+      # Get the rotation matrix
+      xmat = physics.bind(self._entity.root_body).xmat
       
-#       # Roll (rotation around x)
-#       roll = np.arctan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
+      # Extract the z-axis (third column of the rotation matrix)
+      # In a flattened 3x3 matrix, the third column is at indices 2, 5, 8
+      z_axis = np.array([xmat[2], xmat[5], xmat[8]])
       
-#       # Pitch (rotation around y)
-#       pitch = np.arcsin(2*(w*y - z*x))
-      
-#       # Yaw (rotation around z)
-#       yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
-      
-#       return np.array([roll, pitch, yaw], dtype=np.float32)
-#     return observable.Generic(root_orientation_euler)
+      return z_axis
+    return observable.Generic(root_zaxis)
 
   @composer.observable
-  def absolute_root_mat(self):
-    """Absolute orientation matrix of the root body in the global frame."""
-    return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xmat)
+  def bodies_zaxes(self):
+    """Z-axes of all bodies in the egocentric frame."""
+    bodies = self._entity.bodies
+    self._entity.bodies_zaxis_sensors = []
+    
+    for body in bodies:
+      # Only create sensors for z-axis
+      self._entity.bodies_zaxis_sensors.append(
+          self._entity.mjcf_model.sensor.add(
+              'framezaxis', name=body.name + '_ego_body_zaxis',
+              objtype='xbody', objname=body,
+              reftype='xbody', refname=self._entity.root_body))
+              
+    def bodies_ego_zaxes(physics):
+      # Return z-axes directly
+      return physics.bind(self._entity.bodies_zaxis_sensors).sensordata
+    
+    return observable.Generic(bodies_ego_zaxes)
 
   @property
   def proprioception(self):
     return ([self.joints_pos, self.joints_vel,
              self.body_height, self.end_effectors_pos,
              self.appendages_pos, self.world_zaxis,
-             self.bodies_quats, self.bodies_pos, self.absolute_root_pos, self.absolute_root_mat] +
+             self.bodies_zaxes, self.bodies_pos, self.absolute_root_pos, self.absolute_root_zaxis] +
             self._collect_from_attachments('proprioception'))

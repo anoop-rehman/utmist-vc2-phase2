@@ -469,38 +469,30 @@ class RotationPhaseWrapper(DMControlWrapper):
         angular_stillness_penalty = 0.0
         
         # Track orientation history
-        if 'absolute_root_mat' in timestep.observation[0]:
-            current_mat = timestep.observation[0]['absolute_root_mat'].copy()
-            self.matrix_history.append(current_mat)
+        if 'absolute_root_zaxis' in timestep.observation[0]:
+            current_zaxis = timestep.observation[0]['absolute_root_zaxis'].copy()
+            self.matrix_history.append(current_zaxis)
             # Keep history manageable
             if len(self.matrix_history) > 20:  # 20-step window
                 self.matrix_history.pop(0)
             
             # Calculate angular movement over window
             if len(self.matrix_history) >= 2:
-                # Get past matrix
-                past_mat = self.matrix_history[max(0, len(self.matrix_history)-10)]  # 10 steps back
+                # Get past z-axis
+                past_zaxis = self.matrix_history[max(0, len(self.matrix_history)-10)]  # 10 steps back
                 
-                # Calculate angular difference between matrices
-                # This uses the trace of R1^T * R2 to find rotation angle
-                current_mat_reshaped = current_mat.reshape(3, 3)
-                past_mat_reshaped = past_mat.reshape(3, 3)
-                
-                # Calculate R1^T * R2
-                rotation_diff = np.dot(current_mat_reshaped.T, past_mat_reshaped)
-                
-                # Trace of the matrix gives us 1 + 2*cos(theta)
-                trace = np.trace(rotation_diff)
-                trace = min(3.0, max(-1.0, trace))  # Clamp to valid range
+                # Calculate angular difference between z-axes using dot product
+                dot_product = np.dot(current_zaxis, past_zaxis)
+                dot_product = np.clip(dot_product, -1.0, 1.0)  # Clamp to valid range
                 
                 # Convert to angle in radians
-                angle_diff = np.arccos((trace - 1.0) / 2.0)
+                angle_diff = np.arccos(dot_product)
                 
                 # Convert to degrees for more intuitive values
                 angular_movement = np.degrees(angle_diff)
                 
                 # Calculate alignment reward
-                alignment_reward = self.calculate_alignment_reward(current_mat)
+                alignment_reward = self.calculate_alignment_reward(current_zaxis)
                 
                 # Apply stillness penalty based on angular movement AND current alignment
                 angle_threshold = 5.0  # Degrees of expected rotation in window
@@ -515,9 +507,9 @@ class RotationPhaseWrapper(DMControlWrapper):
                     angular_stillness_penalty = 2.0 * stillness_factor * penalty_scaling
             else:
                 # Not enough history yet, just calculate alignment without stillness penalty
-                alignment_reward = self.calculate_alignment_reward(current_mat)
+                alignment_reward = self.calculate_alignment_reward(current_zaxis)
         else:
-            print("absolute_root_mat not found in timestep.observation[0]!")
+            print("absolute_root_zaxis not found in timestep.observation[0]!")
             alignment_reward = 0.0
         
         # Combine alignment reward with angular stillness penalty
@@ -573,8 +565,8 @@ class RotationPhaseWrapper(DMControlWrapper):
                 print(f"Error randomizing orientation: {e}")
         
         # Store initial orientation
-        if 'absolute_root_mat' in timestep.observation[0]:
-            self.initial_orientation = timestep.observation[0]['absolute_root_mat'].copy()
+        if 'absolute_root_zaxis' in timestep.observation[0]:
+            self.initial_orientation = timestep.observation[0]['absolute_root_zaxis'].copy()
             # Calculate and log initial alignment
             initial_alignment = self.calculate_alignment_reward(self.initial_orientation)
             self.last_vel_to_ball = initial_alignment
@@ -587,7 +579,7 @@ class RotationPhaseWrapper(DMControlWrapper):
         print(f"\nEpisode {self.episode_count} started:")
         if 'absolute_root_pos' in timestep.observation[0]:
             print(f"  Creature position: {timestep.observation[0]['absolute_root_pos']}")
-        if 'absolute_root_mat' in timestep.observation[0]:
+        if 'absolute_root_zaxis' in timestep.observation[0]:
             print(f"  Initial alignment reward: {self.last_vel_to_ball:.4f}")
         
         # We need to re-process the observation after applying the random rotation
@@ -601,20 +593,15 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         return obs
 
-    def calculate_alignment_reward(self, rotation_matrix):
-        """Calculate reward based on aligning local z-axis with global x-axis using rotation matrix."""
-        # Reshape from flat array to 3x3 matrix 
-        mat = rotation_matrix.reshape(3, 3)
-
-        # The third column of the matrix is the local z-axis in global coordinates
-        local_z = mat[:, 2]  # Extract third column (index 2)
-        
-        # Alignment is simply the x-component of the local z-axis
-        alignment = local_z[0]
+    def calculate_alignment_reward(self, zaxis):
+        """Calculate reward based on aligning local z-axis with global x-axis."""
+        # The z-axis is already in global coordinates
+        # Alignment is simply the x-component (index 0)
+        alignment = zaxis[0]
         
         # Print alignment in verbose mode for debugging - only every 40 steps
         if self.verbose and hasattr(process_observation, "should_print") and process_observation.should_print:
-            print(f"Root z-axis (from matrix): [{local_z[0]:.3f}, {local_z[1]:.3f}, {local_z[2]:.3f}], " +
+            print(f"Root z-axis: [{zaxis[0]:.3f}, {zaxis[1]:.3f}, {zaxis[2]:.3f}], " +
                   f"Alignment with x: {alignment:.3f}, Reward: {alignment:.3f}")
         
         return alignment

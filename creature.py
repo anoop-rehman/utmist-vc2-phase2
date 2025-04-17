@@ -157,18 +157,27 @@ class CreatureObservables(legacy_base.WalkerObservables):
 
   @composer.observable
   def bodies_zaxes(self):
-    """Z-axes of all bodies relative to the root body frame."""
+    """Z-axes of bodies in multiple reference frames: world frame for root body, 
+    and relative to the root body frame for others."""
     bodies = self._entity.bodies
     self._entity.bodies_zaxis_sensors = []
     
+    # For the root body, express z-axis in world frame
+    root_body = self.root_body
+    self._entity.bodies_zaxis_sensors.append(
+        self._entity.mjcf_model.sensor.add(
+            'framezaxis', name=root_body.name + '_world_zaxis',
+            objtype='xbody', objname=root_body))
+    
+    # For other bodies, express z-axis relative to root body
     for body in bodies:
-      # Create sensors for z-axis relative to root body frame
-      self._entity.bodies_zaxis_sensors.append(
-          self._entity.mjcf_model.sensor.add(
-              'framezaxis', name=body.name + '_ego_zaxis',
-              objtype='xbody', objname=body,
-              reftype='xbody', refname=self._entity.root_body))
-              
+      if body != root_body:
+        self._entity.bodies_zaxis_sensors.append(
+            self._entity.mjcf_model.sensor.add(
+                'framezaxis', name=body.name + '_rel_zaxis',
+                objtype='xbody', objname=body,
+                reftype='xbody', refname=root_body))
+            
     def bodies_ego_zaxes(physics):
       # Return z-axes directly
       return physics.bind(self._entity.bodies_zaxis_sensors).sensordata

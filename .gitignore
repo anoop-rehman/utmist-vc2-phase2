@@ -160,8 +160,18 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
-/trained_creatures
-/tensorboard_logs
-/tensorboard_logs
+
 .DS_Store
-.DS_Store
+/trained_creatures/*
+/tensorboard_logs/*
+
+!/trained_creatures/20250417__pm_10_08_47/
+!/trained_creatures/20250417__pm_07_13_33/
+!/trained_creatures/20250417__pm_04_32_30/
+!/trained_creatures/20250417__am_02_40_36/
+
+!/tensorboard_logs/20250417__pm_10_08_47_0/
+!/tensorboard_logs/20250417__pm_07_13_33_0/
+!/tensorboard_logs/20250417__pm_04_32_30_0/
+!/tensorboard_logs/20250417__am_02_40_36_0/
+

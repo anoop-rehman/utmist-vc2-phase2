@@ -170,3 +170,8 @@ cython_debug/
 !/trained_creatures/20250417__pm_04_32_30/
 !/trained_creatures/20250417__am_02_40_36/
 
+!/tensorboard_logs/20250417__pm_10_08_47_0/
+!/tensorboard_logs/20250417__pm_07_13_33_0/
+!/tensorboard_logs/20250417__pm_04_32_30_0/
+!/tensorboard_logs/20250417__am_02_40_36_0/
+!/tensorboard_logs/PPO_2/

@@ -112,7 +112,7 @@
         <motor name="motor0_to_8" joint="seg0_to_8" />
     </actuator> -->
 
-    <actuator>
+    <!-- <actuator>
         <motor name="motor0_to_1" joint="seg0_to_1" gear="222.3375" />
         <motor name="motor0_to_2" joint="seg0_to_2" gear="160.00" />
         <motor name="motor2_to_3" joint="seg2_to_3" gear="84.5918" />
@@ -121,6 +121,17 @@
         <motor name="motor0_to_6" joint="seg0_to_6" gear="20796.840" />
         <motor name="motor6_to_7" joint="seg6_to_7" gear="10995.2578" />
         <motor name="motor0_to_8" joint="seg0_to_8" gear="677.0279" />
+    </actuator> -->
+
+    <actuator>
+        <motor name="motor0_to_1" joint="seg0_to_1" gear="2223.375" />
+        <motor name="motor0_to_2" joint="seg0_to_2" gear="1600.0" />
+        <motor name="motor2_to_3" joint="seg2_to_3" gear="845.918" />
+        <motor name="motor0_to_4" joint="seg0_to_4" gear="111285.648" />
+        <motor name="motor4_to_5" joint="seg4_to_5" gear="58836.571" />
+        <motor name="motor0_to_6" joint="seg0_to_6" gear="207968.40" />
+        <motor name="motor6_to_7" joint="seg6_to_7" gear="109952.578" />
+        <motor name="motor0_to_8" joint="seg0_to_8" gear="6770.279" />
     </actuator>
 
     <sensor>

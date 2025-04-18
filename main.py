@@ -44,21 +44,7 @@ def create_policy(model, training_phase="combined"):
         
         # Process base observation
         orig_obs = process_observation(time_step)
-        
-        # Display rotation alignment information when in rotation phase
-        if training_phase == "rotation" and 'absolute_root_mat' in time_step.observation[0]:
-            frame_counter += 1
-            # Only display every 10 frames to avoid console spam
-            if frame_counter % 10 == 0:
-                # Extract the z-axis from the rotation matrix
-                rot_matrix = time_step.observation[0]['absolute_root_mat']
-                # Get the x-component (alignment with x-axis)
-                alignment = float(rot_matrix[0, 2])
-                
-                # Use raw alignment value (-1 to 1) 
-                reward = alignment
-                
-                print(f"Rotation reward (alignment with x): {alignment:.3f}")
+    
         
         # Only add the additional observation components for walking phase
         if training_phase == "walking":
@@ -142,6 +128,23 @@ def create_policy(model, training_phase="combined"):
                 
         # Get action from model
         action, _states = model.predict(full_obs, deterministic=True)
+
+        # Display rotation alignment information when in rotation phase
+        if training_phase == "rotation" and 'absolute_root_mat' in time_step.observation[0]:
+            frame_counter += 1
+            # Only display every 10 frames to avoid console spam
+            if frame_counter % 1 == 0:
+                # Extract the z-axis from the rotation matrix
+                rot_matrix = time_step.observation[0]['absolute_root_mat']
+                # Get the x-component (alignment with x-axis)
+                alignment = float(rot_matrix[0, 2])
+                
+                # Use raw alignment value (-1 to 1) 
+                reward = alignment
+                
+                print(f"Rotation reward (alignment with x): {alignment:.3f}")
+                print(f"Action: {action}")
+
         return [action]
     
     return policy

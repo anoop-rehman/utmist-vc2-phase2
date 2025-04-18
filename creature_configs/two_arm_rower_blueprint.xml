@@ -2,7 +2,6 @@
 <mujoco model="Two Arm Rower">
     <compiler angle="degree" />
     <default>
-		<!-- <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="1500" /> -->
 		<motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="16000" />
         <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50.0" />
         <joint limited="true" armature="1" damping="1" stiffness="1" solreflimit=".04 1"
@@ -102,8 +101,7 @@
         </body>
     </worldbody>
 
-    <actuator>
-        <!-- Motors for all joints -->
+    <!-- <actuator>
         <motor name="motor0_to_1" joint="seg0_to_1" />
         <motor name="motor0_to_2" joint="seg0_to_2" />
         <motor name="motor2_to_3" joint="seg2_to_3" />
@@ -112,6 +110,17 @@
         <motor name="motor0_to_6" joint="seg0_to_6" />
         <motor name="motor6_to_7" joint="seg6_to_7" />
         <motor name="motor0_to_8" joint="seg0_to_8" />
+    </actuator> -->
+
+    <actuator>
+        <motor name="motor0_to_1" joint="seg0_to_1" gear="222.3375" />
+        <motor name="motor0_to_2" joint="seg0_to_2" gear="160.00" />
+        <motor name="motor2_to_3" joint="seg2_to_3" gear="84.5918" />
+        <motor name="motor0_to_4" joint="seg0_to_4" gear="11128.5648" />
+        <motor name="motor4_to_5" joint="seg4_to_5" gear="5883.6571" />
+        <motor name="motor0_to_6" joint="seg0_to_6" gear="20796.840" />
+        <motor name="motor6_to_7" joint="seg6_to_7" gear="10995.2578" />
+        <motor name="motor0_to_8" joint="seg0_to_8" gear="677.0279" />
     </actuator>
 
     <sensor>

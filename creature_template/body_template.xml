@@ -1,0 +1,19 @@
+<body name="seg{{bp.id}}" pos="{{bp.mujoco_position()}}">
+    {%- if properties %}
+    {{ properties | indent(4) }}
+
+    {%- endif %}
+    {%- if bp.joint %}
+    {%- if bp.joint.type == "hinge" %}
+    <joint name="seg{{bp.parent.id}}_to_{{bp.id}}" range="-75 75" type="{{bp.joint.type}}" axis="{{bp.mujoco_axis()}}" pos="{{bp.mujoco_joint_position()}} "/>
+    {%- elif bp.joint.type == "fixed" %}
+    <joint name="seg{{bp.parent.id}}_to_{{bp.id}}" range="0 0.01" type="hinge" axis="0 0 1" pos="{{bp.mujoco_joint_position()}} "/>
+    {%- endif %}
+    {%- endif %}
+    <geom name="seg{{bp.id}}_geom" type="box" pos="0 0 0" size="{{bp.mujoco_size()}}" euler="{{bp.rotation}}" />
+    <site name="seg{{bp.id}}_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+    {%- for child in bp.children %}
+
+    {{ child | render_body_part | indent(4) }}
+    {%- endfor %}
+</body>

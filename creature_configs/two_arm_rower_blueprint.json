@@ -1,0 +1,1073 @@
+[
+  {
+    "UniqueId": 0,
+    "TypeId": 1,
+    "Position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "LocalPosition": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "Rotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "LocalRotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "Size": {
+      "x": 0.7817855,
+      "y": 1.3171674,
+      "z": 0.436341643,
+      "normalized": {
+        "x": 0.490872949,
+        "y": 0.827032268,
+        "z": 0.273973256,
+        "normalized": {
+          "x": 0.490872979,
+          "y": 0.8270323,
+          "z": 0.2739733,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 1.59264326,
+      "sqrMagnitude": 2.53651237
+    },
+    "ParentUniqueId": null,
+    "JointType": null,
+    "JointAnchorPos": null,
+    "JointAxis": null,
+    "Color": {
+      "x": 27.0,
+      "y": 255.0,
+      "z": 233.0,
+      "normalized": {
+        "x": 0.07792833,
+        "y": 0.735989749,
+        "z": 0.672492564,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 346.472229,
+      "sqrMagnitude": 120043.0
+    }
+  },
+  {
+    "UniqueId": 1,
+    "TypeId": 3,
+    "Position": {
+      "x": -0.373039246,
+      "y": 1.3171674,
+      "z": 0.06939888,
+      "normalized": {
+        "x": -0.272146136,
+        "y": 0.9609231,
+        "z": 0.05062909,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 1.37073135,
+      "sqrMagnitude": 1.87890434
+    },
+    "LocalPosition": {
+      "x": -0.373039246,
+      "y": 1.3171674,
+      "z": 0.06939888,
+      "normalized": {
+        "x": -0.272146136,
+        "y": 0.9609231,
+        "z": 0.05062909,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 1.37073135,
+      "sqrMagnitude": 1.87890434
+    },
+    "Rotation": {
+      "x": 0.0008985509,
+      "y": 0.00109280727,
+      "z": 0.004466458,
+      "normalized": {
+        "x": 0.191785961,
+        "y": 0.233247876,
+        "z": 0.953317165,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 0.00468517561,
+      "sqrMagnitude": 2.19508711E-05
+    },
+    "LocalRotation": {
+      "x": 0.0008985509,
+      "y": 0.00109280727,
+      "z": 0.004466458,
+      "normalized": {
+        "x": 0.191785961,
+        "y": 0.233247876,
+        "z": 0.953317165,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 0.00468517561,
+      "sqrMagnitude": 2.19508711E-05
+    },
+    "Size": {
+      "x": 0.595344,
+      "y": 0.419512331,
+      "z": 0.388579845,
+      "normalized": {
+        "x": 0.721208334,
+        "y": 0.5082033,
+        "z": 0.470731258,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 0.8254813,
+      "sqrMagnitude": 0.6814194
+    },
+    "ParentUniqueId": 0,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": -0.477163136,
+      "y": 1.0,
+      "z": 0.159047112,
+      "normalized": {
+        "x": -0.426279753,
+        "y": 0.8933627,
+        "z": 0.142086759,
+        "normalized": {
+          "x": -0.426279783,
+          "y": 0.893362761,
+          "z": 0.142086774,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 1.11936617,
+      "sqrMagnitude": 1.25298059
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": 1.0,
+      "z": 0.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 187.0,
+      "y": 84.0,
+      "z": 213.0,
+      "normalized": {
+        "x": 0.632558644,
+        "y": 0.284143984,
+        "z": 0.720508,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 295.624756,
+      "sqrMagnitude": 87394.0
+    }
+  },
+  {
+    "UniqueId": 2,
+    "TypeId": 2,
+    "Position": {
+      "x": 0.390892744,
+      "y": 0.153632462,
+      "z": -0.06310558,
+      "normalized": {
+        "x": 0.9203659,
+        "y": 0.361731172,
+        "z": -0.148583546,
+        "normalized": {
+          "x": 0.920366,
+          "y": 0.3617312,
+          "z": -0.148583561,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.424714476,
+      "sqrMagnitude": 0.180382386
+    },
+    "LocalPosition": {
+      "x": 0.390892744,
+      "y": 0.153632462,
+      "z": -0.06310558,
+      "normalized": {
+        "x": 0.9203659,
+        "y": 0.361731172,
+        "z": -0.148583546,
+        "normalized": {
+          "x": 0.920366,
+          "y": 0.3617312,
+          "z": -0.148583561,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.424714476,
+      "sqrMagnitude": 0.180382386
+    },
+    "Rotation": {
+      "x": 0.000849346863,
+      "y": 0.00307855778,
+      "z": 0.0009179028,
+      "normalized": {
+        "x": 0.255606532,
+        "y": 0.926476,
+        "z": 0.276238084,
+        "normalized": {
+          "x": 0.255606562,
+          "y": 0.926476061,
+          "z": 0.2762381,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00332286838,
+      "sqrMagnitude": 1.10414539E-05
+    },
+    "LocalRotation": {
+      "x": 0.000849346863,
+      "y": 0.00307855778,
+      "z": 0.0009179028,
+      "normalized": {
+        "x": 0.255606532,
+        "y": 0.926476,
+        "z": 0.276238084,
+        "normalized": {
+          "x": 0.255606562,
+          "y": 0.926476061,
+          "z": 0.2762381,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00332286838,
+      "sqrMagnitude": 1.10414539E-05
+    },
+    "Size": {
+      "x": 0.165260255,
+      "y": 0.5905807,
+      "z": 0.482132822,
+      "normalized": {
+        "x": 0.211846247,
+        "y": 0.757062256,
+        "z": 0.6180435,
+        "normalized": {
+          "x": 0.211846277,
+          "y": 0.7570624,
+          "z": 0.618043542,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.9999999,
+        "sqrMagnitude": 0.9999998
+      },
+      "magnitude": 0.7800953,
+      "sqrMagnitude": 0.608548641
+    },
+    "ParentUniqueId": 0,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": 0.49999997,
+      "y": 0.116638534,
+      "z": -0.144624248,
+      "normalized": {
+        "x": 0.9373743,
+        "y": 0.218667939,
+        "z": -0.2711341,
+        "normalized": {
+          "x": 0.937374353,
+          "y": 0.218667954,
+          "z": -0.271134138,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.5334048,
+      "sqrMagnitude": 0.2845207
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 120.0,
+      "y": 157.0,
+      "z": 121.0,
+      "normalized": {
+        "x": 0.51788646,
+        "y": 0.6775681,
+        "z": 0.522202134,
+        "normalized": {
+          "x": 0.5178865,
+          "y": 0.677568138,
+          "z": 0.5222022,
+          "magnitude": 1.00000012,
+          "sqrMagnitude": 1.00000024
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 231.711029,
+      "sqrMagnitude": 53690.0
+    }
+  },
+  {
+    "UniqueId": 3,
+    "TypeId": 2,
+    "Position": {
+      "x": 0.350706816,
+      "y": 0.6957537,
+      "z": 0.177970886,
+      "normalized": {
+        "x": 0.438814968,
+        "y": 0.870548069,
+        "z": 0.222682551,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 0.7992134,
+      "sqrMagnitude": 0.6387421
+    },
+    "LocalPosition": {
+      "x": 0.350706816,
+      "y": 0.6957537,
+      "z": 0.177970886,
+      "normalized": {
+        "x": 0.438814968,
+        "y": 0.870548069,
+        "z": 0.222682551,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 0.7992134,
+      "sqrMagnitude": 0.6387421
+    },
+    "Rotation": {
+      "x": 0.000849346863,
+      "y": 0.00307855778,
+      "z": 0.0009179028,
+      "normalized": {
+        "x": 0.255606532,
+        "y": 0.926476,
+        "z": 0.276238084,
+        "normalized": {
+          "x": 0.255606562,
+          "y": 0.926476061,
+          "z": 0.2762381,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00332286838,
+      "sqrMagnitude": 1.10414539E-05
+    },
+    "LocalRotation": {
+      "x": 0.000849346863,
+      "y": 0.00307855778,
+      "z": 0.0009179028,
+      "normalized": {
+        "x": 0.255606532,
+        "y": 0.926476,
+        "z": 0.276238084,
+        "normalized": {
+          "x": 0.255606562,
+          "y": 0.926476061,
+          "z": 0.2762381,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00332286838,
+      "sqrMagnitude": 1.10414539E-05
+    },
+    "Size": {
+      "x": 0.145482287,
+      "y": 0.5199013,
+      "z": 0.424432218,
+      "normalized": {
+        "x": 0.211846277,
+        "y": 0.757062256,
+        "z": 0.618043542,
+        "normalized": {
+          "x": 0.211846292,
+          "y": 0.7570623,
+          "z": 0.6180436,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.9999999
+      },
+      "magnitude": 0.686735153,
+      "sqrMagnitude": 0.471605152
+    },
+    "ParentUniqueId": 2,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": -0.243193358,
+      "y": 0.917953253,
+      "z": 0.4999997,
+      "normalized": {
+        "x": -0.2266036,
+        "y": 0.855333865,
+        "z": 0.46589157,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 1.07321048,
+      "sqrMagnitude": 1.15178084
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 120.0,
+      "y": 157.0,
+      "z": 121.0,
+      "normalized": {
+        "x": 0.51788646,
+        "y": 0.6775681,
+        "z": 0.522202134,
+        "normalized": {
+          "x": 0.5178865,
+          "y": 0.677568138,
+          "z": 0.5222022,
+          "magnitude": 1.00000012,
+          "sqrMagnitude": 1.00000024
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 231.711029,
+      "sqrMagnitude": 53690.0
+    }
+  },
+  {
+    "UniqueId": 4,
+    "TypeId": 2,
+    "Position": {
+      "x": 0.1708703,
+      "y": 1.3171674,
+      "z": 0.191222191,
+      "normalized": {
+        "x": 0.127334714,
+        "y": 0.9815698,
+        "z": 0.1425012,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 1.3418988,
+      "sqrMagnitude": 1.80069244
+    },
+    "LocalPosition": {
+      "x": 0.1708703,
+      "y": 1.3171674,
+      "z": 0.191222191,
+      "normalized": {
+        "x": 0.127334714,
+        "y": 0.9815698,
+        "z": 0.1425012,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 1.3418988,
+      "sqrMagnitude": 1.80069244
+    },
+    "Rotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "LocalRotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "Size": {
+      "x": 0.386039972,
+      "y": 1.37956786,
+      "z": 1.126239,
+      "normalized": {
+        "x": 0.211846262,
+        "y": 0.7570623,
+        "z": 0.618043542,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 1.82226467,
+      "sqrMagnitude": 3.32064867
+    },
+    "ParentUniqueId": 0,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": 0.218564168,
+      "y": 1.0,
+      "z": 0.4382396,
+      "normalized": {
+        "x": 0.196290344,
+        "y": 0.8980902,
+        "z": 0.3935787,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 1.11347389,
+      "sqrMagnitude": 1.23982418
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": -1.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 120.0,
+      "y": 157.0,
+      "z": 121.0,
+      "normalized": {
+        "x": 0.51788646,
+        "y": 0.6775681,
+        "z": 0.522202134,
+        "normalized": {
+          "x": 0.5178865,
+          "y": 0.677568138,
+          "z": 0.5222022,
+          "magnitude": 1.00000012,
+          "sqrMagnitude": 1.00000024
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 231.711029,
+      "sqrMagnitude": 53690.0
+    }
+  },
+  {
+    "UniqueId": 5,
+    "TypeId": 2,
+    "Position": {
+      "x": 0.2647531,
+      "y": 2.58354616,
+      "z": 0.7543421,
+      "normalized": {
+        "x": 0.0978967845,
+        "y": 0.955308437,
+        "z": 0.2789303,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 2.70441055,
+      "sqrMagnitude": 7.313837
+    },
+    "LocalPosition": {
+      "x": 0.2647531,
+      "y": 2.58354616,
+      "z": 0.7543421,
+      "normalized": {
+        "x": 0.0978967845,
+        "y": 0.955308437,
+        "z": 0.2789303,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 2.70441055,
+      "sqrMagnitude": 7.313837
+    },
+    "Rotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "LocalRotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "Size": {
+      "x": 0.339839548,
+      "y": 1.21446419,
+      "z": 0.9914531,
+      "normalized": {
+        "x": 0.211846277,
+        "y": 0.7570623,
+        "z": 0.618043542,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 1.60418,
+      "sqrMagnitude": 2.57339334
+    },
+    "ParentUniqueId": 4,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": 0.243194491,
+      "y": 0.917953134,
+      "z": 0.500000358,
+      "normalized": {
+        "x": 0.226604551,
+        "y": 0.8553334,
+        "z": 0.465891957,
+        "normalized": {
+          "x": 0.226604521,
+          "y": 0.855333269,
+          "z": 0.4658919,
+          "magnitude": 0.9999999,
+          "sqrMagnitude": 0.9999998
+        },
+        "magnitude": 1.00000012,
+        "sqrMagnitude": 1.00000024
+      },
+      "magnitude": 1.073211,
+      "sqrMagnitude": 1.1517818
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": -1.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 120.0,
+      "y": 157.0,
+      "z": 121.0,
+      "normalized": {
+        "x": 0.51788646,
+        "y": 0.6775681,
+        "z": 0.522202134,
+        "normalized": {
+          "x": 0.5178865,
+          "y": 0.677568138,
+          "z": 0.5222022,
+          "magnitude": 1.00000012,
+          "sqrMagnitude": 1.00000024
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 231.711029,
+      "sqrMagnitude": 53690.0
+    }
+  },
+  {
+    "UniqueId": 6,
+    "TypeId": 2,
+    "Position": {
+      "x": -0.13718462,
+      "y": 1.18598843,
+      "z": -0.21817112,
+      "normalized": {
+        "x": -0.11303319,
+        "y": 0.977194548,
+        "z": -0.179761976,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 1.21366668,
+      "sqrMagnitude": 1.4729867
+    },
+    "LocalPosition": {
+      "x": -0.13718462,
+      "y": 1.18598843,
+      "z": -0.21817112,
+      "normalized": {
+        "x": -0.11303319,
+        "y": 0.977194548,
+        "z": -0.179761976,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 1.21366668,
+      "sqrMagnitude": 1.4729867
+    },
+    "Rotation": {
+      "x": 0.0009045518,
+      "y": -0.000434916059,
+      "z": -0.00434324844,
+      "normalized": {
+        "x": 0.20291853,
+        "y": -0.09756492,
+        "z": -0.9743229,
+        "normalized": {
+          "x": 0.202918544,
+          "y": -0.09756493,
+          "z": -0.974323,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00445770938,
+      "sqrMagnitude": 1.98711732E-05
+    },
+    "LocalRotation": {
+      "x": 0.0009045518,
+      "y": -0.000434916059,
+      "z": -0.00434324844,
+      "normalized": {
+        "x": 0.20291853,
+        "y": -0.09756492,
+        "z": -0.9743229,
+        "normalized": {
+          "x": 0.202918544,
+          "y": -0.09756493,
+          "z": -0.974323,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00445770938,
+      "sqrMagnitude": 1.98711732E-05
+    },
+    "Size": {
+      "x": 0.4374656,
+      "y": 1.5633446,
+      "z": 1.27626884,
+      "normalized": {
+        "x": 0.211846277,
+        "y": 0.7570623,
+        "z": 0.618043542,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 2.06501436,
+      "sqrMagnitude": 4.26428461
+    },
+    "ParentUniqueId": 0,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": -0.17547603,
+      "y": 0.9004083,
+      "z": -0.500000656,
+      "normalized": {
+        "x": -0.1679579,
+        "y": 0.861831,
+        "z": -0.4785785,
+        "normalized": {
+          "x": -0.167957917,
+          "y": 0.861831069,
+          "z": -0.478578538,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 1.044762,
+      "sqrMagnitude": 1.0915277
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 120.0,
+      "y": 157.0,
+      "z": 121.0,
+      "normalized": {
+        "x": 0.51788646,
+        "y": 0.6775681,
+        "z": 0.522202134,
+        "normalized": {
+          "x": 0.5178865,
+          "y": 0.677568138,
+          "z": 0.5222022,
+          "magnitude": 1.00000012,
+          "sqrMagnitude": 1.00000024
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 231.711029,
+      "sqrMagnitude": 53690.0
+    }
+  },
+  {
+    "UniqueId": 7,
+    "TypeId": 2,
+    "Position": {
+      "x": -0.243469715,
+      "y": 2.62106371,
+      "z": 0.419984818,
+      "normalized": {
+        "x": -0.09133629,
+        "y": 0.983277261,
+        "z": 0.157554924,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 2.66564059,
+      "sqrMagnitude": 7.10564
+    },
+    "LocalPosition": {
+      "x": -0.243469715,
+      "y": 2.62106371,
+      "z": 0.419984818,
+      "normalized": {
+        "x": -0.09133629,
+        "y": 0.983277261,
+        "z": 0.157554924,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 2.66564059,
+      "sqrMagnitude": 7.10564
+    },
+    "Rotation": {
+      "x": 0.0009045518,
+      "y": -0.000434916059,
+      "z": -0.00434324844,
+      "normalized": {
+        "x": 0.20291853,
+        "y": -0.09756492,
+        "z": -0.9743229,
+        "normalized": {
+          "x": 0.202918544,
+          "y": -0.09756493,
+          "z": -0.974323,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00445770938,
+      "sqrMagnitude": 1.98711732E-05
+    },
+    "LocalRotation": {
+      "x": 0.0009045518,
+      "y": -0.000434916059,
+      "z": -0.00434324844,
+      "normalized": {
+        "x": 0.20291853,
+        "y": -0.09756492,
+        "z": -0.9743229,
+        "normalized": {
+          "x": 0.202918544,
+          "y": -0.09756493,
+          "z": -0.974323,
+          "magnitude": 1.0,
+          "sqrMagnitude": 1.00000012
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 0.00445770938,
+      "sqrMagnitude": 1.98711732E-05
+    },
+    "Size": {
+      "x": 0.385110676,
+      "y": 1.37624693,
+      "z": 1.12352777,
+      "normalized": {
+        "x": 0.211846277,
+        "y": 0.7570623,
+        "z": 0.618043542,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 1.817878,
+      "sqrMagnitude": 3.30468035
+    },
+    "ParentUniqueId": 6,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": -0.243194059,
+      "y": 0.917953253,
+      "z": 0.499999762,
+      "normalized": {
+        "x": -0.226604208,
+        "y": 0.8553337,
+        "z": 0.4658915,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 1.07321072,
+      "sqrMagnitude": 1.15178132
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 120.0,
+      "y": 157.0,
+      "z": 121.0,
+      "normalized": {
+        "x": 0.51788646,
+        "y": 0.6775681,
+        "z": 0.522202134,
+        "normalized": {
+          "x": 0.5178865,
+          "y": 0.677568138,
+          "z": 0.5222022,
+          "magnitude": 1.00000012,
+          "sqrMagnitude": 1.00000024
+        },
+        "magnitude": 0.99999994,
+        "sqrMagnitude": 0.99999994
+      },
+      "magnitude": 231.711029,
+      "sqrMagnitude": 53690.0
+    }
+  },
+  {
+    "UniqueId": 8,
+    "TypeId": 3,
+    "Position": {
+      "x": 0.321707964,
+      "y": 0.0139163733,
+      "z": 0.21817112,
+      "normalized": {
+        "x": 0.8271021,
+        "y": 0.0357786044,
+        "z": 0.5609118,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 0.388957977,
+      "sqrMagnitude": 0.151288316
+    },
+    "LocalPosition": {
+      "x": 0.321707964,
+      "y": 0.0139163733,
+      "z": 0.21817112,
+      "normalized": {
+        "x": 0.8271021,
+        "y": 0.0357786044,
+        "z": 0.5609118,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 0.388957977,
+      "sqrMagnitude": 0.151288316
+    },
+    "Rotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "LocalRotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "magnitude": 0.0,
+      "sqrMagnitude": 0.0
+    },
+    "Size": {
+      "x": 0.7438524,
+      "y": 0.524159551,
+      "z": 0.485510945,
+      "normalized": {
+        "x": 0.721208334,
+        "y": 0.5082033,
+        "z": 0.470731229,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 1.03139734,
+      "sqrMagnitude": 1.06378043
+    },
+    "ParentUniqueId": 0,
+    "JointType": "hinge",
+    "JointAnchorPos": {
+      "x": 0.41150412,
+      "y": 0.01056538,
+      "z": 0.500000656,
+      "normalized": {
+        "x": 0.6353824,
+        "y": 0.01631346,
+        "z": 0.772025347,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.00000012
+      },
+      "magnitude": 0.647648,
+      "sqrMagnitude": 0.4194479
+    },
+    "JointAxis": {
+      "x": 0.0,
+      "y": -1.0,
+      "z": 0.0,
+      "magnitude": 1.0,
+      "sqrMagnitude": 1.0
+    },
+    "Color": {
+      "x": 187.0,
+      "y": 84.0,
+      "z": 213.0,
+      "normalized": {
+        "x": 0.632558644,
+        "y": 0.284143984,
+        "z": 0.720508,
+        "magnitude": 1.0,
+        "sqrMagnitude": 1.0
+      },
+      "magnitude": 295.624756,
+      "sqrMagnitude": 87394.0
+    }
+  }
+]

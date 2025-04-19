@@ -133,7 +133,7 @@ def create_policy(model, training_phase="combined"):
         if training_phase == "rotation" and 'absolute_root_mat' in time_step.observation[0]:
             frame_counter += 1
             # Only display every 10 frames to avoid console spam
-            if frame_counter % 1 == 0:
+            if frame_counter % 1 == 40:
                 # Extract the z-axis from the rotation matrix
                 rot_matrix = time_step.observation[0]['absolute_root_mat']
                 # Get the x-component (alignment with x-axis)

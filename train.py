@@ -90,8 +90,7 @@ def process_observation(timestep):
         process_observation.counter = 0
     
     # Print observations every 40 steps
-    # should_print = process_observation.counter % 40 == 0
-    should_print = False
+    should_print = process_observation.counter % 40 == 0
     process_observation.should_print = should_print  # Set a flag for other functions
     
     # Filter the observation - keep only the core components we want

@@ -122,11 +122,29 @@ def get_env_params():
     stiffness = joint.get('stiffness')
     density = geom.get('density')
     
-    # Get environment params from create_soccer_env
-    env_params = inspect.getsource(create_soccer_env)
-    # Extract default values using string parsing
+    # Get environment params from main.py instead of custom_soccer_env defaults
     import re
-    time_limit = float(re.search(r'time_limit=(\d+\.?\d*)', env_params).group(1))
+    
+    # Read the actual time_limit from main.py which overrides the default
+    try:
+        with open("main.py", "r") as f:
+            main_content = f.read()
+            # Extract the time_limit value set in main.py's create_env function
+            time_limit_match = re.search(r'time_limit=(\d+\.?\d*)', main_content)
+            if time_limit_match:
+                time_limit = float(time_limit_match.group(1))
+            else:
+                # Fallback to the default from custom_soccer_env.py
+                env_params = inspect.getsource(create_soccer_env)
+                time_limit = float(re.search(r'time_limit=(\d+\.?\d*)', env_params).group(1))
+    except Exception as e:
+        print(f"Warning: Error reading time_limit from main.py: {e}")
+        # Fallback to the default from custom_soccer_env.py
+        env_params = inspect.getsource(create_soccer_env)
+        time_limit = float(re.search(r'time_limit=(\d+\.?\d*)', env_params).group(1))
+    
+    # Get other environment parameters from custom_soccer_env.py
+    env_params = inspect.getsource(create_soccer_env)
     disable_walker_contacts = re.search(r'disable_walker_contacts=(\w+)', env_params).group(1) == 'True'
     enable_field_box = re.search(r'enable_field_box=(\w+)', env_params).group(1) == 'True'
     terminate_on_goal = re.search(r'terminate_on_goal=(\w+)', env_params).group(1) == 'True'

@@ -656,6 +656,12 @@ class TensorboardCallback(BaseCallback):
         # Track total timesteps for interruption handling
         self.current_total_timesteps = start_timesteps
         
+        # For hardware monitoring
+        self.hw_monitor_interval = 50  # Log hardware metrics every 50 steps
+        self.has_gpu = th.cuda.is_available()
+        import psutil
+        self.psutil = psutil
+        
     def _on_training_start(self):
         # Initialize episode tracking
         self.current_episode_rewards = []
@@ -697,6 +703,43 @@ class TensorboardCallback(BaseCallback):
         # Log step-level metrics
         self.logger.record('train/reward', reward)
         self.logger.record('train/velocity_to_ball', vel_to_ball)
+        
+        # Log hardware metrics periodically to avoid overhead
+        if self.num_timesteps % self.hw_monitor_interval == 0:
+            try:
+                # CPU usage (per core and total)
+                cpu_percent = self.psutil.cpu_percent(interval=0.1)
+                self.logger.record('system/cpu_percent', cpu_percent)
+                
+                # Memory usage
+                mem = self.psutil.virtual_memory()
+                self.logger.record('system/memory_used_percent', mem.percent)
+                self.logger.record('system/memory_available_gb', mem.available / (1024**3))
+                
+                # GPU metrics if available
+                if self.has_gpu:
+                    try:
+                        gpu_util = float(th.cuda.utilization())
+                        self.logger.record('system/gpu_util_percent', gpu_util)
+                    except:
+                        # Fallback to nvidia-smi if torch method fails
+                        try:
+                            import subprocess
+                            result = subprocess.check_output(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'])
+                            result = result.decode('utf-8').strip().split(',')
+                            gpu_util = float(result[0])
+                            gpu_mem_used = float(result[1])
+                            gpu_mem_total = float(result[2])
+                            
+                            self.logger.record('system/gpu_util_percent', gpu_util)
+                            self.logger.record('system/gpu_memory_used_mb', gpu_mem_used)
+                            self.logger.record('system/gpu_memory_percent', 100 * gpu_mem_used / gpu_mem_total)
+                        except:
+                            pass
+            except Exception as e:
+                # Don't let hardware monitoring failures interrupt training
+                if self.verbose > 0:
+                    print(f"Warning: Failed to log hardware metrics: {e}")
         
         # Log training metrics from the model
         if hasattr(self.model, 'logger') and self.model.logger is not None:

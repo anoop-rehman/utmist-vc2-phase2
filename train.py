@@ -30,11 +30,13 @@ def quaternion_to_forward_vector(quaternion):
 default_hyperparameters = dict(
     learning_rate=3e-4,
     n_steps=8192,
-    batch_size=64,
+    batch_size=512,  # Increased from 64 to better utilize GPU
     n_epochs=10,
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
+    # Larger policy network to make better use of GPU
+    policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
 )
 
 def setup_env(env, phase="combined"):
@@ -45,7 +47,9 @@ def setup_env(env, phase="combined"):
         wrapped_env = RotationPhaseWrapper(env)
     else:
         wrapped_env = DMControlWrapper(env)  # Original combined phase
-    return DummyVecEnv([lambda: wrapped_env])
+    
+    # Return the wrapped environment directly, without vectorizing
+    return wrapped_env
 
 def create_ppo_model(vec_env, tensorboard_log, load_path=None):
     """Create or load a PPO model with standard parameters."""
@@ -184,6 +188,14 @@ class DMControlWrapper(gym.Env):
             shape=(obs_size,),
             dtype=np.float32
         )
+        
+        # Random number generator for seeding
+        self.np_random = np.random.RandomState()
+
+    def seed(self, seed=None):
+        """Seed the environment's random number generator."""
+        self.np_random = np.random.RandomState(seed)
+        return [seed]
 
     def get_distance_traveled(self):
         """Calculate total distance traveled in the moving window."""
@@ -291,6 +303,15 @@ class WalkingPhaseWrapper(DMControlWrapper):
         print(f"Base filtered observation size: {self.base_obs_size}")
         print(f"Additional features size: {self.additional_obs_size}")
         print(f"Total expected size: {self.base_obs_size + self.additional_obs_size}")
+    
+    def seed(self, seed=None):
+        """Seed both the environment and internal RNG."""
+        super().seed(seed)
+        # Also seed phase and other random elements
+        if seed is not None:
+            # Add some offset to avoid same seeds for different aspects
+            self.phase = self.np_random.uniform(0, 1.0)  # Randomize initial phase
+        return [seed]
     
     def reset(self):
         timestep = self.env.reset()
@@ -485,6 +506,13 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         print("\n==== Using simplified rotation reward (alignment only, -1 to 1 range) ====\n")
         
+    def seed(self, seed=None):
+        """Seed the environment's random number generator."""
+        result = super().seed(seed)
+        # Use the seeded RNG for randomizing initial orientation
+        self.initial_orientation = None  # Reset initial orientation
+        return result
+    
     def step(self, action):
         timestep = self.env.step([action])
         
@@ -632,9 +660,25 @@ class TensorboardCallback(BaseCallback):
         
     def _on_step(self):
         # Get current reward and velocity from the wrapped environment
-        env = self.training_env.envs[0]  # Get the actual environment from DummyVecEnv
-        reward = env.reward
-        vel_to_ball = env.last_vel_to_ball
+        # This needs to work with both DummyVecEnv and SubprocVecEnv
+        try:
+            # For DummyVecEnv, access the environment directly
+            if hasattr(self.training_env, 'envs'):
+                env = self.training_env.envs[0]
+                reward = env.reward
+                vel_to_ball = env.last_vel_to_ball
+            else:
+                # For SubprocVecEnv, use get_attr method
+                # Get values from the first environment (index 0)
+                rewards = self.training_env.get_attr('reward')
+                vel_to_balls = self.training_env.get_attr('last_vel_to_ball')
+                reward = rewards[0] if rewards else 0.0
+                vel_to_ball = vel_to_balls[0] if vel_to_balls else 0.0
+        except Exception as e:
+            # Fallback if we can't get the values
+            print(f"Warning: Could not get reward or velocity: {e}")
+            reward = 0.0
+            vel_to_ball = 0.0
         
         # Track current episode stats
         self.current_episode_rewards.append(reward)
@@ -778,7 +822,7 @@ class CheckpointCallback(BaseCallback):
         
         return True
 
-def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined"):
+def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1):
     """Train a creature using PPO.
     
     Args:
@@ -793,6 +837,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         checkpoint_stride: How many checkpoints to skip between saves
         keep_previous_model: Whether to keep the previous model folder
         training_phase: Which training phase is being used ("combined", "walking", or "rotation")
+        n_envs: Number of parallel environments being used
     """
     # Record start time
     start_time = datetime.now()
@@ -821,9 +866,20 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
                 start_timesteps = 0
     else:
         print("\nCreating new model")
-        model = PPO("MlpPolicy", env, tensorboard_log=tensorboard_log, **default_hyperparameters)
+        # Use default hyperparameters with updated policy_kwargs
+        model = PPO("MlpPolicy", 
+                   env, 
+                   tensorboard_log=tensorboard_log, 
+                   verbose=1,
+                   **default_hyperparameters)
         start_timesteps = start_timesteps or 0
     
+    # Log the number of parallel environments
+    if n_envs > 1:
+        print(f"\nTraining with {n_envs} parallel environments")
+        print(f"Each timestep will collect {n_envs} samples")
+        print(f"Expected speedup: ~{n_envs}x (minus overhead)")
+
     # Setup callbacks
     tensorboard_callback = TensorboardCallback(start_timesteps=start_timesteps)
     callbacks = [
@@ -892,6 +948,11 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
             print(f"Environment Steps: {env_steps}")
             print(f"Training Iterations: {training_iterations} ({model.n_epochs} epochs per step)")
             
+            # Add information about parallel environments
+            if n_envs > 1:
+                print(f"Parallel Environments: {n_envs}")
+                print(f"Total samples collected: {env_steps * n_envs}")
+            
             # Clean up intermediate checkpoints unless keep_checkpoints is True
             if not keep_checkpoints:
                 for filename in os.listdir(save_dir):
@@ -944,7 +1005,8 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         checkpoint_stride=checkpoint_stride,
         load_path=load_path,
         interrupted=interrupted,  # Pass the interrupted flag
-        training_phase=training_phase  # Pass the training phase
+        training_phase=training_phase,  # Pass the training phase
+        n_envs=n_envs  # Pass the number of environments
     )
     
     return model 

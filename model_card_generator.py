@@ -157,7 +157,7 @@ def get_env_params():
         'body_density': density
     }
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, trained_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined"):
+def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, trained_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined", n_envs=1):
     """Generate a markdown file with model details.
     
     Args:
@@ -174,6 +174,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         load_path: Path to the model loaded for continued training
         interrupted: Whether training was interrupted (e.g., by KeyboardInterrupt)
         training_phase: The training phase used ("combined", "walking", or "rotation")
+        n_envs: Number of parallel environments used for training
     """
     from train import default_hyperparameters
     card_path = os.path.join(save_dir, "model_card.md")
@@ -222,6 +223,8 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write("### Training Command\n")
         n_updates = trained_timesteps // default_hyperparameters["n_steps"]  # Convert timesteps back to updates
         command = f"python main.py --training-phase {training_phase} --n-updates {n_updates}"
+        if n_envs > 1:
+            command += f" --n-envs {n_envs}"
         if tensorboard_log and tensorboard_log != 'tensorboard_logs':  # Only include if not default
             command += f" --tensorboard-log {tensorboard_log}"
         if load_path:
@@ -247,6 +250,12 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} env timesteps)\n")
         f.write(f"- Training Updates: {training_updates} ({trained_timesteps} env timesteps)\n")
         f.write(f"- Total Updates: {total_updates} ({total_timesteps} env timesteps)\n")
+        
+        # Add parallel environments info
+        if n_envs > 1:
+            total_samples = total_timesteps * n_envs
+            f.write(f"- Parallel Environments: {n_envs}\n")
+            f.write(f"- Total Training Samples: {total_samples}\n")
         
         # Add completion status
         if interrupted:

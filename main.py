@@ -4,7 +4,7 @@ from creature import Creature
 from train import train_creature, DMControlWrapper, process_observation, calculate_reward, setup_env, default_hyperparameters, TensorboardCallback
 from dm_control import viewer
 import numpy as np
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 import os
@@ -163,23 +163,53 @@ if __name__ == "__main__":
     parser.add_argument('--tensorboard-log', type=str, default='tensorboard_logs', help='TensorBoard log directory')
     parser.add_argument('--start-timesteps', type=int, default=None, help='Starting timestep count (for resuming training)')
     parser.add_argument('--enable-viewer', action='store_true', help='Enable the DM Control viewer (requires a GUI environment)')
+    parser.add_argument('--n-envs', type=int, default=8, help='Number of parallel environments for training')
     args = parser.parse_args()
 
-    # Create environment
+    # Create raw environment
     env = create_env(training_phase=args.training_phase, view_only=args.view_only)
-    vec_env = setup_env(env, phase=args.training_phase)
+    
+    # For viewer mode, we use a single environment with DummyVecEnv
+    if args.view_only and args.load_model:
+        # Setup a single environment and wrap it properly
+        wrapped_env = setup_env(env, phase=args.training_phase)
+        vec_env = DummyVecEnv([lambda: wrapped_env])
+    else:
+        # For training, use SubprocVecEnv with multiple environments
+        print(f"\nUsing {args.n_envs} parallel environments for training")
+        
+        # Create environments with different seeds for diversity
+        def make_env(seed):
+            def _init():
+                # Create a fresh environment for each parallel instance
+                train_env = create_env(training_phase=args.training_phase)
+                # Setup the environment without vectorizing it
+                wrapped_env = setup_env(train_env, phase=args.training_phase)
+                # Set the seed for randomization
+                wrapped_env.seed(seed)
+                # Return the wrapped environment directly
+                return wrapped_env
+            return _init
+            
+        # Create a vectorized environment with n_envs parallel environments
+        vec_env = SubprocVecEnv([make_env(i) for i in range(args.n_envs)])
 
     if args.view_only and args.load_model:
         # Load model and launch viewer
         print(f"\nLoading model from {args.load_model} for viewing...")
         model = PPO.load(args.load_model, env=vec_env)
         print("Launching viewer...")
-        # Always launch viewer in view-only mode
+        # Always launch viewer in view-only mode with the original unwrapped environment
         viewer.launch(env, policy=create_policy(model, args.training_phase))
     else:
         # Convert n_updates to timesteps using n_steps from hyperparameters
-        timesteps = args.n_updates * default_hyperparameters["n_steps"]
+        # With parallel environments, we collect n_envs times more samples per step
+        timesteps_per_update = default_hyperparameters["n_steps"] 
+        timesteps = args.n_updates * timesteps_per_update
+        
         print(f"Starting training for {args.n_updates} updates ({timesteps} timesteps)...")
+        print(f"With {args.n_envs} parallel environments, this will collect {args.n_envs * timesteps} total samples")
+        
         if args.load_model:
             print(f"Resuming training from {args.load_model}")
         
@@ -193,12 +223,15 @@ if __name__ == "__main__":
             checkpoint_stride=args.checkpoint_stride,
             start_timesteps=args.start_timesteps,
             keep_previous_model=args.keep_previous_model,
-            training_phase=args.training_phase  # Pass the training phase
+            training_phase=args.training_phase,  # Pass the training phase
+            n_envs=args.n_envs  # Pass the number of environments
         )
 
         # Launch viewer after training if enabled
         if args.enable_viewer:
             print("\nLaunching viewer with trained model...")
-            viewer.launch(env, policy=create_policy(model, args.training_phase))
+            # For viewing, we need a single environment
+            view_env = create_env(training_phase=args.training_phase, view_only=True)
+            viewer.launch(view_env, policy=create_policy(model, args.training_phase))
         else:
             print("\nViewer disabled. Run with --enable-viewer to launch the viewer after training.")

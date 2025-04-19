@@ -30,13 +30,16 @@ def quaternion_to_forward_vector(quaternion):
 default_hyperparameters = dict(
     learning_rate=3e-4,
     n_steps=8192,
-    batch_size=512,  # Increased from 64 to better utilize GPU
+    batch_size=8192,  # Double from current 4096
     n_epochs=10,
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
-    # Larger policy network to make better use of GPU
-    policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
+    # Massive network size
+    policy_kwargs=dict(
+        net_arch=[dict(pi=[1024, 1024, 512], vf=[1024, 1024, 512])],
+        activation_fn=th.nn.ReLU
+    ),
 )
 
 def setup_env(env, phase="combined"):
@@ -60,7 +63,7 @@ def create_ppo_model(vec_env, tensorboard_log, load_path=None):
     return PPO(
         "MlpPolicy",
         vec_env,
-        verbose=1,
+        verbose=0,
         tensorboard_log=tensorboard_log,
         **default_hyperparameters
     )
@@ -870,7 +873,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         model = PPO("MlpPolicy", 
                    env, 
                    tensorboard_log=tensorboard_log, 
-                   verbose=1,
+                   verbose=0,  # Changed from 1 to 0 to disable table logs
                    **default_hyperparameters)
         start_timesteps = start_timesteps or 0
     

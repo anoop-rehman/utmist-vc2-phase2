@@ -112,7 +112,10 @@ def get_env_params():
     # Get motor params
     motor = root.find('.//motor')
     control_range = motor.get('ctrlrange')
-    gear_ratio = motor.get('gear')
+    
+    # Get actuator section as XML string for display
+    actuator = root.find('.//actuator')
+    actuator_xml = ET.tostring(actuator, encoding='unicode')
     
     # Get physics params
     geom = root.find('.//geom')
@@ -168,7 +171,7 @@ def get_env_params():
         'field_box': enable_field_box,
         'terminate_on_goal': terminate_on_goal,
         'control_range': control_range,
-        'gear_ratio': gear_ratio,
+        'actuator_xml': actuator_xml,  # Add the full actuator XML
         'friction': friction,
         'joint_damping': damping,
         'joint_stiffness': stiffness,
@@ -366,7 +369,9 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         
         f.write("### Motor Control Parameters:\n")
         f.write(f"- Control Range: {env_params['control_range']}\n")
-        f.write(f"- Gear Ratio: {env_params['gear_ratio']}\n\n")
+        f.write("```xml\n")
+        f.write(env_params['actuator_xml'])
+        f.write("\n```\n\n")
         
         f.write("### Physics Parameters:\n")
         f.write(f"- Ground Friction: {env_params['friction']}\n")

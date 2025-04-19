@@ -379,9 +379,50 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write(f"- Joint Stiffness: {env_params['joint_stiffness']}\n")
         f.write(f"- Body Density: {env_params['body_density']}\n")
         
+        # Version Control section
+        f.write("\n## Version Control\n")
+        try:
+            import subprocess
+            
+            # Get current branch
+            branch_cmd = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], 
+                                        capture_output=True, text=True, check=True)
+            branch = branch_cmd.stdout.strip()
+            
+            # Get latest commit hash
+            commit_hash_cmd = subprocess.run(["git", "rev-parse", "--short", "HEAD"], 
+                                            capture_output=True, text=True, check=True)
+            commit_hash = commit_hash_cmd.stdout.strip()
+            
+            # Get latest commit message
+            commit_msg_cmd = subprocess.run(["git", "log", "-1", "--pretty=%B"], 
+                                          capture_output=True, text=True, check=True)
+            commit_msg = commit_msg_cmd.stdout.strip()
+            
+            # Get commit date
+            commit_date_cmd = subprocess.run(["git", "log", "-1", "--pretty=%cd", "--date=local"], 
+                                            capture_output=True, text=True, check=True)
+            commit_date = commit_date_cmd.stdout.strip()
+            
+            # Write version control info
+            f.write(f"- Branch: `{branch}`\n")
+            f.write(f"- Commit: `{commit_hash}`\n")
+            f.write(f"- Date: {commit_date}\n")
+            f.write(f"- Message: {commit_msg}\n")
+            
+            # Check for uncommitted changes
+            status_cmd = subprocess.run(["git", "status", "--porcelain"], 
+                                      capture_output=True, text=True, check=True)
+            if status_cmd.stdout.strip():
+                f.write("\n⚠️ **Warning**: There were uncommitted changes when this model was trained.\n")
+            
+        except Exception as e:
+            f.write(f"- Unable to retrieve version control information: {str(e)}\n")
+
         # Other Notes section for manual additions
         f.write("\n## Other Notes\n")
         f.write("<!-- Add any interesting observations about this training run here -->\n")
+        
     
     print(f"\nGenerated model card at {card_path}")
     return card_path 

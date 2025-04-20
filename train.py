@@ -29,8 +29,8 @@ def quaternion_to_forward_vector(quaternion):
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
-    n_steps=32768,  # Doubled from 8192 to extend collection phase
-    batch_size=32768,  # Maximal batch size for efficient GPU usage
+    n_steps=49152,  # Doubled from 8192 to extend collection phase
+    batch_size=49152,  # Maximal batch size for efficient GPU usage
     n_epochs=10,  
     gamma=0.99,
     gae_lambda=0.95,
@@ -824,7 +824,7 @@ class TensorboardCallback(BaseCallback):
 class CheckpointCallback(BaseCallback):
     """Custom callback for saving model checkpoints during training."""
     
-    def __init__(self, save_dir, checkpoint_freq=4000, start_timesteps=0, total_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, verbose=0):
+    def __init__(self, save_dir, checkpoint_freq=4000, start_timesteps=0, total_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, verbose=0, n_envs=1):
         """Initialize the callback.
         
         Args:
@@ -835,6 +835,7 @@ class CheckpointCallback(BaseCallback):
             keep_checkpoints: Whether to keep all checkpoints or delete previous ones
             checkpoint_stride: Save every Nth checkpoint (e.g. 3 means save checkpoint_freq * 3)
             verbose: Verbosity level
+            n_envs: Number of parallel environments
         """
         super().__init__(verbose)
         self.save_dir = save_dir
@@ -843,6 +844,7 @@ class CheckpointCallback(BaseCallback):
         self.total_timesteps = total_timesteps
         self.keep_checkpoints = keep_checkpoints
         self.checkpoint_stride = checkpoint_stride
+        self.n_envs = n_envs
         
         # Create save directory if it doesn't exist
         os.makedirs(save_dir, exist_ok=True)
@@ -853,23 +855,19 @@ class CheckpointCallback(BaseCallback):
         
     def _on_step(self) -> bool:
         """Save a checkpoint if it's time to do so."""
-        # Calculate current checkpoint number
-        current_checkpoint = self.start_timesteps + self.n_calls
+        # Calculate total environment steps (accounting for vectorization)
+        env_steps = (self.start_timesteps + self.n_calls) * self.n_envs
         
-        # Only save if we've reached a checkpoint frequency and it matches our stride
-        if current_checkpoint % self.checkpoint_freq == 0:
-            checkpoint_number = current_checkpoint // self.checkpoint_freq
-            if checkpoint_number % self.checkpoint_stride == 0:
-                # Don't save a checkpoint if we're at the end (final model will be saved)
-                if current_checkpoint == self.start_timesteps + self.total_timesteps:
-                    return True
-                    
-                n_updates = current_checkpoint // default_hyperparameters["n_steps"]
+        # Check if we've completed a full update
+        if env_steps % self.checkpoint_freq == 0:
+            # Calculate updates based on total env steps
+            n_updates = env_steps // self.checkpoint_freq
+            if n_updates % self.checkpoint_stride == 0:
                 checkpoint_path = os.path.join(self.save_dir, f"model_{n_updates}updates.zip")
                 
                 # If not keeping checkpoints, delete the previous one
-                if not self.keep_checkpoints:
-                    prev_updates = (current_checkpoint - (self.checkpoint_freq * self.checkpoint_stride)) // default_hyperparameters["n_steps"]
+                if not self.keep_checkpoints and n_updates > 0:
+                    prev_updates = n_updates - self.checkpoint_stride
                     if prev_updates > 0:
                         prev_path = os.path.join(self.save_dir, f"model_{prev_updates}updates.zip")
                         if os.path.exists(prev_path):
@@ -948,12 +946,13 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     callbacks = [
         CheckpointCallback(
             save_dir=save_dir,
-            checkpoint_freq=checkpoint_freq // n_envs,  # Adjust for number of environments
+            checkpoint_freq=default_hyperparameters["n_steps"],  # Keep original value
             start_timesteps=start_timesteps,
             total_timesteps=total_timesteps,
             keep_checkpoints=keep_checkpoints,
             checkpoint_stride=checkpoint_stride,
-            verbose=1
+            verbose=1,
+            n_envs=n_envs  # Pass n_envs as a parameter
         ),
         tensorboard_callback
     ]

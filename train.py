@@ -948,7 +948,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     callbacks = [
         CheckpointCallback(
             save_dir=save_dir,
-            checkpoint_freq=checkpoint_freq,
+            checkpoint_freq=checkpoint_freq // n_envs,  # Adjust for number of environments
             start_timesteps=start_timesteps,
             total_timesteps=total_timesteps,
             keep_checkpoints=keep_checkpoints,

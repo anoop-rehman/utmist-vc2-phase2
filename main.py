@@ -163,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument('--tensorboard-log', type=str, default='tensorboard_logs', help='TensorBoard log directory')
     parser.add_argument('--start-timesteps', type=int, default=None, help='Starting timestep count (for resuming training)')
     parser.add_argument('--enable-viewer', action='store_true', help='Enable the DM Control viewer (requires a GUI environment)')
-    parser.add_argument('--n-envs', type=int, default=8, help='Number of parallel environments for training')
+    parser.add_argument('--n-envs', type=int, default=1, help='Number of parallel environments for training')
     args = parser.parse_args()
 
     # Create raw environment
@@ -203,12 +203,16 @@ if __name__ == "__main__":
         viewer.launch(env, policy=create_policy(model, args.training_phase))
     else:
         # Convert n_updates to timesteps using n_steps from hyperparameters
-        # With parallel environments, we collect n_envs times more samples per step
+        # With parallel environments, we need to adjust the total_timesteps
+        # since SB3 will collect n_envs times more samples per step
         timesteps_per_update = default_hyperparameters["n_steps"] 
-        timesteps = args.n_updates * timesteps_per_update
         
-        print(f"Starting training for {args.n_updates} updates ({timesteps} timesteps)...")
-        print(f"With {args.n_envs} parallel environments, this will collect {args.n_envs * timesteps} total samples")
+        # Calculate total timesteps with a buffer to ensure we don't stop prematurely
+        # We'll rely on the callback to stop at exactly n_updates
+        timesteps = (args.n_updates * timesteps_per_update * 2) // args.n_envs
+        
+        print(f"Starting training for {args.n_updates} updates...")
+        print(f"Using {args.n_envs} parallel environments for sample collection")
         
         if args.load_model:
             print(f"Resuming training from {args.load_model}")
@@ -224,7 +228,8 @@ if __name__ == "__main__":
             start_timesteps=args.start_timesteps,
             keep_previous_model=args.keep_previous_model,
             training_phase=args.training_phase,  # Pass the training phase
-            n_envs=args.n_envs  # Pass the number of environments
+            n_envs=args.n_envs,  # Pass the number of environments
+            target_updates=args.n_updates  # Ensure we stop at exactly n_updates
         )
 
         # Launch viewer after training if enabled

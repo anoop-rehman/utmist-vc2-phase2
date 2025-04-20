@@ -639,7 +639,7 @@ class TrainingCallback(BaseCallback):
         return True
 
 class TensorboardCallback(BaseCallback):
-    def __init__(self, start_timesteps=0, verbose=0):
+    def __init__(self, start_timesteps=0, verbose=0, target_updates=None):
         super().__init__(verbose)
         self.start_timesteps = start_timesteps
         
@@ -662,12 +662,22 @@ class TensorboardCallback(BaseCallback):
         import psutil
         self.psutil = psutil
         
+        # For enforcing exact number of updates
+        self.target_updates = target_updates
+        
     def _on_training_start(self):
         # Initialize episode tracking
         self.current_episode_rewards = []
         self.current_episode_velocities = []
         
     def _on_step(self):
+        # Check if we've reached our target number of updates
+        if self.target_updates is not None:
+            current_update = self.num_timesteps // default_hyperparameters["n_steps"]
+            if current_update >= self.target_updates:
+                print(f"\nReached target of {self.target_updates} updates. Stopping training.")
+                return False  # Return False to stop training
+        
         # Get current reward and velocity from the wrapped environment
         # This needs to work with both DummyVecEnv and SubprocVecEnv
         try:
@@ -868,7 +878,7 @@ class CheckpointCallback(BaseCallback):
         
         return True
 
-def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1):
+def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1, target_updates=None):
     """Train a creature using PPO.
     
     Args:
@@ -884,6 +894,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         keep_previous_model: Whether to keep the previous model folder
         training_phase: Which training phase is being used ("combined", "walking", or "rotation")
         n_envs: Number of parallel environments being used
+        target_updates: The exact number of updates to train for (overrides total_timesteps for stopping)
     """
     # Record start time
     start_time = datetime.now()
@@ -927,7 +938,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         print(f"Expected speedup: ~{n_envs}x (minus overhead)")
 
     # Setup callbacks
-    tensorboard_callback = TensorboardCallback(start_timesteps=start_timesteps)
+    tensorboard_callback = TensorboardCallback(start_timesteps=start_timesteps, target_updates=target_updates)
     callbacks = [
         CheckpointCallback(
             save_dir=save_dir,

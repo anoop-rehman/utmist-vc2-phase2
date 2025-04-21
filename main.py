@@ -11,80 +11,6 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 import argparse
-import gym
-
-class BatchedEnvironment(gym.Env):
-    """A wrapper that runs multiple environments in a single process"""
-    def __init__(self, envs_per_batch=8, training_phase="combined", seed_offset=0):
-        # Create multiple environments within this process
-        self.envs = []
-        for i in range(envs_per_batch):
-            # Create each environment with a different seed
-            env = create_env(training_phase=training_phase)
-            wrapped_env = setup_env(env, phase=training_phase)
-            wrapped_env.seed(seed_offset + i)
-            self.envs.append(wrapped_env)
-        
-        self.envs_per_batch = envs_per_batch
-        
-        # Use observation space from the first environment
-        self.observation_space = self.envs[0].observation_space
-        self.action_space = self.envs[0].action_space
-        
-        # Track internal rewards for TensorBoard logging
-        self.reward = 0.0
-        self.last_vel_to_ball = 0.0
-        
-    def reset(self):
-        """Reset all environments and return observations"""
-        observations = []
-        for env in self.envs:
-            obs = env.reset()
-            observations.append(obs)
-        
-        # Return as numpy array with same shape as a single observation but with batch dimension
-        return np.array(observations)
-    
-    def step(self, actions):
-        """Step all environments with different actions"""
-        observations = []
-        rewards = []
-        dones = []
-        infos = []
-        
-        # Split actions into separate actions for each environment
-        # Each action should have the shape of a single environment's action space
-        for i, env in enumerate(self.envs):
-            # Process single action
-            action = actions[i]
-            
-            # Step the environment
-            obs, reward, done, info = env.step(action)
-            
-            # Store results
-            observations.append(obs)
-            rewards.append(reward)
-            dones.append(done)
-            infos.append(info)
-            
-            # Update this batch's summary statistics for logging
-            if i == 0:  # Just use the first env for tracking
-                self.reward = reward
-                self.last_vel_to_ball = env.last_vel_to_ball if hasattr(env, 'last_vel_to_ball') else 0.0
-        
-        return np.array(observations), np.array(rewards), np.array(dones), infos
-    
-    def seed(self, seed=None):
-        """Seed all environments"""
-        seeds = []
-        for i, env in enumerate(self.envs):
-            # Give each environment a different but deterministic seed
-            if seed is not None:
-                env_seed = seed + i
-            else:
-                env_seed = None
-            seeds.append(env.seed(env_seed))
-        return seeds
 
 def create_env(training_phase="combined", view_only=False):
     """Create the environment for training or viewing."""
@@ -251,33 +177,24 @@ if __name__ == "__main__":
         wrapped_env = setup_env(env, phase=args.training_phase)
         vec_env = DummyVecEnv([lambda: wrapped_env])
     else:
-        # For training, use batched approach
-        print(f"\nUsing batched parallel environments for training")
-        print(f"Total environments: 192 (24 processes × 8 environments per process)")
+        # For training, use SubprocVecEnv with multiple environments
+        print(f"\nUsing {args.n_envs} parallel environments for training")
         
-        # Each process will handle 8 environments internally
-        envs_per_batch = 8
-        n_processes = 24  # Using 24 processes for 24 vCPUs
-        
-        # Create batched environments with different seed offsets
-        def make_batched_env(process_idx):
+        # Create environments with different seeds for diversity
+        def make_env(seed):
             def _init():
-                seed_offset = process_idx * envs_per_batch
-                return BatchedEnvironment(
-                    envs_per_batch=envs_per_batch,
-                    training_phase=args.training_phase,
-                    seed_offset=seed_offset
-                )
+                # Create a fresh environment for each parallel instance
+                train_env = create_env(training_phase=args.training_phase)
+                # Setup the environment without vectorizing it
+                wrapped_env = setup_env(train_env, phase=args.training_phase)
+                # Set the seed for randomization
+                wrapped_env.seed(seed)
+                # Return the wrapped environment directly
+                return wrapped_env
             return _init
-        
-        # Create vectorized environment with batched environments
-        vec_env = SubprocVecEnv(
-            [make_batched_env(i) for i in range(n_processes)], 
-            start_method='forkserver'  # More memory efficient
-        )
-        
-        # Update the effective number of environments for the training function
-        args.n_envs = n_processes * envs_per_batch
+            
+        # Create a vectorized environment with n_envs parallel environments
+        vec_env = SubprocVecEnv([make_env(i) for i in range(args.n_envs)])
 
     if args.view_only and args.load_model:
         # Load model and launch viewer

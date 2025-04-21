@@ -30,8 +30,8 @@ def quaternion_to_forward_vector(quaternion):
 default_hyperparameters = dict(
     learning_rate=3e-4,
     n_steps=196608,  # Doubled from 8192 to extend collection phase
-    batch_size=196608,  # Maximal batch size for efficient GPU usage
-    n_epochs=10,  
+    batch_size=1536,  # Maximal batch size for efficient GPU usage
+    n_epochs=10,
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
@@ -545,7 +545,7 @@ class RotationPhaseWrapper(DMControlWrapper):
         # Use the seeded RNG for randomizing initial orientation
         self.initial_orientation = None  # Reset initial orientation
         return result
-    
+        
     def step(self, action):
         timestep = self.env.step([action])
         
@@ -584,7 +584,7 @@ class RotationPhaseWrapper(DMControlWrapper):
         self.current_episode_velocities.append(alignment_reward)
         
         return obs, reward, done, info
-    
+        
     def reset(self):
         timestep = self.env.reset()
         obs = process_observation(timestep)
@@ -723,8 +723,8 @@ class TensorboardCallback(BaseCallback):
             # For DummyVecEnv, access the environment directly
             if hasattr(self.training_env, 'envs'):
                 env = self.training_env.envs[0]
-                reward = env.reward
-                vel_to_ball = env.last_vel_to_ball
+        reward = env.reward
+        vel_to_ball = env.last_vel_to_ball
             else:
                 # For SubprocVecEnv, use get_attr method
                 # Get values from the first environment (index 0)
@@ -996,7 +996,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         print(f"\nTraining with {n_envs} parallel environments")
         print(f"Each timestep will collect {n_envs} samples")
         print(f"Expected speedup: ~{n_envs}x (minus overhead)")
-
+    
     # Setup callbacks
     tensorboard_callback = TensorboardCallback(start_timesteps=start_timesteps, target_updates=target_updates)
     callbacks = [
@@ -1020,12 +1020,12 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     # Train the model
     interrupted = False
     try:
-        model.learn(
-            total_timesteps=total_timesteps,
-            callback=callbacks,
-            tb_log_name=os.path.basename(save_dir),
-            reset_num_timesteps=False  # Continue timesteps from previous run
-        )
+    model.learn(
+        total_timesteps=total_timesteps,
+        callback=callbacks,
+        tb_log_name=os.path.basename(save_dir),
+        reset_num_timesteps=False  # Continue timesteps from previous run
+    )
     except KeyboardInterrupt:
         print("\n\nTraining interrupted by keyboard! Saving model and generating model card...")
         interrupted = True
@@ -1048,9 +1048,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         print(f"Total steps including previous training: {env_steps}")
         print(f"Total updates: {total_updates}")
     else:
-        env_steps = start_timesteps + total_timesteps
+    env_steps = start_timesteps + total_timesteps
         # Calculate total updates based on total steps
-        total_updates = env_steps // default_hyperparameters["n_steps"]
+    total_updates = env_steps // default_hyperparameters["n_steps"]
     
     # Save final model with environment steps in filename
     training_iterations = (total_timesteps if not interrupted else model.actual_timesteps_trained) * model.n_epochs

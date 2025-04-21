@@ -34,18 +34,17 @@ default_hyperparameters = dict(
     n_steps=1024,
     batch_size=24576,
     # batch_size=512,
-    n_epochs=10,  
+    n_epochs=20,  
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
     # Much larger network to fully utilize GPU
     policy_kwargs=dict(
         net_arch=[dict(
-            # Policy network (much larger)
-            pi=[64, 64],
-            
-            # Value network (also expanded)
-            vf=[64, 64]
+            # Policy network
+            pi=[2048, 2048, 1024, 512, 256],
+            # Value network
+            vf=[2048, 1536, 1024, 512]
         )],
         # activation_fn=th.nn.ReLU
         activation_fn=th.nn.Tanh

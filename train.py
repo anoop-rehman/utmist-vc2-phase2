@@ -31,7 +31,7 @@ default_hyperparameters = dict(
     learning_rate=3e-4,
     n_steps=196608,  # Doubled from 8192 to extend collection phase
     batch_size=1536,  # Maximal batch size for efficient GPU usage
-    n_epochs=10,
+    n_epochs=10,  
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
@@ -161,10 +161,6 @@ class DMControlWrapper(gym.Env):
         self.position_history = []
         self.window_size = 20  # Track last 20 steps
         
-        # Add episode statistics tracking for multi-env aggregation
-        self.current_episode_rewards = []
-        self.current_episode_velocities = []
-        
         # Get action and observation specs
         action_spec = env.action_spec()[0]
         obs_spec = env.observation_spec()[0]
@@ -245,11 +241,6 @@ class DMControlWrapper(gym.Env):
 
         self.reward = reward
         self.last_vel_to_ball = vel_to_ball
-        
-        # Track statistics for this episode
-        self.current_episode_rewards.append(reward)
-        self.current_episode_velocities.append(vel_to_ball)
-        
         return obs, reward, done, info
 
     def reset(self):
@@ -258,10 +249,6 @@ class DMControlWrapper(gym.Env):
         
         # Clear position history
         self.position_history = []
-        
-        # Clear episode statistics
-        self.current_episode_rewards = []
-        self.current_episode_velocities = []
         
         # Initialize last_vel_to_ball
         _, self.last_vel_to_ball = calculate_reward(timestep, np.zeros(self.action_space.shape), 0.0)
@@ -353,10 +340,6 @@ class WalkingPhaseWrapper(DMControlWrapper):
         self.velocity_history = []
         self.last_position = None
         self.start_position = None  # Reset start position
-        
-        # Clear episode statistics
-        self.current_episode_rewards = []
-        self.current_episode_velocities = []
         
         # Create initial observation with phase variables
         additional_obs = []
@@ -522,11 +505,6 @@ class WalkingPhaseWrapper(DMControlWrapper):
 
         self.reward = reward
         self.last_vel_to_ball = forward_velocity  # Keep tracking velocity for logging
-        
-        # Track statistics for this episode
-        self.current_episode_rewards.append(reward)
-        self.current_episode_velocities.append(forward_velocity)
-        
         return obs, reward, done, info
 
 class RotationPhaseWrapper(DMControlWrapper):
@@ -545,7 +523,7 @@ class RotationPhaseWrapper(DMControlWrapper):
         # Use the seeded RNG for randomizing initial orientation
         self.initial_orientation = None  # Reset initial orientation
         return result
-        
+    
     def step(self, action):
         timestep = self.env.step([action])
         
@@ -578,20 +556,11 @@ class RotationPhaseWrapper(DMControlWrapper):
 
         self.reward = reward
         self.last_vel_to_ball = alignment_reward  # For consistency with previous code
-        
-        # Track statistics for this episode
-        self.current_episode_rewards.append(reward)
-        self.current_episode_velocities.append(alignment_reward)
-        
         return obs, reward, done, info
-        
+    
     def reset(self):
         timestep = self.env.reset()
         obs = process_observation(timestep)
-        
-        # Clear episode statistics
-        self.current_episode_rewards = []
-        self.current_episode_velocities = []
         
         # Randomize the creature's orientation by applying a random rotation
         # This is done via the internal physics engine
@@ -717,26 +686,31 @@ class TensorboardCallback(BaseCallback):
                 print(f"\nReached target of {self.target_updates} updates. Stopping training.")
                 return False  # Return False to stop training
         
-        # Get current reward and velocity from the wrapped environment
-        # This needs to work with both DummyVecEnv and SubprocVecEnv
-        try:
-            # For DummyVecEnv, access the environment directly
-            if hasattr(self.training_env, 'envs'):
-                env = self.training_env.envs[0]
-        reward = env.reward
-        vel_to_ball = env.last_vel_to_ball
-            else:
-                # For SubprocVecEnv, use get_attr method
-                # Get values from the first environment (index 0)
-                rewards = self.training_env.get_attr('reward')
-                vel_to_balls = self.training_env.get_attr('last_vel_to_ball')
-                reward = rewards[0] if rewards else 0.0
-                vel_to_ball = vel_to_balls[0] if vel_to_balls else 0.0
-        except Exception as e:
-            # Fallback if we can't get the values
-            print(f"Warning: Could not get reward or velocity: {e}")
-            reward = 0.0
-            vel_to_ball = 0.0
+        # Get rewards and velocities from ALL environments
+        if hasattr(self.training_env, 'envs'):
+            # For DummyVecEnv - direct access
+            envs = self.training_env.envs
+            rewards = [env.reward for env in envs]
+            vel_to_balls = [env.last_vel_to_ball for env in envs]
+        else:
+            # For SubprocVecEnv - remote access
+            rewards = self.training_env.get_attr('reward')
+            vel_to_balls = self.training_env.get_attr('last_vel_to_ball')
+        
+        # Track metrics for all environments
+        for i, (reward, vel) in enumerate(zip(rewards, vel_to_balls)):
+            # Initialize tracking lists for each env if needed
+            if not hasattr(self, 'current_episode_rewards_all'):
+                self.current_episode_rewards_all = [[] for _ in range(len(rewards))]
+                self.current_episode_velocities_all = [[] for _ in range(len(rewards))]
+            
+            # Add metrics to respective environment's tracking
+            self.current_episode_rewards_all[i].append(reward)
+            self.current_episode_velocities_all[i].append(vel)
+        
+        # For step-level logging, use average across all environments
+        reward = np.mean(rewards) if rewards else 0.0
+        vel_to_ball = np.mean(vel_to_balls) if vel_to_balls else 0.0
         
         # Track current episode stats
         self.current_episode_rewards.append(reward)
@@ -795,83 +769,53 @@ class TensorboardCallback(BaseCallback):
             for key, value in self.model.logger.name_to_value.items():
                 self.logger.record(key, value)
         
-        # Handle episode completion
-        if self.locals.get('done'):
-            self.episode_count += 1
+        # Handle episode completions (check all environments)
+        dones = self.locals.get('dones', [False])
+        for i, done in enumerate(dones):
+            if done:
+                # Skip if this environment hasn't accumulated data yet
+                if not hasattr(self, 'current_episode_rewards_all') or i >= len(self.current_episode_rewards_all):
+                    continue
             
-            # Get episode stats from ALL environments
-            all_episodes_rewards = []
-            all_episodes_lengths = []
-            all_episodes_velocities = []
-            
-            # Gather data from all environments that completed episodes
-            if hasattr(self.training_env, 'envs'):
-                # For DummyVecEnv
-                for env in self.training_env.envs:
-                    if hasattr(env, 'current_episode_rewards') and len(env.current_episode_rewards) > 0:
-                        all_episodes_rewards.append(np.mean(env.current_episode_rewards))
-                        all_episodes_lengths.append(len(env.current_episode_rewards))
-                        all_episodes_velocities.append(np.mean(env.current_episode_velocities))
-            else:
-                # For SubprocVecEnv
-                try:
-                    # Get episode stats from all environments
-                    all_rewards = self.training_env.get_attr('current_episode_rewards')
-                    all_velocities = self.training_env.get_attr('current_episode_velocities')
-                    
-                    # Process complete episodes only
-                    for rewards, velocities in zip(all_rewards, all_velocities):
-                        if len(rewards) > 0:
-                            all_episodes_rewards.append(np.mean(rewards))
-                            all_episodes_lengths.append(len(rewards))
-                            all_episodes_velocities.append(np.mean(velocities))
-                except:
-                    # Fallback to current env only
-                    all_episodes_rewards = [np.mean(self.current_episode_rewards)] if self.current_episode_rewards else []
-                    all_episodes_lengths = [len(self.current_episode_rewards)] if self.current_episode_rewards else []
-                    all_episodes_velocities = [np.mean(self.current_episode_velocities)] if self.current_episode_velocities else []
-            
-            # Calculate aggregate statistics if we have any episodes
-            if all_episodes_rewards:
-                # Log average of averages (what you described)
-                self.logger.record('train/episode_reward_mean', np.mean(all_episodes_rewards))
-                self.logger.record('train/episode_length_mean', np.mean(all_episodes_lengths))
-                self.logger.record('train/episode_velocity_mean', np.mean(all_episodes_velocities))
+                # Calculate statistics for this particular environment's episode
+                episode_rewards = self.current_episode_rewards_all[i]
+                episode_velocities = self.current_episode_velocities_all[i]
                 
-                # Also log min/max for insight
-                self.logger.record('train/episode_reward_min', np.min(all_episodes_rewards))
-                self.logger.record('train/episode_reward_max', np.max(all_episodes_rewards))
-            
-            # Print summary every 10 episodes (based on env 0)
-            if self.episode_count % 10 == 0 and all_episodes_rewards:
-                print(f"\nStats across {len(all_episodes_rewards)} environments:")
-                print(f"  Reward: mean={np.mean(all_episodes_rewards):.4f}, min={np.min(all_episodes_rewards):.4f}, max={np.max(all_episodes_rewards):.4f}")
-                print(f"  Average episode length: {np.mean(all_episodes_lengths):.1f} steps")
-            
-            # Log policy metrics if available
-            if hasattr(self.model, 'policy'):
-                explained_var = explained_variance(
-                    self.model.rollout_buffer.values.flatten(),
-                    self.model.rollout_buffer.returns.flatten()
-                )
-                self.logger.record('train/explained_variance', explained_var)
-                
-                if hasattr(self.model, 'clip_range'):
-                    current_clip_range = self.model.clip_range(1) if callable(self.model.clip_range) else self.model.clip_range
-                    self.logger.record('train/clip_fraction', float(current_clip_range))
-                
-                if hasattr(self.model, 'entropy_loss'):
-                    self.logger.record('train/entropy_loss', self.model.entropy_loss)
+                if episode_rewards:
+                    episode_reward_sum = sum(episode_rewards)
+                    episode_reward_mean = np.mean(episode_rewards)
+                    episode_reward_min = np.min(episode_rewards)
+                    episode_reward_max = np.max(episode_rewards)
+                    episode_velocity_mean = np.mean(episode_velocities) if episode_velocities else 0.0
                     
-                if hasattr(self.model, 'policy_loss'):
-                    self.logger.record('train/policy_loss', self.model.policy_loss)
+                    # Store episode summary metrics - track for all environments
+                    if not hasattr(self, 'all_episode_rewards'):
+                        self.all_episode_rewards = [[] for _ in range(len(dones))]
+                        self.all_episode_velocities = [[] for _ in range(len(dones))]
                     
-                if hasattr(self.model, 'value_loss'):
-                    self.logger.record('train/value_loss', self.model.value_loss)
-            
-            # Reset episode tracking for the next episode
-            self.current_episode_rewards = []
-            self.current_episode_velocities = []
+                    self.all_episode_rewards[i].append(episode_reward_mean)
+                    self.all_episode_velocities[i].append(episode_velocity_mean)
+                    
+                    # Log aggregated statistics after we've collected data from all environments
+                    self.episode_count += 1
+                    if self.episode_count % 192 == 0:  # After all 192 envs report
+                        # Calculate global averages across all environments
+                        all_rewards = [r for rewards in self.all_episode_rewards for r in rewards[-1:]]
+                        all_velocities = [v for velocities in self.all_episode_velocities for v in velocities[-1:]]
+                        
+                        # Log aggregated metrics
+                        self.logger.record('train/episode_reward_mean', np.mean(all_rewards))
+                        self.logger.record('train/episode_reward_min', np.min(all_rewards))
+                        self.logger.record('train/episode_reward_max', np.max(all_rewards))
+                        self.logger.record('train/episode_velocity_mean', np.mean(all_velocities))
+                        
+                        # Print summary for user feedback
+                        print(f"\nAggregated stats across {len(all_rewards)} environments:")
+                        print(f"  Reward: mean={np.mean(all_rewards):.4f}, min={np.min(all_rewards):.4f}, max={np.max(all_rewards):.4f}")
+                    
+                    # Reset this environment's tracking
+                    self.current_episode_rewards_all[i] = []
+                    self.current_episode_velocities_all[i] = []
         
         # Make sure to dump all metrics to tensorboard
         self.logger.dump(self.num_timesteps)
@@ -996,7 +940,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         print(f"\nTraining with {n_envs} parallel environments")
         print(f"Each timestep will collect {n_envs} samples")
         print(f"Expected speedup: ~{n_envs}x (minus overhead)")
-    
+
     # Setup callbacks
     tensorboard_callback = TensorboardCallback(start_timesteps=start_timesteps, target_updates=target_updates)
     callbacks = [
@@ -1020,12 +964,12 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     # Train the model
     interrupted = False
     try:
-    model.learn(
-        total_timesteps=total_timesteps,
-        callback=callbacks,
-        tb_log_name=os.path.basename(save_dir),
-        reset_num_timesteps=False  # Continue timesteps from previous run
-    )
+        model.learn(
+            total_timesteps=total_timesteps,
+            callback=callbacks,
+            tb_log_name=os.path.basename(save_dir),
+            reset_num_timesteps=False  # Continue timesteps from previous run
+        )
     except KeyboardInterrupt:
         print("\n\nTraining interrupted by keyboard! Saving model and generating model card...")
         interrupted = True
@@ -1048,9 +992,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         print(f"Total steps including previous training: {env_steps}")
         print(f"Total updates: {total_updates}")
     else:
-    env_steps = start_timesteps + total_timesteps
+        env_steps = start_timesteps + total_timesteps
         # Calculate total updates based on total steps
-    total_updates = env_steps // default_hyperparameters["n_steps"]
+        total_updates = env_steps // default_hyperparameters["n_steps"]
     
     # Save final model with environment steps in filename
     training_iterations = (total_timesteps if not interrupted else model.actual_timesteps_trained) * model.n_epochs

@@ -898,26 +898,25 @@ class TensorboardCallback(BaseCallback):
 class CheckpointCallback(BaseCallback):
     """Custom callback for saving model checkpoints during training."""
     
-    def __init__(self, save_dir, checkpoint_freq=4000, start_timesteps=0, total_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, verbose=0, n_envs=1):
+    def __init__(self, save_dir, checkpoint_freq=1000, start_timesteps=0, total_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, verbose=0, n_envs=1):
         """Initialize the callback.
         
         Args:
             save_dir: Directory to save checkpoints in
-            checkpoint_freq: How often to save checkpoints
+            checkpoint_freq: How many updates between checkpoint saves (e.g., 40000 saves at updates 40000, 80000, etc.)
             start_timesteps: Starting timestep count (for resumed training)
             total_timesteps: Total timesteps to train for
             keep_checkpoints: Whether to keep all checkpoints or delete previous ones
-            checkpoint_stride: Save every Nth checkpoint (e.g. 3 means save checkpoint_freq * 3)
+            checkpoint_stride: DEPRECATED - kept for backward compatibility
             verbose: Verbosity level
             n_envs: Number of parallel environments
         """
         super().__init__(verbose)
         self.save_dir = save_dir
-        self.checkpoint_freq = checkpoint_freq
+        self.checkpoint_freq = checkpoint_freq  # Now interpreted as update frequency
         self.start_timesteps = start_timesteps
         self.total_timesteps = total_timesteps
         self.keep_checkpoints = keep_checkpoints
-        self.checkpoint_stride = checkpoint_stride
         self.n_envs = n_envs
         self.last_update_saved = 0
         self.initial_update_count = 0
@@ -942,22 +941,24 @@ class CheckpointCallback(BaseCallback):
         current_update = total_samples // default_hyperparameters["n_steps"]
         total_updates = current_update + self.initial_update_count
         
-        # Save if we've completed a new update and it matches our checkpoint_stride pattern
-        if total_updates > self.last_update_saved and (total_updates % self.checkpoint_stride == 0):
+        # Save if we've completed a new update divisible by checkpoint_freq
+        if total_updates > self.last_update_saved and total_updates % self.checkpoint_freq == 0:
             self.last_update_saved = total_updates
             checkpoint_path = os.path.join(self.save_dir, f"model_{total_updates}updates.zip")
             
             # If not keeping checkpoints, delete the previous one
-            if not self.keep_checkpoints and total_updates > self.checkpoint_stride:
-                prev_updates = total_updates - self.checkpoint_stride
-                prev_path = os.path.join(self.save_dir, f"model_{prev_updates}updates.zip")
-                if os.path.exists(prev_path):
-                    try:
-                        os.remove(prev_path)
-                        if self.verbose > 0:
-                            print(f"\nRemoved checkpoint at {prev_updates} updates")
-                    except Exception as e:
-                        print(f"Warning: Could not remove previous checkpoint: {e}")
+            if not self.keep_checkpoints:
+                # Find the most recent previous checkpoint
+                for prev_updates in range(total_updates - self.checkpoint_freq, 0, -self.checkpoint_freq):
+                    prev_path = os.path.join(self.save_dir, f"model_{prev_updates}updates.zip")
+                    if os.path.exists(prev_path):
+                        try:
+                            os.remove(prev_path)
+                            if self.verbose > 0:
+                                print(f"\nRemoved checkpoint at {prev_updates} updates")
+                        except Exception as e:
+                            print(f"Warning: Could not remove previous checkpoint: {e}")
+                        break  # Only remove the most recent previous checkpoint
             
             # Save the current checkpoint
             self.model.save(checkpoint_path)
@@ -1006,19 +1007,19 @@ class RolloutDebugCallback(BaseCallback):
         """Required method that is called at each step."""
         return True  # Return True to continue training
 
-def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1, target_updates=None):
+def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1, target_updates=None):
     """Train a creature using PPO.
     
     Args:
         env: The environment to train in
         total_timesteps: Total timesteps to train for
-        checkpoint_freq: How often to save checkpoints
+        checkpoint_freq: How many updates between checkpoint saves (e.g., 40000 saves at updates 40000, 80000, etc.)
         load_path: Path to load a model from
         save_dir: Directory to save models in
         tensorboard_log: TensorBoard log directory
         start_timesteps: Starting timestep count (for resuming training)
         keep_checkpoints: Whether to keep all checkpoints
-        checkpoint_stride: How many checkpoints to skip between saves
+        checkpoint_stride: DEPRECATED - kept for backward compatibility
         keep_previous_model: Whether to keep the previous model folder
         training_phase: Which training phase is being used ("combined", "walking", or "rotation")
         n_envs: Number of parallel environments being used
@@ -1070,13 +1071,13 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     callbacks = [
         CheckpointCallback(
             save_dir=save_dir,
-            checkpoint_freq=default_hyperparameters["n_steps"],  # This doesn't actually matter much with the fix
+            checkpoint_freq=checkpoint_freq,  # Now directly controls at which update numbers to save
             start_timesteps=start_timesteps,
             total_timesteps=total_timesteps,
             keep_checkpoints=keep_checkpoints,
-            checkpoint_stride=checkpoint_stride,
+            checkpoint_stride=checkpoint_stride,  # Kept for backward compatibility
             verbose=1,
-            n_envs=n_envs  # Pass n_envs as a parameter
+            n_envs=n_envs
         ),
         tensorboard_callback,
         RolloutDebugCallback(verbose=1)

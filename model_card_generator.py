@@ -240,10 +240,20 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Training Information
         f.write("## Training Information\n")
         
+        # Correct update calculation accounting for parallel environments
+        # For n_envs environments, each model.n_steps represents n_envs samples
+        total_samples_trained = trained_timesteps * n_envs
+        total_samples_start = start_timesteps * n_envs
+        
+        # Calculate updates correctly
+        # Each update processes model.n_steps samples
+        training_updates = total_samples_trained // default_hyperparameters["n_steps"]
+        previous_updates = total_samples_start // default_hyperparameters["n_steps"]
+        total_updates = training_updates + previous_updates
+        
         # Training Command in its own subsection
         f.write("### Training Command\n")
-        n_updates = trained_timesteps // default_hyperparameters["n_steps"]  # Convert timesteps back to updates
-        command = f"python main.py --training-phase {training_phase} --n-updates {n_updates}"
+        command = f"python main.py --training-phase {training_phase} --n-updates {total_updates}"
         if n_envs > 1:
             command += f" --n-envs {n_envs}"
         if tensorboard_log and tensorboard_log != 'tensorboard_logs':  # Only include if not default
@@ -259,31 +269,23 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write(f"- Start Time: {start_time_est.strftime('%I:%M:%S %p')} EST\n")
         f.write(f"- End Time: {end_time_est.strftime('%I:%M:%S %p')} EST\n")
         f.write(f"- Duration: {hours}h {minutes}m {seconds}s\n")
-        # Add policy updates info
-        prev_updates = start_timesteps // default_hyperparameters["n_steps"] if start_timesteps else 0
         
-        training_updates = trained_timesteps // default_hyperparameters["n_steps"]
-
-        total_timesteps = start_timesteps + trained_timesteps
-        total_updates = total_timesteps // default_hyperparameters["n_steps"]                
-
-        
-        f.write(f"- Previous Updates: {prev_updates} ({start_timesteps} env timesteps)\n")
-        f.write(f"- Training Updates: {training_updates} ({trained_timesteps} env timesteps)\n")
-        f.write(f"- Total Updates: {total_updates} ({total_timesteps} env timesteps)\n")
+        # Write update stats correctly accounting for parallel environments
+        f.write(f"- Previous Updates: {previous_updates} ({start_timesteps} timesteps)\n")
+        f.write(f"- Training Updates: {training_updates} ({trained_timesteps} timesteps)\n")
+        f.write(f"- Total Updates: {total_updates} ({start_timesteps + trained_timesteps} timesteps)\n")
         
         # Add parallel environments info
-        if n_envs > 1:
-            total_samples = total_timesteps * n_envs
-            f.write(f"- Parallel Environments: {n_envs}\n")
-            f.write(f"- Total Training Samples: {total_samples}\n")
+        f.write(f"- Parallel Environments: {n_envs}\n")
+        f.write(f"- Total Samples Collected: {total_samples_trained + total_samples_start}\n")
         
         # Add completion status
         if interrupted:
-            f.write(f"- Training Status: **INTERRUPTED** after {trained_timesteps} steps\n")
+            f.write(f"- Training Status: **INTERRUPTED** after {training_updates} updates\n")
         else:
             f.write(f"- Training Status: COMPLETED\n")
             
+        # Final model path - using correct update count
         final_model_path = os.path.join(save_dir, f'final_model_{total_updates}updates.zip')
         f.write(f"- Final Model Path: `{final_model_path}`\n")
         if start_timesteps > 0:

@@ -32,8 +32,8 @@ default_hyperparameters = dict(
     # n_steps=196608,  # Doubled from 8192 to extend collection phase
     # batch_size=1536,  # Maximal batch size for efficient GPU usage
     n_steps=1024,
-    batch_size=24576,
-    # batch_size=512,
+    # batch_size=24576,
+    batch_size=512,
     n_epochs=10,  
     gamma=0.99,
     gae_lambda=0.95,
@@ -716,11 +716,24 @@ class TensorboardCallback(BaseCallback):
         # For enforcing exact number of updates
         self.target_updates = target_updates
         self.last_update_num = 0  # Track the last update number for logging
+        self.updates_completed = 0  # Track total updates completed, including from previous training
+        
+        # Calculate initial update count from start_timesteps
+        self.initial_update_count = 0
         
     def _on_training_start(self):
         # Initialize episode tracking
         self.current_episode_rewards = []
         self.current_episode_velocities = []
+        
+        # Calculate initial updates from start_timesteps and n_envs
+        if hasattr(self.model, 'n_envs'):
+            n_envs = self.model.n_envs
+            initial_samples = self.start_timesteps * n_envs
+            self.initial_update_count = initial_samples // default_hyperparameters["n_steps"]
+            self.updates_completed = self.initial_update_count
+            if self.verbose > 0 and self.initial_update_count > 0:
+                print(f"\nStarting from update {self.initial_update_count}")
         
     def _on_step(self):
         # Calculate current number of updates - accounting for parallel environments
@@ -729,16 +742,22 @@ class TensorboardCallback(BaseCallback):
         n_envs = self.model.n_envs if hasattr(self.model, 'n_envs') else 1
         total_samples = self.num_timesteps * n_envs
         current_update = total_samples // default_hyperparameters["n_steps"]
+        total_updates = current_update + self.initial_update_count
         
-        # Print update milestone logs
-        if current_update > self.last_update_num:
-            self.last_update_num = current_update
-            if current_update % 100 == 0:
-                print(f"\nReached update {current_update} of {self.target_updates if self.target_updates is not None else 'infinite'}")
+        # Print update milestone logs and track completed updates
+        if total_updates > self.updates_completed:
+            previous_update = self.updates_completed
+            self.updates_completed = total_updates
+            
+            # Log when we reach milestone updates
+            if total_updates % 100 == 0 or total_updates - previous_update >= 10:
+                print(f"\nReached update {total_updates}")
+                if self.target_updates is not None:
+                    print(f"Progress: {total_updates}/{self.target_updates} updates ({total_updates/self.target_updates*100:.1f}%)")
         
         # Check if we've reached our target number of updates
-        if self.target_updates is not None and current_update >= self.target_updates:
-            print(f"\nReached target of {self.target_updates} updates. Current update: {current_update}. Stopping training.")
+        if self.target_updates is not None and total_updates >= self.target_updates:
+            print(f"\nReached target of {self.target_updates} updates. Current update: {total_updates}. Stopping training.")
             return False  # Return False to stop training
         
         # Get rewards and velocities from ALL environments
@@ -901,30 +920,36 @@ class CheckpointCallback(BaseCallback):
         self.checkpoint_stride = checkpoint_stride
         self.n_envs = n_envs
         self.last_update_saved = 0
+        self.initial_update_count = 0
         
         # Create save directory if it doesn't exist
         os.makedirs(save_dir, exist_ok=True)
         
     def _init_callback(self) -> None:
         """Initialize callback attributes."""
-        pass
+        # Calculate initial updates from start_timesteps and n_envs
+        initial_samples = self.start_timesteps * self.n_envs
+        self.initial_update_count = initial_samples // default_hyperparameters["n_steps"]
+        if self.verbose > 0 and self.initial_update_count > 0:
+            print(f"\nCheckpoint tracking starting from update {self.initial_update_count}")
         
     def _on_step(self) -> bool:
         """Save a checkpoint if it's time to do so."""
-        # Calculate total environment steps (accounting for vectorization)
-        env_steps = (self.start_timesteps + self.n_calls) * self.n_envs
+        # Calculate total environment steps considering vectorization
+        total_samples = self.num_timesteps * self.n_envs
         
-        # Calculate current number of updates
-        n_updates = env_steps // self.model.n_steps
+        # Calculate current number of updates including initial updates
+        current_update = total_samples // default_hyperparameters["n_steps"]
+        total_updates = current_update + self.initial_update_count
         
         # Save if we've completed a new update and it matches our checkpoint_stride pattern
-        if n_updates > self.last_update_saved and (n_updates % self.checkpoint_stride == 0):
-            self.last_update_saved = n_updates
-            checkpoint_path = os.path.join(self.save_dir, f"model_{n_updates}updates.zip")
+        if total_updates > self.last_update_saved and (total_updates % self.checkpoint_stride == 0):
+            self.last_update_saved = total_updates
+            checkpoint_path = os.path.join(self.save_dir, f"model_{total_updates}updates.zip")
             
             # If not keeping checkpoints, delete the previous one
-            if not self.keep_checkpoints and n_updates > self.checkpoint_stride:
-                prev_updates = n_updates - self.checkpoint_stride
+            if not self.keep_checkpoints and total_updates > self.checkpoint_stride:
+                prev_updates = total_updates - self.checkpoint_stride
                 prev_path = os.path.join(self.save_dir, f"model_{prev_updates}updates.zip")
                 if os.path.exists(prev_path):
                     try:
@@ -937,7 +962,7 @@ class CheckpointCallback(BaseCallback):
             # Save the current checkpoint
             self.model.save(checkpoint_path)
             if self.verbose > 0:
-                print(f"\nSaved checkpoint at {n_updates} updates")
+                print(f"\nSaved checkpoint at {total_updates} updates")
         
         return True
 
@@ -1086,19 +1111,29 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     # Use correct number of timesteps
     if interrupted:
         env_steps = start_timesteps + model.actual_timesteps_trained
-        # Calculate total updates based on total steps (not separate divisions)
-        total_updates = (env_steps * n_envs) // default_hyperparameters["n_steps"]
-        print(f"Training was interrupted after approximately {model.actual_timesteps_trained} steps.")
-        print(f"Total steps including previous training: {env_steps}")
+        # Calculate total updates based on total steps accounting for parallel environments
+        total_samples = env_steps * n_envs
+        total_updates = total_samples // default_hyperparameters["n_steps"]
+        print(f"Training was interrupted after approximately {model.actual_timesteps_trained} timesteps.")
+        print(f"Total timesteps including previous training: {env_steps}")
+        print(f"Total samples collected: {total_samples}")
         print(f"Total updates: {total_updates}")
     else:
         env_steps = start_timesteps + total_timesteps
-        # Calculate total updates based on total steps accounting for parallel environments
-        total_updates = (env_steps * n_envs) // default_hyperparameters["n_steps"]
-        # If we had a target_updates, use that as the actual count
+        # Calculate total samples first - needed in all code paths
+        total_samples = env_steps * n_envs
+        
+        # If we reached our target updates, use that value directly
         if target_updates is not None:
-            total_updates = min(total_updates, target_updates)
-            print(f"Reached target of {target_updates} updates.")
+            total_updates = target_updates
+            print(f"Completed target of {target_updates} updates.")
+        else:
+            # Calculate total updates based on total samples
+            total_updates = total_samples // default_hyperparameters["n_steps"]
+            print(f"Completed training for {total_updates} updates.")
+        
+        print(f"Total timesteps: {env_steps}")
+        print(f"Total samples collected: {total_samples}")
     
     # Save final model with environment steps in filename
     training_iterations = (total_timesteps if not interrupted else model.actual_timesteps_trained) * model.n_epochs

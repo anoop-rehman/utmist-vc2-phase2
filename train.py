@@ -29,8 +29,10 @@ def quaternion_to_forward_vector(quaternion):
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
-    n_steps=196608,  # Doubled from 8192 to extend collection phase
-    batch_size=1536,  # Maximal batch size for efficient GPU usage
+    # n_steps=196608,  # Doubled from 8192 to extend collection phase
+    # batch_size=1536,  # Maximal batch size for efficient GPU usage
+    n_steps=1024,
+    batch_size=24576,
     n_epochs=10,  
     gamma=0.99,
     gae_lambda=0.95,
@@ -105,7 +107,8 @@ def process_observation(timestep):
         process_observation.counter = 0
     
     # Print observations every 40 steps
-    should_print = process_observation.counter % 40 == 0
+    # should_print = process_observation.counter % 40 == 0
+    should_print = False
     process_observation.should_print = should_print  # Set a flag for other functions
     
     # Filter the observation - keep only the core components we want
@@ -206,6 +209,18 @@ class DMControlWrapper(gym.Env):
     def seed(self, seed=None):
         """Seed the environment's random number generator."""
         self.np_random = np.random.RandomState(seed)
+        # Debug print to verify seeding
+        print(f"DMControlWrapper: Seeding environment with seed {seed}")
+        
+        # Also seed the underlying DM Control environment physics engine
+        if hasattr(self.env, 'physics') and hasattr(self.env.physics, 'set_random_state'):
+            # For DM Control environments, also seed the physics engine
+            try:
+                self.env.physics.set_random_state(seed)
+                print(f"  -> Successfully seeded physics engine with {seed}")
+            except Exception as e:
+                print(f"  -> Failed to seed physics engine: {e}")
+        
         return [seed]
 
     def get_distance_traveled(self):
@@ -246,6 +261,11 @@ class DMControlWrapper(gym.Env):
     def reset(self):
         timestep = self.env.reset()
         obs = process_observation(timestep)
+        
+        # Debug print - verify this is a fresh reset with proper randomization
+        env_id = id(self)  # Unique identifier for this environment instance
+        seed_val = self.np_random.randint(0, 10000) if hasattr(self, 'np_random') else "UNSEEDED"
+        print(f"DMControlWrapper {env_id}: Resetting environment (random check: {seed_val})")
         
         # Clear position history
         self.position_history = []
@@ -519,10 +539,20 @@ class RotationPhaseWrapper(DMControlWrapper):
         
     def seed(self, seed=None):
         """Seed the environment's random number generator."""
-        result = super().seed(seed)
-        # Use the seeded RNG for randomizing initial orientation
-        self.initial_orientation = None  # Reset initial orientation
-        return result
+        self.np_random = np.random.RandomState(seed)
+        # Debug print to verify seeding
+        print(f"RotationPhaseWrapper: Seeding environment with seed {seed}")
+        
+        # Also seed the underlying DM Control environment physics engine
+        if hasattr(self.env, 'physics') and hasattr(self.env.physics, 'set_random_state'):
+            # For DM Control environments, also seed the physics engine
+            try:
+                self.env.physics.set_random_state(seed)
+                print(f"  -> Successfully seeded physics engine with {seed}")
+            except Exception as e:
+                print(f"  -> Failed to seed physics engine: {e}")
+        
+        return [seed]
     
     def step(self, action):
         timestep = self.env.step([action])
@@ -562,6 +592,11 @@ class RotationPhaseWrapper(DMControlWrapper):
         timestep = self.env.reset()
         obs = process_observation(timestep)
         
+        # Debug print - verify this is a fresh reset with proper randomization
+        env_id = id(self)  # Unique identifier for this environment instance
+        seed_val = self.np_random.randint(0, 10000) if hasattr(self, 'np_random') else "UNSEEDED"
+        print(f"RotationPhaseWrapper {env_id}: Resetting environment (random check: {seed_val})")
+        
         # Randomize the creature's orientation by applying a random rotation
         # This is done via the internal physics engine
         if hasattr(self.env, 'physics'):
@@ -575,9 +610,16 @@ class RotationPhaseWrapper(DMControlWrapper):
                     
                     # Generate a random quaternion for orientation
                     # Method: Generate random rotation axis and angle
+                    if not hasattr(self, 'np_random'):
+                        print(f"WARNING: RotationPhaseWrapper {env_id} has no np_random - creating one with random seed")
+                        self.np_random = np.random.RandomState()
+                    
                     axis = self.np_random.randn(3)  # Use seeded RNG instead of global np.random
                     axis = axis / np.linalg.norm(axis)  # Normalize to unit vector
                     angle = self.np_random.uniform(0, 2 * np.pi)  # Use seeded RNG for random angle
+                    
+                    # Debug print to verify randomization
+                    print(f"RotationPhaseWrapper {env_id}: Random rotation: axis={axis}, angle={angle:.2f}")
                     
                     # Convert to quaternion (w,x,y,z format)
                     quat = np.zeros(4)
@@ -882,6 +924,38 @@ class CheckpointCallback(BaseCallback):
         
         return True
 
+class RolloutDebugCallback(BaseCallback):
+    """Callback that prints detailed information at the end of each rollout.
+    Helps verify that all environments are contributing data correctly.
+    """
+    def __init__(self, verbose: int = 0):
+        super().__init__(verbose)
+        # Track how many rollouts we've seen
+        self.rollout_idx = 0
+
+    def _on_rollout_end(self) -> None:
+        self.rollout_idx += 1
+
+        # Length of rollout buffer == n_steps * n_envs
+        buffer_size = len(self.model.rollout_buffer.rewards)
+        n_steps_cfg = self.model.n_steps
+        n_envs_cfg = self.model.n_envs
+        expected_size = n_steps_cfg * n_envs_cfg
+
+        print("\n=== Rollout Debug ===")
+        print(f"Rollout #{self.rollout_idx} ended.")
+        print(f"Configured n_steps: {n_steps_cfg}")
+        print(f"Configured n_envs:  {n_envs_cfg}")
+        print(f"Rollout buffer size: {buffer_size}")
+        print(f"Expected size (n_steps * n_envs): {expected_size}")
+
+        # Sanity‑check: each env should have n_steps transitions
+        # Count how many transitions come from each env id
+        env_counts = np.bincount(self.model.rollout_buffer.env_indices, minlength=n_envs_cfg)
+        for env_id, cnt in enumerate(env_counts):
+            print(f"  Env {env_id}: {cnt} transitions")
+        print("====================\n")
+
 def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1, target_updates=None):
     """Train a creature using PPO.
     
@@ -954,7 +1028,8 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
             verbose=1,
             n_envs=n_envs  # Pass n_envs as a parameter
         ),
-        tensorboard_callback
+        tensorboard_callback,
+        RolloutDebugCallback(verbose=1)
     ]
     
     # Store the model for saving in case of interruption

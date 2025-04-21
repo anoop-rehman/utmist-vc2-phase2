@@ -161,6 +161,10 @@ class DMControlWrapper(gym.Env):
         self.position_history = []
         self.window_size = 20  # Track last 20 steps
         
+        # Add episode statistics tracking for multi-env aggregation
+        self.current_episode_rewards = []
+        self.current_episode_velocities = []
+        
         # Get action and observation specs
         action_spec = env.action_spec()[0]
         obs_spec = env.observation_spec()[0]
@@ -241,6 +245,11 @@ class DMControlWrapper(gym.Env):
 
         self.reward = reward
         self.last_vel_to_ball = vel_to_ball
+        
+        # Track statistics for this episode
+        self.current_episode_rewards.append(reward)
+        self.current_episode_velocities.append(vel_to_ball)
+        
         return obs, reward, done, info
 
     def reset(self):
@@ -249,6 +258,10 @@ class DMControlWrapper(gym.Env):
         
         # Clear position history
         self.position_history = []
+        
+        # Clear episode statistics
+        self.current_episode_rewards = []
+        self.current_episode_velocities = []
         
         # Initialize last_vel_to_ball
         _, self.last_vel_to_ball = calculate_reward(timestep, np.zeros(self.action_space.shape), 0.0)
@@ -340,6 +353,10 @@ class WalkingPhaseWrapper(DMControlWrapper):
         self.velocity_history = []
         self.last_position = None
         self.start_position = None  # Reset start position
+        
+        # Clear episode statistics
+        self.current_episode_rewards = []
+        self.current_episode_velocities = []
         
         # Create initial observation with phase variables
         additional_obs = []
@@ -505,6 +522,11 @@ class WalkingPhaseWrapper(DMControlWrapper):
 
         self.reward = reward
         self.last_vel_to_ball = forward_velocity  # Keep tracking velocity for logging
+        
+        # Track statistics for this episode
+        self.current_episode_rewards.append(reward)
+        self.current_episode_velocities.append(forward_velocity)
+        
         return obs, reward, done, info
 
 class RotationPhaseWrapper(DMControlWrapper):
@@ -556,11 +578,20 @@ class RotationPhaseWrapper(DMControlWrapper):
 
         self.reward = reward
         self.last_vel_to_ball = alignment_reward  # For consistency with previous code
+        
+        # Track statistics for this episode
+        self.current_episode_rewards.append(reward)
+        self.current_episode_velocities.append(alignment_reward)
+        
         return obs, reward, done, info
     
     def reset(self):
         timestep = self.env.reset()
         obs = process_observation(timestep)
+        
+        # Clear episode statistics
+        self.current_episode_rewards = []
+        self.current_episode_velocities = []
         
         # Randomize the creature's orientation by applying a random rotation
         # This is done via the internal physics engine
@@ -768,31 +799,54 @@ class TensorboardCallback(BaseCallback):
         if self.locals.get('done'):
             self.episode_count += 1
             
-            # Calculate statistics for this episode
-            episode_reward_sum = sum(self.current_episode_rewards)
-            episode_reward_mean = np.mean(self.current_episode_rewards)
-            episode_reward_min = np.min(self.current_episode_rewards)
-            episode_reward_max = np.max(self.current_episode_rewards)
-            episode_velocity_mean = np.mean(self.current_episode_velocities)
+            # Get episode stats from ALL environments
+            all_episodes_rewards = []
+            all_episodes_lengths = []
+            all_episodes_velocities = []
             
-            # Store episode summary metrics
-            self.episode_rewards.append(episode_reward_sum)
-            self.episode_velocities.append(episode_velocity_mean)
+            # Gather data from all environments that completed episodes
+            if hasattr(self.training_env, 'envs'):
+                # For DummyVecEnv
+                for env in self.training_env.envs:
+                    if hasattr(env, 'current_episode_rewards') and len(env.current_episode_rewards) > 0:
+                        all_episodes_rewards.append(np.mean(env.current_episode_rewards))
+                        all_episodes_lengths.append(len(env.current_episode_rewards))
+                        all_episodes_velocities.append(np.mean(env.current_episode_velocities))
+            else:
+                # For SubprocVecEnv
+                try:
+                    # Get episode stats from all environments
+                    all_rewards = self.training_env.get_attr('current_episode_rewards')
+                    all_velocities = self.training_env.get_attr('current_episode_velocities')
+                    
+                    # Process complete episodes only
+                    for rewards, velocities in zip(all_rewards, all_velocities):
+                        if len(rewards) > 0:
+                            all_episodes_rewards.append(np.mean(rewards))
+                            all_episodes_lengths.append(len(rewards))
+                            all_episodes_velocities.append(np.mean(velocities))
+                except:
+                    # Fallback to current env only
+                    all_episodes_rewards = [np.mean(self.current_episode_rewards)] if self.current_episode_rewards else []
+                    all_episodes_lengths = [len(self.current_episode_rewards)] if self.current_episode_rewards else []
+                    all_episodes_velocities = [np.mean(self.current_episode_velocities)] if self.current_episode_velocities else []
             
-            # Log this episode's statistics
-            self.logger.record('train/episode_reward_sum', episode_reward_sum)
-            self.logger.record('train/episode_reward_mean', episode_reward_mean)
-            self.logger.record('train/episode_reward_min', episode_reward_min)
-            self.logger.record('train/episode_reward_max', episode_reward_max)
-            self.logger.record('train/episode_velocity_mean', episode_velocity_mean)
-            self.logger.record('train/episode_length', len(self.current_episode_rewards))
+            # Calculate aggregate statistics if we have any episodes
+            if all_episodes_rewards:
+                # Log average of averages (what you described)
+                self.logger.record('train/episode_reward_mean', np.mean(all_episodes_rewards))
+                self.logger.record('train/episode_length_mean', np.mean(all_episodes_lengths))
+                self.logger.record('train/episode_velocity_mean', np.mean(all_episodes_velocities))
+                
+                # Also log min/max for insight
+                self.logger.record('train/episode_reward_min', np.min(all_episodes_rewards))
+                self.logger.record('train/episode_reward_max', np.max(all_episodes_rewards))
             
-            if self.episode_count % 10 == 0:
-                print(f"\nEpisode {self.episode_count} stats:")
-                print(f"  Reward: sum={episode_reward_sum:.4f}, mean={episode_reward_mean:.4f}, min={episode_reward_min:.4f}, max={episode_reward_max:.4f}")
-                print(f"  Length: {len(self.current_episode_rewards)} steps")
-                if hasattr(self.model, 'policy'):
-                    print(f"  Value Loss: {self.model.value_loss if hasattr(self.model, 'value_loss') else 'N/A'}")
+            # Print summary every 10 episodes (based on env 0)
+            if self.episode_count % 10 == 0 and all_episodes_rewards:
+                print(f"\nStats across {len(all_episodes_rewards)} environments:")
+                print(f"  Reward: mean={np.mean(all_episodes_rewards):.4f}, min={np.min(all_episodes_rewards):.4f}, max={np.max(all_episodes_rewards):.4f}")
+                print(f"  Average episode length: {np.mean(all_episodes_lengths):.1f} steps")
             
             # Log policy metrics if available
             if hasattr(self.model, 'policy'):

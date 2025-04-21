@@ -240,15 +240,18 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Training Information
         f.write("## Training Information\n")
         
-        # Correct update calculation accounting for parallel environments
-        # For n_envs environments, each model.n_steps represents n_envs samples
+        # Calculate environment steps and samples
+        total_vectorized_steps_trained = trained_timesteps
+        total_vectorized_steps_start = start_timesteps
+        
+        # Calculate total environment interactions across all parallel environments
         total_samples_trained = trained_timesteps * n_envs
         total_samples_start = start_timesteps * n_envs
         
-        # Calculate updates correctly
-        # Each update processes model.n_steps samples
-        training_updates = total_samples_trained // default_hyperparameters["n_steps"]
-        previous_updates = total_samples_start // default_hyperparameters["n_steps"]
+        # Calculate updates correctly - each update is n_steps of vectorized environment steps
+        # NOT total environment interactions / n_steps
+        training_updates = total_vectorized_steps_trained // default_hyperparameters["n_steps"]
+        previous_updates = total_vectorized_steps_start // default_hyperparameters["n_steps"]
         total_updates = training_updates + previous_updates
         
         # Training Command in its own subsection
@@ -270,14 +273,14 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write(f"- End Time: {end_time_est.strftime('%I:%M:%S %p')} EST\n")
         f.write(f"- Duration: {hours}h {minutes}m {seconds}s\n")
         
-        # Write update stats correctly accounting for parallel environments
-        f.write(f"- Previous Updates: {previous_updates} ({start_timesteps} timesteps)\n")
-        f.write(f"- Training Updates: {training_updates} ({trained_timesteps} timesteps)\n")
-        f.write(f"- Total Updates: {total_updates} ({start_timesteps + trained_timesteps} timesteps)\n")
+        # Write update stats clearly with correct terminology
+        f.write(f"- Previous Updates: {previous_updates} ({start_timesteps} vectorized timesteps)\n")
+        f.write(f"- Training Updates: {training_updates} ({trained_timesteps} vectorized timesteps)\n")
+        f.write(f"- Total Updates: {total_updates} ({start_timesteps + trained_timesteps} vectorized timesteps)\n")
         
         # Add parallel environments info
         f.write(f"- Parallel Environments: {n_envs}\n")
-        f.write(f"- Total Samples Collected: {total_samples_trained + total_samples_start}\n")
+        f.write(f"- Total Environment Interactions: {total_samples_trained + total_samples_start}\n")
         
         # Add completion status
         if interrupted:

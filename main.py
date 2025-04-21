@@ -207,8 +207,7 @@ if __name__ == "__main__":
         # since SB3 will collect n_envs times more samples per step
         timesteps_per_update = default_hyperparameters["n_steps"] 
         
-
-        timesteps = (args.n_updates * timesteps_per_update) // args.n_envs
+        timesteps = args.n_updates * timesteps_per_update
         
         print(f"Starting training for {args.n_updates} updates...")
         print(f"Using {args.n_envs} parallel environments for sample collection")

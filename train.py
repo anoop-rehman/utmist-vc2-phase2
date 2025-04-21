@@ -1210,4 +1210,14 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
         n_envs=n_envs  # Pass the number of environments
     )
     
+    # Print final summary with clear terminology
+    vectorized_steps = env_steps  # The steps taken by the vectorized environment
+    total_environment_steps = env_steps * n_envs  # Total steps across all environments
+    # Calculate updates as vectorized steps divided by n_steps (not total steps)
+    total_updates = vectorized_steps // default_hyperparameters["n_steps"]
+
+    print(f"Vectorized steps: {vectorized_steps}")
+    print(f"Total environment steps: {total_environment_steps}")
+    print(f"Updates completed: {total_updates}")
+    
     return model 

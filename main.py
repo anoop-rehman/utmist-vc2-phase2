@@ -1,13 +1,16 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="glfw")
+import os
 from custom_soccer_env import create_soccer_env
 from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED
 from creature import Creature
 from train import train_creature, DMControlWrapper, process_observation, calculate_reward, setup_env, default_hyperparameters, TensorboardCallback
 from dm_control import viewer
 import numpy as np
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+# from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, AsyncVectorEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
-import os
 import argparse
 
 def create_env(training_phase="combined", view_only=False):
@@ -192,7 +195,8 @@ if __name__ == "__main__":
             return _init
             
         # Create a vectorized environment with n_envs parallel environments
-        vec_env = SubprocVecEnv([make_env(i) for i in range(args.n_envs)])
+        # vec_env = SubprocVecEnv([make_env(i) for i in range(args.n_envs)])
+        vec_env = AsyncVectorEnv([make_env(i) for i in range(args.n_envs)])
 
     if args.view_only and args.load_model:
         # Load model and launch viewer

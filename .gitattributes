@@ -1,3 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 tensorboard_logs/**/* filter=lfs diff=lfs merge=lfs -text
+trained_creatures/**/*.zip filter=lfs diff=lfs merge=lfs -text

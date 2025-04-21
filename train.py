@@ -29,8 +29,8 @@ def quaternion_to_forward_vector(quaternion):
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
-    n_steps=196608,  # Doubled from 8192 to extend collection phase
-    batch_size=196608,  # Maximal batch size for efficient GPU usage
+    n_steps=24576,  # Doubled from 8192 to extend collection phase
+    batch_size=24576,  # Maximal batch size for efficient GPU usage
     n_epochs=10,  
     gamma=0.99,
     gae_lambda=0.95,

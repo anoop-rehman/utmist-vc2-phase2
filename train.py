@@ -575,9 +575,9 @@ class RotationPhaseWrapper(DMControlWrapper):
                     
                     # Generate a random quaternion for orientation
                     # Method: Generate random rotation axis and angle
-                    axis = np.random.randn(3)
+                    axis = self.np_random.randn(3)  # Use seeded RNG instead of global np.random
                     axis = axis / np.linalg.norm(axis)  # Normalize to unit vector
-                    angle = np.random.uniform(0, 2 * np.pi)  # Random angle between 0 and 2π
+                    angle = self.np_random.uniform(0, 2 * np.pi)  # Use seeded RNG for random angle
                     
                     # Convert to quaternion (w,x,y,z format)
                     quat = np.zeros(4)

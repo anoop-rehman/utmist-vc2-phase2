@@ -956,6 +956,10 @@ class RolloutDebugCallback(BaseCallback):
             print(f"  Env {env_id}: {cnt} transitions")
         print("====================\n")
 
+    def _on_step(self) -> bool:
+        """Required method that is called at each step."""
+        return True  # Return True to continue training
+
 def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1, target_updates=None):
     """Train a creature using PPO.
     

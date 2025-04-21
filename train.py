@@ -33,6 +33,7 @@ default_hyperparameters = dict(
     # batch_size=1536,  # Maximal batch size for efficient GPU usage
     n_steps=1024,
     batch_size=24576,
+    # batch_size=512,
     n_epochs=10,  
     gamma=0.99,
     gae_lambda=0.95,
@@ -948,14 +949,18 @@ class RolloutDebugCallback(BaseCallback):
         print(f"Configured n_envs:  {n_envs_cfg}")
         print(f"Rollout buffer size: {buffer_size}")
         print(f"Expected size (n_steps * n_envs): {expected_size}")
-
-        # Sanity‑check: each env should have n_steps transitions
-        # Count how many transitions come from each env id
-        env_counts = np.bincount(self.model.rollout_buffer.env_indices, minlength=n_envs_cfg)
-        for env_id, cnt in enumerate(env_counts):
-            print(f"  Env {env_id}: {cnt} transitions")
+        
+        # The env_indices attribute doesn't exist in SB3's RolloutBuffer
+        # Check the shape of buffer components to understand distribution
+        obs_shape = getattr(self.model.rollout_buffer.observations, 'shape', 'unknown')
+        actions_shape = getattr(self.model.rollout_buffer.actions, 'shape', 'unknown')
+        rewards_shape = self.model.rollout_buffer.rewards.shape if hasattr(self.model.rollout_buffer.rewards, 'shape') else 'unknown'
+        
+        print(f"Observations shape: {obs_shape}")
+        print(f"Actions shape: {actions_shape}")
+        print(f"Rewards shape: {rewards_shape}")
         print("====================\n")
-
+    
     def _on_step(self) -> bool:
         """Required method that is called at each step."""
         return True  # Return True to continue training

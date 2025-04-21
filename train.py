@@ -29,9 +29,9 @@ def quaternion_to_forward_vector(quaternion):
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
-    n_steps=98304,  # Doubled from 8192 to extend collection phase
-    batch_size=98304,  # Maximal batch size for efficient GPU usage
-    n_epochs=20,  
+    n_steps=196608,  # Doubled from 8192 to extend collection phase
+    batch_size=196608,  # Maximal batch size for efficient GPU usage
+    n_epochs=10,  
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
@@ -39,12 +39,14 @@ default_hyperparameters = dict(
     policy_kwargs=dict(
         net_arch=[dict(
             # Policy network (much larger)
-            pi=[4096, 4096, 2048, 2048, 1024, 512],
+            pi=[64, 64],
             
             # Value network (also expanded)
-            vf=[4096, 3072, 2048, 1024, 512]
+            vf=[64, 64]
         )],
-        activation_fn=th.nn.ReLU
+        # activation_fn=th.nn.ReLU
+        activation_fn=th.nn.Tanh
+
     ),
 )
 

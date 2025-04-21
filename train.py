@@ -1089,6 +1089,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     
     # Train the model
     interrupted = False
+    error_message = None
     try:
         model.learn(
             total_timesteps=total_timesteps,
@@ -1099,15 +1100,24 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     except KeyboardInterrupt:
         print("\n\nTraining interrupted by keyboard! Saving model and generating model card...")
         interrupted = True
+        error_message = "Training was manually interrupted by keyboard."
+    except Exception as e:
+        print(f"\n\nTraining crashed with error: {e}")
+        print("Attempting to save model and generate model card anyway...")
+        interrupted = True
+        error_message = f"Training crashed with error: {str(e)}"
         
-        # Get how many timesteps we've actually trained
-        # This will be more accurate than estimating
-        if hasattr(tensorboard_callback, 'current_total_timesteps'):
-            model.actual_timesteps_trained = tensorboard_callback.current_total_timesteps - start_timesteps
-            print(f"Trained for {model.actual_timesteps_trained} steps of planned {total_timesteps}")
-        else:
-            model.actual_timesteps_trained = total_timesteps
-            print("No tensorboard callback found, using total timesteps")
+        # Handle specific physics errors from MuJoCo
+        if "Physics state is invalid" in str(e) or "mjWARN_BADQACC" in str(e):
+            error_message = "Training crashed due to physics simulation instability (common with extreme movements)."
+        
+    # Get how many timesteps we've actually trained
+    if hasattr(tensorboard_callback, 'current_total_timesteps'):
+        model.actual_timesteps_trained = tensorboard_callback.current_total_timesteps - start_timesteps
+        print(f"Trained for {model.actual_timesteps_trained} steps of planned {total_timesteps}")
+    else:
+        model.actual_timesteps_trained = total_timesteps
+        print("No tensorboard callback found, using total timesteps")
     
     # Use correct number of timesteps
     if interrupted:
@@ -1119,6 +1129,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
         print(f"Total timesteps including previous training: {env_steps}")
         print(f"Total samples collected: {total_samples}")
         print(f"Total updates: {total_updates}")
+        
+        if error_message:
+            print(f"Error details: {error_message}")
     else:
         env_steps = start_timesteps + total_timesteps
         # Calculate total samples first - needed in all code paths
@@ -1139,10 +1152,16 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     # Save final model with environment steps in filename
     training_iterations = (total_timesteps if not interrupted else model.actual_timesteps_trained) * model.n_epochs
     final_path = os.path.join(save_dir, f"final_model_{total_updates}updates.zip")
-    model.save(final_path)
+    
+    try:
+        model.save(final_path)
+        model_saved = True
+    except Exception as save_error:
+        print(f"Warning: Failed to save model: {save_error}")
+        model_saved = False
     
     # Verify the saved model
-    if os.path.exists(final_path):
+    if model_saved and os.path.exists(final_path):
         file_size = os.path.getsize(final_path)
         expected_min_size = 100 * 1024  # 100KB minimum
         if file_size > expected_min_size:
@@ -1187,6 +1206,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     # Store the tensorboard callback in the model for model card generation
     model.last_callback = tensorboard_callback
     
+    # Store error message for model card
+    model.error_message = error_message if interrupted and error_message else None
+    
     # After training is complete, record end time
     end_time = datetime.now()
     
@@ -1194,22 +1216,27 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     actual_timesteps = model.actual_timesteps_trained if interrupted else total_timesteps
     
     # Generate model card with actual timing information and steps
-    generate_model_card(
-        model=model,
-        save_dir=save_dir,
-        start_time=start_time,
-        end_time=end_time,
-        start_timesteps=start_timesteps or 0,
-        trained_timesteps=actual_timesteps,  # Use actual timesteps trained
-        tensorboard_log=tensorboard_log,
-        checkpoint_freq=checkpoint_freq,
-        keep_checkpoints=keep_checkpoints,
-        checkpoint_stride=checkpoint_stride,
-        load_path=load_path,
-        interrupted=interrupted,  # Pass the interrupted flag
-        training_phase=training_phase,  # Pass the training phase
-        n_envs=n_envs  # Pass the number of environments
-    )
+    try:
+        generate_model_card(
+            model=model,
+            save_dir=save_dir,
+            start_time=start_time,
+            end_time=end_time,
+            start_timesteps=start_timesteps or 0,
+            trained_timesteps=actual_timesteps,  # Use actual timesteps trained
+            tensorboard_log=tensorboard_log,
+            checkpoint_freq=checkpoint_freq,
+            keep_checkpoints=keep_checkpoints,
+            checkpoint_stride=checkpoint_stride,
+            load_path=load_path,
+            interrupted=interrupted,  # Pass the interrupted flag
+            training_phase=training_phase,  # Pass the training phase
+            n_envs=n_envs,  # Pass the number of environments
+            error_message=error_message  # Pass any error message
+        )
+        print(f"Generated model card in {save_dir}")
+    except Exception as card_error:
+        print(f"Warning: Failed to generate model card: {card_error}")
     
     # Print final summary with clear terminology
     vectorized_steps = env_steps  # The steps taken by the vectorized environment

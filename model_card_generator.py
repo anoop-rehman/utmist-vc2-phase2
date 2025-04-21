@@ -178,7 +178,7 @@ def get_env_params():
         'body_density': density
     }
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, trained_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined", n_envs=1):
+def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, trained_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined", n_envs=1, error_message=None):
     """Generate a markdown file with model details.
     
     Args:
@@ -196,6 +196,7 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         interrupted: Whether training was interrupted (e.g., by KeyboardInterrupt)
         training_phase: The training phase used ("combined", "walking", or "rotation")
         n_envs: Number of parallel environments used for training
+        error_message: Optional error message if training crashed
     """
     from train import default_hyperparameters
     card_path = os.path.join(save_dir, "model_card.md")
@@ -235,7 +236,11 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         # Add interrupt warning if applicable
         if interrupted:
             f.write("⚠️ **TRAINING INTERRUPTED** ⚠️\n\n")
-            f.write("This training run was interrupted before completion. The model may not be fully trained.\n\n")
+            
+            if error_message:
+                f.write(f"**Reason:** {error_message}\n\n")
+            else:
+                f.write("This training run was interrupted before completion. The model may not be fully trained.\n\n")
         
         # Training Information
         f.write("## Training Information\n")

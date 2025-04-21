@@ -888,6 +888,7 @@ class CheckpointCallback(BaseCallback):
         self.keep_checkpoints = keep_checkpoints
         self.checkpoint_stride = checkpoint_stride
         self.n_envs = n_envs
+        self.last_update_saved = 0
         
         # Create save directory if it doesn't exist
         os.makedirs(save_dir, exist_ok=True)
@@ -901,27 +902,30 @@ class CheckpointCallback(BaseCallback):
         # Calculate total environment steps (accounting for vectorization)
         env_steps = (self.start_timesteps + self.n_calls) * self.n_envs
         
-        # Check if we've completed a full update
-        if env_steps % self.checkpoint_freq == 0:
-            # Calculate updates based on total env steps
-            n_updates = env_steps // self.checkpoint_freq
-            if n_updates % self.checkpoint_stride == 0:
-                checkpoint_path = os.path.join(self.save_dir, f"model_{n_updates}updates.zip")
-                
-                # If not keeping checkpoints, delete the previous one
-                if not self.keep_checkpoints and n_updates > 0:
-                    prev_updates = n_updates - self.checkpoint_stride
-                    if prev_updates > 0:
-                        prev_path = os.path.join(self.save_dir, f"model_{prev_updates}updates.zip")
-                        if os.path.exists(prev_path):
-                            os.remove(prev_path)
-                            if self.verbose > 0:
-                                print(f"\nRemoved checkpoint at {prev_updates} updates")
-                
-                # Save the current checkpoint
-                self.model.save(checkpoint_path)
-                if self.verbose > 0:
-                    print(f"\nSaved checkpoint at {n_updates} updates")
+        # Calculate current number of updates
+        n_updates = env_steps // self.model.n_steps
+        
+        # Save if we've completed a new update and it matches our checkpoint_stride pattern
+        if n_updates > self.last_update_saved and (n_updates % self.checkpoint_stride == 0):
+            self.last_update_saved = n_updates
+            checkpoint_path = os.path.join(self.save_dir, f"model_{n_updates}updates.zip")
+            
+            # If not keeping checkpoints, delete the previous one
+            if not self.keep_checkpoints and n_updates > self.checkpoint_stride:
+                prev_updates = n_updates - self.checkpoint_stride
+                prev_path = os.path.join(self.save_dir, f"model_{prev_updates}updates.zip")
+                if os.path.exists(prev_path):
+                    try:
+                        os.remove(prev_path)
+                        if self.verbose > 0:
+                            print(f"\nRemoved checkpoint at {prev_updates} updates")
+                    except Exception as e:
+                        print(f"Warning: Could not remove previous checkpoint: {e}")
+            
+            # Save the current checkpoint
+            self.model.save(checkpoint_path)
+            if self.verbose > 0:
+                print(f"\nSaved checkpoint at {n_updates} updates")
         
         return True
 
@@ -1029,7 +1033,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=4000, load_path=No
     callbacks = [
         CheckpointCallback(
             save_dir=save_dir,
-            checkpoint_freq=default_hyperparameters["n_steps"],  # Keep original value
+            checkpoint_freq=default_hyperparameters["n_steps"],  # This doesn't actually matter much with the fix
             start_timesteps=start_timesteps,
             total_timesteps=total_timesteps,
             keep_checkpoints=keep_checkpoints,

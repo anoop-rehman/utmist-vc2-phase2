@@ -49,54 +49,54 @@
             <site name="starboard_site" pos="-.5 0 0" size="0.5" rgba="0 1 0 1" group="5" />
                     
             <geom name="seg0_geom" type="box" pos="0 0 0" size="0.7817855 0.436341643 1.3171674" euler="0.0 0.0 0.0" />
-            <site name="seg0_site" type="box" pos="0 0 0" size="0.7817855 0.436341643 1.3171674" zaxis="0 0 1" rgba="1 1 0 1" />
+            <site name="seg0_site" type="box" pos="0 0 0" size="0.8599641 0.479975807 1.4488841" zaxis="0 0 1" rgba="1 1 0 1" />
 
             <body name="seg1" pos="-0.746078492 0.13879776 1.736679731">
                 <joint name="seg0_to_1" range="-75 75" type="hinge" axis="0 0 1" pos="0.477163136 -0.159047112 -1.0 "/>
                 <geom name="seg1_geom" type="box" pos="0 0 0" size="0.595344 0.388579845 0.419512331" euler="0.0008985509 0.00109280727 0.004466458" />
-                <site name="seg1_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                <site name="seg1_site" type="box" pos="0 0 0" size="0.6548784 0.4274378295 0.4614635641" zaxis="0 0 1" rgba="1 1 0 1" />
             </body>
 
             <body name="seg2" pos="0.781785488 -0.12621116 -0.4193217760000001">
                 <joint name="seg0_to_2" range="-75 75" type="hinge" axis="0 1 0" pos="-0.49999997 0.144624248 -0.116638534 "/>
                 <geom name="seg2_geom" type="box" pos="0 0 0" size="0.165260255 0.482132822 0.5905807" euler="0.000849346863 0.00307855778 0.0009179028" />
-                <site name="seg2_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                <site name="seg2_site" type="box" pos="0 0 0" size="0.18178628 0.5303461042 0.64963877" zaxis="0 0 1" rgba="1 1 0 1" />
 
                 <body name="seg3" pos="-0.08037185600000007 0.482152932 1.013563076">
                     <joint name="seg2_to_3" range="-75 75" type="hinge" axis="0 1 0" pos="0.243193358 -0.4999997 -0.917953253 "/>
                     <geom name="seg3_geom" type="box" pos="0 0 0" size="0.145482287 0.424432218 0.5199013" euler="0.000849346863 0.00307855778 0.0009179028" />
-                    <site name="seg3_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                    <site name="seg3_site" type="box" pos="0 0 0" size="0.1600305157 0.4668754398 0.57189143" zaxis="0 0 1" rgba="1 1 0 1" />
                 </body>
             </body>
 
             <body name="seg4" pos="0.3417406 0.382444382 2.6967352600000005">
                 <joint name="seg0_to_4" range="-75 75" type="hinge" axis="0 1 0" pos="-0.218564168 -0.4382396 -1.0 "/>
                 <geom name="seg4_geom" type="box" pos="0 0 0" size="0.386039972 1.126239 1.37956786" euler="0.0 0.0 0.0" />
-                <site name="seg4_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                <site name="seg4_site" type="box" pos="0 0 0" size="0.4246439692 1.2388629 1.517524646" zaxis="0 0 1" rgba="1 1 0 1" />
 
                 <body name="seg5" pos="0.18776560000000003 1.126239818 2.36765385">
                     <joint name="seg4_to_5" range="-75 75" type="hinge" axis="0 1 0" pos="-0.243194491 -0.500000358 -0.917953134 "/>
                     <geom name="seg5_geom" type="box" pos="0 0 0" size="0.339839548 0.9914531 1.21446419" euler="0.0 0.0 0.0" />
-                    <site name="seg5_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                    <site name="seg5_site" type="box" pos="0 0 0" size="0.3738235028 1.09059841 1.335910609" zaxis="0 0 1" rgba="1 1 0 1" />
                 </body>
             </body>
 
             <body name="seg6" pos="-0.27436924 -0.43634224 2.61815406">
                 <joint name="seg0_to_6" range="-75 75" type="hinge" axis="0 1 0" pos="0.17547603 0.500000656 -0.9004083 "/>
                 <geom name="seg6_geom" type="box" pos="0 0 0" size="0.4374656 1.27626884 1.5633446" euler="0.0009045518 -0.000434916059 -0.00434324844" />
-                <site name="seg6_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                <site name="seg6_site" type="box" pos="0 0 0" size="0.48121216 1.403895724 1.7196791" zaxis="0 0 1" rgba="1 1 0 1" />
 
                 <body name="seg7" pos="-0.21257019 1.2763118759999998 2.68305289">
                     <joint name="seg6_to_7" range="-75 75" type="hinge" axis="0 1 0" pos="0.243194059 -0.499999762 -0.917953253 "/>
                     <geom name="seg7_geom" type="box" pos="0 0 0" size="0.385110676 1.12352777 1.37624693" euler="0.0009045518 -0.000434916059 -0.00434324844" />
-                    <site name="seg7_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                    <site name="seg7_site" type="box" pos="0 0 0" size="0.4236217436 1.235880547 1.513871623" zaxis="0 0 1" rgba="1 1 0 1" />
                 </body>
             </body>
 
             <body name="seg8" pos="0.643415928 0.43634224 -0.7651751024">
                 <joint name="seg0_to_8" range="-75 75" type="hinge" axis="0 0 1" pos="-0.41150412 -0.500000656 -0.01056538 "/>
                 <geom name="seg8_geom" type="box" pos="0 0 0" size="0.7438524 0.485510945 0.524159551" euler="0.0 0.0 0.0" />
-                <site name="seg8_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+                <site name="seg8_site" type="box" pos="0 0 0" size="0.81823764 0.5340620395 0.5765755061" zaxis="0 0 1" rgba="1 1 0 1" />
             </body>
         </body>
     </worldbody>

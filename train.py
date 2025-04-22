@@ -109,8 +109,8 @@ def process_observation(timestep):
 
     # Print observations every 40 steps
     # should_print = process_observation.counter % 1 == 0
-    should_print = process_observation.counter % 40 == 0
-    # should_print = False
+    # should_print = process_observation.counter % 40 == 0
+    should_print = False
     process_observation.should_print = should_print  # Set a flag for other functions
     
     # Convert boolean observation to float

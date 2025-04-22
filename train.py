@@ -117,7 +117,16 @@ def process_observation(timestep):
     
     # Filter the observation - keep only the core components we want
     filtered_dict = {}
-    core_observations = ['absolute_root_mat', 'bodies_pos', 'joints_pos', 'touch_sensors']
+    # core_observations = ['absolute_root_mat', 'bodies_pos', 'joints_pos', 'touch_sensors']
+    core_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
+                          'bodies_pos', 'joints_pos', 'joints_vel', 'prev_action',
+                          'sensors_accelerometer', 'sensors_gyro', 'sensors_velocimeter',
+                          'ball_ego_angular_velocity', 'ball_ego_position', 'ball_ego_linear_velocity',
+                          'team_goal_back_right', 'team_goal_mid', 'team_goal_front_left',
+                          'field_front_left', 'opponent_goal_back_left', 'opponent_goal_mid',
+                          'opponent_goal_front_right', 'field_back_right', 'stats_vel_to_ball',
+                          'stats_closest_vel_to_ball', 'stats_vel_ball_to_goal', 'stats_home_avg_teammate_dist',
+                            'stats_teammate_spread_out', 'stats_home_score', 'stats_away_score']
     
     for key in core_observations:
         if key in obs_dict:
@@ -184,7 +193,15 @@ class DMControlWrapper(gym.Env):
         
         # Get filtered keys for debugging
         obs_dict = timestep.observation[0]
-        core_observations = ['absolute_root_mat', 'bodies_pos', 'joints_pos']
+        core_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
+                        'bodies_pos', 'joints_pos', 'joints_vel', 'prev_action',
+                        'sensors_accelerometer', 'sensors_gyro', 'sensors_velocimeter',
+                        'ball_ego_angular_velocity', 'ball_ego_position', 'ball_ego_linear_velocity',
+                        'team_goal_back_right', 'team_goal_mid', 'team_goal_front_left',
+                        'field_front_left', 'opponent_goal_back_left', 'opponent_goal_mid',
+                        'opponent_goal_front_right', 'field_back_right', 'stats_vel_to_ball',
+                        'stats_closest_vel_to_ball', 'stats_vel_ball_to_goal', 'stats_home_avg_teammate_dist',
+                        'stats_teammate_spread_out', 'stats_home_score', 'stats_away_score']
         filtered_dict = {}
         for key in core_observations:
             if key in obs_dict:

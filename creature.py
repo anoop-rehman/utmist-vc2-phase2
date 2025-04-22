@@ -182,6 +182,11 @@ class CreatureObservables(legacy_base.WalkerObservables):
   #   return observable.Generic(bodies_ego_zaxes)
 
   @composer.observable
+  def joints_vel(self):
+    """Joint velocity information."""
+    return observable.MJCFFeature('qvel', self._entity.observable_joints)
+
+  @composer.observable
   def bodies_pos(self):
     """Position of bodies relative to root, in the egocentric frame."""
     bodies = self._entity.bodies
@@ -197,10 +202,10 @@ class CreatureObservables(legacy_base.WalkerObservables):
           physics.bind(self._entity.bodies_pos_sensors).sensordata, -1)
     return observable.Generic(bodies_ego_pos)
 
-  # @composer.observable
-  # def absolute_root_pos(self):
-  #   """Absolute position of the root body in the global frame."""
-  #   return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xpos)
+  @composer.observable
+  def absolute_root_pos(self):
+    """Absolute position of the root body in the global frame."""
+    return observable.Generic(lambda physics: physics.bind(self._entity.root_body).xpos)
 
   @composer.observable
   def absolute_root_mat(self):
@@ -246,13 +251,15 @@ class CreatureObservables(legacy_base.WalkerObservables):
     
     return observable.Generic(get_touch_readings)
 
-  @composer.observable
-  def veloc_up(self):
-    """The z-component of the velocimeter, which is our creature's 'forward' direction."""
-    return observable.MJCFFeature(
-        'sensordata', self._entity.mjcf_model.sensor.velocimeter)[2]
+
+#   @composer.observable
+#   def veloc_up(self):
+#     """The z-component of the velocimeter, which is our creature's 'forward' direction."""
+#     return observable.MJCFFeature(
+#         'sensordata', self._entity.mjcf_model.sensor.velocimeter)[2]
+
 
   @property
   def proprioception(self):
-    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat, self.touch_sensors, self.veloc_up] +
+    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat, self.touch_sensors, self.joints_vel, self.absolute_root_pos] +
             self._collect_from_attachments('proprioception'))

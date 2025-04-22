@@ -49,7 +49,7 @@
             <site name="starboard_site" pos="-.5 0 0" size="0.5" rgba="0 1 0 1" group="5" />
                     
             <geom name="seg0_geom" type="box" pos="0 0 0" size="0.7817855 0.436341643 1.3171674" euler="0.0 0.0 0.0" />
-            <site name="seg0_site" type="box" pos="0 0 0" size="0.09 0.09 0.24" zaxis="0.2 0.2 0" rgba="1 1 0 0" />
+            <site name="seg0_site" type="box" pos="0 0 0" size="0.7817855 0.436341643 1.3171674" zaxis="0 0 1" rgba="1 1 0 1" />
 
             <body name="seg1" pos="-0.746078492 0.13879776 1.736679731">
                 <joint name="seg0_to_1" range="-75 75" type="hinge" axis="0 0 1" pos="0.477163136 -0.159047112 -1.0 "/>

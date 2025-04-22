@@ -99,7 +99,8 @@ class Creature(legacy_base.Walker):
 
   @property
   def _foot_bodies(self):
-    return tuple(self.mjcf_model.find_all('body'))
+    # return tuple(self.mjcf_model.find_all('body'))
+    return (self._mjcf_root.find('body', 'seg0'),)
 
   @composer.cached_property
   def end_effectors(self):

@@ -246,7 +246,13 @@ class CreatureObservables(legacy_base.WalkerObservables):
     
     return observable.Generic(get_touch_readings)
 
+  @composer.observable
+  def veloc_up(self):
+    """The z-component of the velocimeter, which is our creature's 'forward' direction."""
+    return observable.MJCFFeature(
+        'sensordata', self._entity.mjcf_model.sensor.velocimeter)[2]
+
   @property
   def proprioception(self):
-    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat, self.touch_sensors] +
+    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat, self.touch_sensors, self.veloc_up] +
             self._collect_from_attachments('proprioception'))

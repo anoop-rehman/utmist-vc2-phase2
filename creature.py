@@ -239,8 +239,10 @@ class CreatureObservables(legacy_base.WalkerObservables):
     self._entity._touch_sensors = touch_sensors
     
     def get_touch_readings(physics):
-      # Return the touch sensor readings as a flat array
-      return physics.bind(self._entity.touch_sensors).sensordata
+      readings = physics.bind(self._entity.touch_sensors).sensordata
+      # Normalize by dividing by a constant based on your environment
+      # You could use something like 10000 based on your observations
+      return readings / 10000.0
     
     return observable.Generic(get_touch_readings)
 

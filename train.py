@@ -109,11 +109,15 @@ def process_observation(timestep):
     # Add a counter to track number of calls (static variable)
     if not hasattr(process_observation, "counter"):
         process_observation.counter = 0
-    
+
     # Print observations every 40 steps
     should_print = process_observation.counter % 40 == 0
     # should_print = False
     process_observation.should_print = should_print  # Set a flag for other functions
+    
+    # Convert boolean observation to float
+    if 'stats_teammate_spread_out' in obs_dict:
+        obs_dict['stats_teammate_spread_out'] = obs_dict['stats_teammate_spread_out'].astype(np.float32)
     
     # Filter the observation - keep only the core components we want
     filtered_dict = {}
@@ -131,6 +135,9 @@ def process_observation(timestep):
     for key in core_observations:
         if key in obs_dict:
             filtered_dict[key] = obs_dict[key]
+            print(f"Keeping observation: {key} with shape {obs_dict[key].shape}")
+        else:
+            print(f"Warning: {key} not found in observation dictionary")
     
     # Only print the filtered observations
     if should_print:
@@ -190,25 +197,6 @@ class DMControlWrapper(gym.Env):
         
         # Calculate observation size with filtered observations
         timestep = env.reset()
-        
-        # Get filtered keys for debugging
-        obs_dict = timestep.observation[0]
-        core_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
-                        'bodies_pos', 'joints_pos', 'joints_vel', 'prev_action',
-                        'sensors_accelerometer', 'sensors_gyro', 'sensors_velocimeter',
-                        'ball_ego_angular_velocity', 'ball_ego_position', 'ball_ego_linear_velocity',
-                        'team_goal_back_right', 'team_goal_mid', 'team_goal_front_left',
-                        'field_front_left', 'opponent_goal_back_left', 'opponent_goal_mid',
-                        'opponent_goal_front_right', 'field_back_right', 'stats_vel_to_ball',
-                        'stats_closest_vel_to_ball', 'stats_vel_ball_to_goal', 'stats_home_avg_teammate_dist',
-                        'stats_teammate_spread_out', 'stats_home_score', 'stats_away_score']
-        filtered_dict = {}
-        for key in core_observations:
-            if key in obs_dict:
-                filtered_dict[key] = obs_dict[key]
-                print(f"Keeping observation: {key} with shape {obs_dict[key].shape}")
-            else:
-                print(f"Warning: {key} not found in observation dictionary")
         
         self.obs_concat = process_observation(timestep)
         obs_size = self.obs_concat.shape[0]

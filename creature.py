@@ -38,6 +38,7 @@ class Creature(legacy_base.Walker):
     super()._build(initializer=initializer)
     self._appendages_sensors = []
     self._bodies_pos_sensors = []
+    self._touch_sensors = []
     self._mjcf_root = mjcf.from_path(xml_config)
     if name:
       self._mjcf_root.model = name
@@ -136,6 +137,11 @@ class Creature(legacy_base.Walker):
   def bodies_pos_sensors(self):
     return self._bodies_pos_sensors
 
+  @property
+  def touch_sensors(self):
+    """Returns the list of touch sensors for all segments."""
+    return self._touch_sensors
+
 
 class CreatureObservables(legacy_base.WalkerObservables):
   """Observables for the Creature."""
@@ -218,7 +224,27 @@ class CreatureObservables(legacy_base.WalkerObservables):
   #     return z_axis
   #   return observable.Generic(root_zaxis)
 
+  @composer.observable
+  def touch_sensors(self):
+    """Touch sensor readings for each segment of the creature."""
+    # Create references to the touch sensors defined in the XML
+    touch_sensors = []
+    for i in range(9):  # For seg0 through seg8
+      sensor_name = f'seg{i}_touch'
+      touch_sensor = self._entity.mjcf_model.find('sensor', sensor_name)
+      if touch_sensor is not None:
+        touch_sensors.append(touch_sensor)
+    
+    # Store the references for later use
+    self._entity._touch_sensors = touch_sensors
+    
+    def get_touch_readings(physics):
+      # Return the touch sensor readings as a flat array
+      return physics.bind(self._entity.touch_sensors).sensordata
+    
+    return observable.Generic(get_touch_readings)
+
   @property
   def proprioception(self):
-    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat] +
+    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat, self.touch_sensors] +
             self._collect_from_attachments('proprioception'))

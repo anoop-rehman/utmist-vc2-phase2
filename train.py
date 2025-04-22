@@ -33,9 +33,9 @@ def quaternion_to_forward_vector(quaternion):
 default_hyperparameters = dict(
     learning_rate=3e-4,
     n_steps=1024,
-    # batch_size=73728, # for 900 envs
+    batch_size=73728, # for 900 envs
     # batch_size=24576, # for 192 envs
-    batch_size=512, # for 1-4 envs
+    # batch_size=512, # for 1-4 envs
     n_epochs=20,  
     gamma=0.99,
     gae_lambda=0.95,

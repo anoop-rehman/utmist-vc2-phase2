@@ -32,17 +32,14 @@ def quaternion_to_forward_vector(quaternion):
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
-    # n_steps=196608,  # Doubled from 8192 to extend collection phase
-    # batch_size=1536,  # Maximal batch size for efficient GPU usage
     n_steps=1024,
-    # batch_size=73728,
-    batch_size=24576,
-    # batch_size=512,
+    # batch_size=73728, # for 900 envs
+    # batch_size=24576, # for 192 envs
+    batch_size=512, # for 1-4 envs
     n_epochs=20,  
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
-    # Much larger network to fully utilize GPU
     policy_kwargs=dict(
         net_arch=[dict(
             # Policy network
@@ -135,9 +132,9 @@ def process_observation(timestep):
     for key in core_observations:
         if key in obs_dict:
             filtered_dict[key] = obs_dict[key]
-            print(f"Keeping observation: {key} with shape {obs_dict[key].shape}")
-        else:
-            print(f"Warning: {key} not found in observation dictionary")
+        #     print(f"Keeping observation: {key} with shape {obs_dict[key].shape}")
+        # else:
+        #     print(f"Warning: {key} not found in observation dictionary")
     
     # Only print the filtered observations
     if should_print:

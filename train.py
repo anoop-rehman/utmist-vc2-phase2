@@ -108,6 +108,7 @@ def process_observation(timestep):
         process_observation.counter = 0
 
     # Print observations every 40 steps
+    # should_print = process_observation.counter % 1 == 0
     should_print = process_observation.counter % 40 == 0
     # should_print = False
     process_observation.should_print = should_print  # Set a flag for other functions
@@ -1030,7 +1031,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
         target_updates: The exact number of updates to train for (overrides total_timesteps for stopping)
     """
     # Add memory monitor
-    def memory_monitor(model, save_dir, max_gb=490):
+    def memory_monitor(model, save_dir, max_gb=499):
         """Monitor memory and terminate if it exceeds limit"""
         while True:
             # Get current memory usage
@@ -1113,7 +1114,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     # After creating/loading the model, start the monitor thread:
     monitor_thread = threading.Thread(
         target=memory_monitor, 
-        args=(model, save_dir, 490), 
+        args=(model, save_dir, 499), 
         daemon=True
     )
     monitor_thread.start()

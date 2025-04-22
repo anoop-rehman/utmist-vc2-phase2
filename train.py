@@ -1044,7 +1044,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
                 except Exception as e:
                     print(f"Failed to save emergency checkpoint: {e}")
                     os._exit(1)  # Hard exit if saving fails
-            time.sleep(5)  # Check every 5 seconds
+            time.sleep(1)  # Check every second
     
     # Record start time
     start_time = datetime.now()
@@ -1111,7 +1111,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     # After creating/loading the model, start the monitor thread:
     monitor_thread = threading.Thread(
         target=memory_monitor, 
-        args=(model, save_dir, 500), 
+        args=(model, save_dir, 490), 
         daemon=True
     )
     monitor_thread.start()

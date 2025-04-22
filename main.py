@@ -194,7 +194,7 @@ if __name__ == "__main__":
             return _init
             
         # Create a vectorized environment with n_envs parallel environments
-        vec_env = SubprocVecEnv([make_env(i) for i in range(args.n_envs)])
+        vec_env = SubprocVecEnv([make_env(i) for i in range(args.n_envs)], start_method='forkserver')
 
     if args.view_only and args.load_model:
         # Load model and launch viewer

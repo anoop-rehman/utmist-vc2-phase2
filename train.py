@@ -10,6 +10,9 @@ import os
 from datetime import datetime
 from model_card_generator import generate_model_card
 import pytz
+import psutil
+import threading
+import time
 
 # Add quaternion utility function
 def quaternion_to_forward_vector(quaternion):
@@ -32,9 +35,10 @@ default_hyperparameters = dict(
     # n_steps=196608,  # Doubled from 8192 to extend collection phase
     # batch_size=1536,  # Maximal batch size for efficient GPU usage
     n_steps=1024,
+    # batch_size=73728,
     batch_size=24576,
     # batch_size=512,
-    n_epochs=40,  
+    n_epochs=20,  
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
@@ -709,7 +713,6 @@ class TensorboardCallback(BaseCallback):
         # For hardware monitoring
         self.hw_monitor_interval = 50  # Log hardware metrics every 50 steps
         self.has_gpu = th.cuda.is_available()
-        import psutil
         self.psutil = psutil
         
         # For enforcing exact number of updates
@@ -810,7 +813,7 @@ class TensorboardCallback(BaseCallback):
                 # Memory usage
                 mem = self.psutil.virtual_memory()
                 self.logger.record('system/memory_used_percent', mem.percent)
-                self.logger.record('system/memory_available_gb', mem.available / (1024**3))
+                self.logger.record('system/memory_available_gb', mem.available / (1000**3))
                 
                 # GPU metrics if available
                 if self.has_gpu:
@@ -1024,6 +1027,25 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
         n_envs: Number of parallel environments being used
         target_updates: The exact number of updates to train for (overrides total_timesteps for stopping)
     """
+    # Add memory monitor
+    def memory_monitor(model, save_dir, max_gb=490):
+        """Monitor memory and terminate if it exceeds limit"""
+        while True:
+            # Get current memory usage
+            used_gb = psutil.virtual_memory().used / (1000**3)  # Convert to GB (10^9 bytes), not GiB
+            if used_gb > max_gb:
+                print(f"\n\nWARNING: Memory usage at {used_gb:.1f}GB, approaching limit. Saving checkpoint...")
+                # Try to save and exit gracefully
+                try:
+                    emergency_path = os.path.join(save_dir, "emergency_save.zip")
+                    model.save(emergency_path)
+                    print(f"Saved emergency checkpoint to {emergency_path}")
+                    os._exit(0)  # Clean exit
+                except Exception as e:
+                    print(f"Failed to save emergency checkpoint: {e}")
+                    os._exit(1)  # Hard exit if saving fails
+            time.sleep(5)  # Check every 5 seconds
+    
     # Record start time
     start_time = datetime.now()
 
@@ -1085,6 +1107,14 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     # Store the model for saving in case of interruption
     # Note: We'll update this attribute in case of an interruption
     model.actual_timesteps_trained = 0
+    
+    # After creating/loading the model, start the monitor thread:
+    monitor_thread = threading.Thread(
+        target=memory_monitor, 
+        args=(model, save_dir, 500), 
+        daemon=True
+    )
+    monitor_thread.start()
     
     # Train the model
     interrupted = False

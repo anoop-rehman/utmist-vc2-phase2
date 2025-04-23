@@ -14,6 +14,9 @@ import psutil
 import threading
 import time
 
+# Global variable to store observation size when it's first calculated
+GLOBAL_OBS_SIZE = 0
+
 # Add quaternion utility function
 def quaternion_to_forward_vector(quaternion):
     """Convert a quaternion to a forward vector (x-axis in local coordinates)."""
@@ -29,29 +32,48 @@ def quaternion_to_forward_vector(quaternion):
     forward = np.array([forward_x, forward_y, forward_z])
     return forward / np.linalg.norm(forward)
 
+# Add a simple function to get observation shape directly from an environment
+def get_observation_size(env):
+    """Extracts observation size from an environment's observation space."""
+    if hasattr(env, 'observation_space'):
+        obs_shape = env.observation_space.shape
+        if obs_shape and len(obs_shape) > 0:
+            return obs_shape[0]
+    return 0
+
 # Default hyperparameters for the PPO model.
 default_hyperparameters = dict(
     learning_rate=3e-4,
     n_steps=1024,
-    batch_size=73728, # for 900 envs
+    # batch_size=73728, # for 900 envs
     # batch_size=24576, # for 192 envs
-    # batch_size=512, # for 1-4 envs
+    batch_size=512, # for 1-4 envs
     n_epochs=20,  
     gamma=0.99,
     gae_lambda=0.95,
     clip_range=0.2,
     policy_kwargs=dict(
-        net_arch=[dict(
+        net_arch=dict(
             # Policy network
             pi=[2048, 2048, 1024, 512, 256],
             # Value network
             vf=[2048, 1536, 1024, 512]
-        )],
-        # activation_fn=th.nn.ReLU
+        ),
         activation_fn=th.nn.Tanh
-
     ),
 )
+
+# Define core observation components at module level
+core_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
+                        'bodies_pos', 'joints_pos', 'joints_vel', 'prev_action',
+                        'sensors_accelerometer', 'sensors_gyro', 'sensors_velocimeter',
+                        'ball_ego_angular_velocity', 'ball_ego_position', 'ball_ego_linear_velocity',
+                        'team_goal_back_right', 'team_goal_mid', 'team_goal_front_left',
+                        'field_front_left', 'opponent_goal_back_left', 'opponent_goal_mid',
+                        'opponent_goal_front_right', 'field_back_right', 'stats_vel_to_ball',
+                        'stats_closest_vel_to_ball', 'stats_vel_ball_to_goal', 'stats_home_avg_teammate_dist',
+                        'stats_teammate_spread_out', 'stats_home_score', 'stats_away_score']
+obs_size_global = 0
 
 def setup_env(env, phase="combined"):
     """Wrap environment based on training phase."""
@@ -69,15 +91,19 @@ def create_ppo_model(vec_env, tensorboard_log, load_path=None):
     """Create or load a PPO model with standard parameters."""
     if load_path:
         print(f"Loading pre-trained model from {load_path}")
-        return PPO.load(load_path, env=vec_env, tensorboard_log=tensorboard_log, **default_hyperparameters)
-    
-    return PPO(
+        model = PPO.load(load_path, env=vec_env, tensorboard_log=tensorboard_log, **default_hyperparameters)
+    else:
+        model = PPO(
         "MlpPolicy",
         vec_env,
         verbose=0,
         tensorboard_log=tensorboard_log,
         **default_hyperparameters
     )
+    
+    # Store observation size directly on model object
+    model.obs_size = 0
+    return model
 
 def get_default_folder():
     """Generate a default folder name using datetime in EST timezone."""
@@ -119,17 +145,6 @@ def process_observation(timestep):
     
     # Filter the observation - keep only the core components we want
     filtered_dict = {}
-    # core_observations = ['absolute_root_mat', 'bodies_pos', 'joints_pos', 'touch_sensors']
-    core_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
-                          'bodies_pos', 'joints_pos', 'joints_vel', 'prev_action',
-                          'sensors_accelerometer', 'sensors_gyro', 'sensors_velocimeter',
-                          'ball_ego_angular_velocity', 'ball_ego_position', 'ball_ego_linear_velocity',
-                          'team_goal_back_right', 'team_goal_mid', 'team_goal_front_left',
-                          'field_front_left', 'opponent_goal_back_left', 'opponent_goal_mid',
-                          'opponent_goal_front_right', 'field_back_right', 'stats_vel_to_ball',
-                          'stats_closest_vel_to_ball', 'stats_vel_ball_to_goal', 'stats_home_avg_teammate_dist',
-                            'stats_teammate_spread_out', 'stats_home_score', 'stats_away_score']
-    
     for key in core_observations:
         if key in obs_dict:
             filtered_dict[key] = obs_dict[key]
@@ -172,6 +187,9 @@ def calculate_reward(timestep, action, distance_in_window):
     return reward, vel_to_ball
 
 class DMControlWrapper(gym.Env):
+    # Class attribute to store observation size
+    obs_size = 0
+    
     def __init__(self, env):
         self.env = env
         self.reward = 0
@@ -198,7 +216,12 @@ class DMControlWrapper(gym.Env):
         
         self.obs_concat = process_observation(timestep)
         obs_size = self.obs_concat.shape[0]
-        
+        # Store on the instance and class for reference
+        self.obs_size = obs_size
+        DMControlWrapper.obs_size = obs_size
+        # Also store in global variable
+        global GLOBAL_OBS_SIZE
+        GLOBAL_OBS_SIZE = obs_size
         print(f"Filtered observation space size: {obs_size}")
         # Expected sizes: 9 (root_mat) + 27 (bodies_pos) + 8 (joints_pos) = 44
         
@@ -1031,7 +1054,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
         target_updates: The exact number of updates to train for (overrides total_timesteps for stopping)
     """
     # Add memory monitor
-    def memory_monitor(model, save_dir, max_gb=499):
+    def memory_monitor(model, save_dir, max_gb=248):
         """Monitor memory and terminate if it exceeds limit"""
         while True:
             # Get current memory usage
@@ -1084,6 +1107,32 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
                    **default_hyperparameters)
         start_timesteps = start_timesteps or 0
     
+    # Get observation size directly from environment
+    obs_size = get_observation_size(env)
+    print(f"Using environment observation space size: {obs_size}")
+    
+    # If still zero, try the other methods
+    if obs_size == 0:
+        try:
+            # Try global variable
+            if GLOBAL_OBS_SIZE > 0:
+                obs_size = GLOBAL_OBS_SIZE
+                print(f"Using observation size from global: {obs_size}")
+            # Try class attribute
+            elif DMControlWrapper.obs_size > 0:
+                obs_size = DMControlWrapper.obs_size
+                print(f"Using observation size from class: {obs_size}")
+            # Try to access wrapped environments
+            elif hasattr(env, 'envs') and len(env.envs) > 0:
+                for i, sub_env in enumerate(env.envs):
+                    sub_size = get_observation_size(sub_env)
+                    if sub_size > 0:
+                        obs_size = sub_size
+                        print(f"Using observation size from wrapped env {i}: {obs_size}")
+                        break
+        except Exception as e:
+            print(f"Note: Could not extract observation size: {e}")
+    
     # Log the number of parallel environments
     if n_envs > 1:
         print(f"\nTraining with {n_envs} parallel environments")
@@ -1114,7 +1163,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     # After creating/loading the model, start the monitor thread:
     monitor_thread = threading.Thread(
         target=memory_monitor, 
-        args=(model, save_dir, 499), 
+        args=(model, save_dir, 498), 
         daemon=True
     )
     monitor_thread.start()
@@ -1264,7 +1313,9 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
             interrupted=interrupted,  # Pass the interrupted flag
             training_phase=training_phase,  # Pass the training phase
             n_envs=n_envs,  # Pass the number of environments
-            error_message=error_message  # Pass any error message
+            error_message=error_message,  # Pass any error message
+            core_observations=core_observations,  # Pass the core observations
+            obs_size=obs_size
         )
         print(f"Generated model card in {save_dir}")
     except Exception as card_error:

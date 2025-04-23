@@ -178,25 +178,46 @@ def get_env_params():
         'body_density': density
     }
 
-def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0, trained_timesteps=None, tensorboard_log=None, checkpoint_freq=None, keep_checkpoints=False, checkpoint_stride=1, load_path=None, interrupted=False, training_phase="combined", n_envs=1, error_message=None):
-    """Generate a markdown file with model details.
-    
+def generate_model_card(
+    model,
+    save_dir,
+    start_time=None,
+    end_time=None,
+    start_timesteps=0,
+    trained_timesteps=0,
+    tensorboard_log=None,
+    checkpoint_freq=10000,
+    keep_checkpoints=10,
+    checkpoint_stride=None,
+    load_path=None,
+    interrupted=False,
+    training_phase=None,
+    n_envs=None,
+    error_message=None,
+    core_observations=None,
+    obs_size=None,
+):
+    """
+    Generate an explanatory model card for an SB3 model.
+
     Args:
         model: The trained model
-        save_dir: Directory where model is saved
-        start_time: Actual training start time
-        end_time: Actual training end time
-        start_timesteps: Starting timestep count
-        trained_timesteps: Total timesteps trained for
-        tensorboard_log: TensorBoard log directory
+        save_dir: Directory where the model is saved
+        start_time: When training started
+        end_time: When training ended
+        start_timesteps: Starting timestep count (for continued training)
+        trained_timesteps: Actual number of timesteps trained
+        tensorboard_log: Path to tensorboard logs
         checkpoint_freq: How often checkpoints were saved
-        keep_checkpoints: Whether all checkpoints were kept
-        checkpoint_stride: How many checkpoints were skipped between saves
-        load_path: Path to the model loaded for continued training
-        interrupted: Whether training was interrupted (e.g., by KeyboardInterrupt)
-        training_phase: The training phase used ("combined", "walking", or "rotation")
-        n_envs: Number of parallel environments used for training
-        error_message: Optional error message if training crashed
+        keep_checkpoints: Number of checkpoints kept
+        checkpoint_stride: Stride between checkpoints to keep
+        load_path: Path of loaded model (for continued training)
+        interrupted: Whether training was interrupted
+        training_phase: Which training phase, if part of multi-phase training
+        n_envs: Number of parallel environments used
+        error_message: If training failed, the error message
+        core_observations: List of core observation keys used in training
+        obs_size: The size of the observation space
     """
     from train import default_hyperparameters
     card_path = os.path.join(save_dir, "model_card.md")
@@ -388,6 +409,22 @@ def generate_model_card(model, save_dir, start_time, end_time, start_timesteps=0
         f.write(f"- Joint Damping: {env_params['joint_damping']}\n")
         f.write(f"- Joint Stiffness: {env_params['joint_stiffness']}\n")
         f.write(f"- Body Density: {env_params['body_density']}\n")
+
+        # Observations Section
+        if core_observations:
+            f.write("\n## Observations\n")
+            # f.write("The model receives the following observation components:\n\n")
+            f.write("```python\n")
+            f.write("core_observations = [\n")
+            for i, obs in enumerate(core_observations):
+                if i < len(core_observations) - 1:
+                    f.write(f"    '{obs}',\n")
+                else:
+                    f.write(f"    '{obs}'\n")
+            f.write("]\n")
+            f.write("```\n")
+            f.write(f"Observation size: {obs_size}\n")
+
         
         # Version Control section
         f.write("\n## Version Control\n")

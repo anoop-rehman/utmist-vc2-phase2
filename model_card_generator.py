@@ -194,7 +194,7 @@ def generate_model_card(
     training_phase=None,
     n_envs=None,
     error_message=None,
-    core_observations=None,
+    filtered_observations=None,
     obs_size=None,
 ):
     """
@@ -216,7 +216,7 @@ def generate_model_card(
         training_phase: Which training phase, if part of multi-phase training
         n_envs: Number of parallel environments used
         error_message: If training failed, the error message
-        core_observations: List of core observation keys used in training
+        filtered_observations: List of core observation keys used in training
         obs_size: The size of the observation space
     """
     from train import default_hyperparameters
@@ -411,13 +411,13 @@ def generate_model_card(
         f.write(f"- Body Density: {env_params['body_density']}\n")
 
         # Observations Section
-        if core_observations:
+        if filtered_observations:
             f.write("\n## Observations\n")
             # f.write("The model receives the following observation components:\n\n")
             f.write("```python\n")
-            f.write("core_observations = [\n")
-            for i, obs in enumerate(core_observations):
-                if i < len(core_observations) - 1:
+            f.write("filtered_observations = [\n")
+            for i, obs in enumerate(filtered_observations):
+                if i < len(filtered_observations) - 1:
                     f.write(f"    '{obs}',\n")
                 else:
                     f.write(f"    '{obs}'\n")

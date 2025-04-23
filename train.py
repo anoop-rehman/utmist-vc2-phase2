@@ -61,7 +61,7 @@ default_hyperparameters = dict(
 )
 
 # Define core observation components at module level
-core_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
+filtered_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
                         'bodies_pos', 'joints_pos', 'joints_vel', 'prev_action',
                         'sensors_accelerometer', 'sensors_gyro', 'sensors_velocimeter',
                         'ball_ego_angular_velocity', 'ball_ego_position', 'ball_ego_linear_velocity',
@@ -70,7 +70,6 @@ core_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
                         'opponent_goal_front_right', 'field_back_right', 'stats_vel_to_ball',
                         'stats_closest_vel_to_ball', 'stats_vel_ball_to_goal', 'stats_home_avg_teammate_dist',
                         'stats_teammate_spread_out', 'stats_home_score', 'stats_away_score']
-obs_size_global = 0
 
 def setup_env(env, phase="combined"):
     """Wrap environment based on training phase."""
@@ -142,7 +141,7 @@ def process_observation(timestep):
     
     # Filter the observation - keep only the core components we want
     filtered_dict = {}
-    for key in core_observations:
+    for key in filtered_observations:
         if key in obs_dict:
             filtered_dict[key] = obs_dict[key]
         #     print(f"Keeping observation: {key} with shape {obs_dict[key].shape}")
@@ -1281,7 +1280,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
             training_phase=training_phase,  # Pass the training phase
             n_envs=n_envs,  # Pass the number of environments
             error_message=error_message,  # Pass any error message
-            core_observations=core_observations,  # Pass the core observations
+            filtered_observations=filtered_observations,  # Pass the core observations
             obs_size=obs_size
         )
         print(f"Generated model card in {save_dir}")

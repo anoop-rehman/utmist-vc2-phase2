@@ -12,7 +12,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 import argparse
 
-def create_env(training_phase="combined", view_only=False):
+def create_env(training_phase="rotation", view_only=False):
     """Create the environment for training or viewing."""
     home_player = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_BLUE)
     return create_soccer_env(
@@ -25,7 +25,7 @@ def create_env(training_phase="combined", view_only=False):
         terminate_on_goal=False
     )
 
-def create_policy(model, training_phase="combined"):
+def create_policy(model, training_phase="rotation"):
     """Create a policy function for the viewer."""
     
     # Track state for phase and history

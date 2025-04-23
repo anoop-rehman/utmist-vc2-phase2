@@ -741,8 +741,8 @@ class ChaseBallPhaseWrapper(DMControlWrapper):
         # Log reward and metrics
         self.reward = reward
 
-        self.last_vel_to_ball = vel_to_ball 
-        # self.last_ball_alignment = ball_alignment
+        self.last_vel_to_ball = vel_to_ball
+        self.last_ball_alignment = ball_alignment
 
         # Print debug info periodically
         if hasattr(process_observation, "should_print") and process_observation.should_print:
@@ -809,7 +809,7 @@ class ChaseBallPhaseWrapper(DMControlWrapper):
         
         
         self.last_vel_to_ball = 0.0 #TODO: Try running with this line commented out to see if anything changes, if not remove it
-        
+        self.last_ball_alignment = 0.0
         # Print episode start info
         self.episode_count += 1
         print(f"\nEpisode {self.episode_count} started:")
@@ -918,41 +918,49 @@ class TensorboardCallback(BaseCallback):
             # For DummyVecEnv - direct access
             envs = self.training_env.envs
             rewards = [env.reward for env in envs]
+
             vel_to_balls = [env.last_vel_to_ball for env in envs]
+            ball_alignments = [env.last_ball_alignment for env in envs]
         else:
             # For SubprocVecEnv - remote access
             rewards = self.training_env.get_attr('reward')
+
             vel_to_balls = self.training_env.get_attr('last_vel_to_ball')
+            ball_alignments = self.training_env.get_attr('last_ball_alignment')
         
         # Track metrics for all environments
-        for i, (reward, vel) in enumerate(zip(rewards, vel_to_balls)):
+        for i, (reward, vel, alignment) in enumerate(zip(rewards, vel_to_balls, ball_alignments)):
             # Initialize tracking lists for each env if needed
             if not hasattr(self, 'current_episode_rewards_all'):
                 self.current_episode_rewards_all = [[] for _ in range(len(rewards))]
                 self.current_episode_velocities_all = [[] for _ in range(len(rewards))]
+                self.current_episode_alignments_all = [[] for _ in range(len(rewards))]
             
             # Add metrics to respective environment's tracking
             self.current_episode_rewards_all[i].append(reward)
             self.current_episode_velocities_all[i].append(vel)
+            self.current_episode_alignments_all[i].append(alignment)
         
         # For step-level logging, use average across all environments
         reward = np.mean(rewards) if rewards else 0.0
         vel_to_ball = np.mean(vel_to_balls) if vel_to_balls else 0.0
+        ball_alignment = np.mean(ball_alignments) if ball_alignments else 0.0
         
         # Track current episode stats
         self.current_episode_rewards.append(reward)
         self.current_episode_velocities.append(vel_to_ball)
+        self.current_episode_alignments.append(ball_alignment)
         
         # Get current environment steps
         env_steps = self.num_timesteps
         
         # Update total timesteps count (including initial steps)
-        # self.current_total_timesteps = self.start_timesteps + self.num_timesteps
         self.current_total_timesteps = self.num_timesteps
         
         # Log step-level metrics
         self.logger.record('train/reward', reward)
         self.logger.record('train/velocity_to_ball', vel_to_ball)
+        self.logger.record('train/ball_alignment', ball_alignment)
         
         # Log hardware metrics periodically to avoid overhead
         if self.num_timesteps % self.hw_monitor_interval == 0:
@@ -1007,46 +1015,49 @@ class TensorboardCallback(BaseCallback):
                 # Calculate statistics for this particular environment's episode
                 episode_rewards = self.current_episode_rewards_all[i]
                 episode_velocities = self.current_episode_velocities_all[i]
+                episode_alignments = self.current_episode_alignments_all[i]
                 
                 if episode_rewards:
-                    episode_reward_sum = sum(episode_rewards)
                     episode_reward_mean = np.mean(episode_rewards)
-                    episode_reward_min = np.min(episode_rewards)
-                    episode_reward_max = np.max(episode_rewards)
 
                     episode_velocity_mean = np.mean(episode_velocities) if episode_velocities else 0.0
+                    episode_alignment_mean = np.mean(episode_alignments) if episode_alignments else 0.0
                     
                     # Store episode summary metrics - track for all environments
                     if not hasattr(self, 'all_episode_rewards'):
                         self.all_episode_rewards = [[] for _ in range(len(dones))]
                         self.all_episode_velocities = [[] for _ in range(len(dones))]
+                        self.all_episode_alignments = [[] for _ in range(len(dones))]
                     
                     self.all_episode_rewards[i].append(episode_reward_mean)
                     self.all_episode_velocities[i].append(episode_velocity_mean)
+                    self.all_episode_alignments[i].append(episode_alignment_mean)
                     
                     # Log aggregated statistics after we've collected data from all environments
                     self.episode_count += 1
-                    if self.episode_count % n_envs == 0:  # After all envs report s
-
+                    if self.episode_count % n_envs == 0:  # After all envs report
                         # Calculate global averages across all environments
                         all_rewards = [r for rewards in self.all_episode_rewards for r in rewards[-1:]]
                         all_velocities = [v for velocities in self.all_episode_velocities for v in velocities[-1:]]
+                        all_alignments = [a for alignments in self.all_episode_alignments for a in alignments[-1:]]
                         
                         # Log aggregated metrics
                         self.logger.record('train/episode_reward_mean', np.mean(all_rewards))
                         self.logger.record('train/episode_reward_min', np.min(all_rewards))
-                        self.logger.record('train/episode_reward_max', np.max(all_rewards)) 
-
-                        self.logger.record('train/episode_velocity_mean', np.mean(all_velocities)) 
-
+                        self.logger.record('train/episode_reward_max', np.max(all_rewards))
+                        
+                        self.logger.record('train/episode_velocity_mean', np.mean(all_velocities))
+                        self.logger.record('train/episode_alignment_mean', np.mean(all_alignments))
                         
                         # Print summary for user feedback
                         print(f"\nAggregated stats across {len(all_rewards)} environments:")
                         print(f"  Reward: mean={np.mean(all_rewards):.4f}, min={np.min(all_rewards):.4f}, max={np.max(all_rewards):.4f}")
+                        print(f"  Ball alignment: mean={np.mean(all_alignments):.4f}")
                     
                     # Reset this environment's tracking
                     self.current_episode_rewards_all[i] = []
                     self.current_episode_velocities_all[i] = []
+                    self.current_episode_alignments_all[i] = []
         
         # Make sure to dump all metrics to tensorboard
         self.logger.dump(self.num_timesteps)

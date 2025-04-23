@@ -12,7 +12,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 import argparse
 
-def create_env(training_phase="rotation", view_only=False):
+def create_env():
     """Create the environment for training or viewing."""
     home_player = Creature("creature_configs/two_arm_rower_blueprint.xml", marker_rgba=RGBA_BLUE)
     return create_soccer_env(
@@ -46,7 +46,6 @@ def create_policy(model, training_phase="rotation"):
         
         # Process base observation
         orig_obs = process_observation(time_step)
-    
         
         # Only add the additional observation components for walking phase
         if training_phase == "walking":
@@ -169,7 +168,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Create raw environment
-    env = create_env(training_phase=args.training_phase, view_only=args.view_only)
+    env = create_env()
     
     # For viewer mode, we use a single environment with DummyVecEnv
     if args.view_only and args.load_model:
@@ -184,7 +183,7 @@ if __name__ == "__main__":
         def make_env(seed):
             def _init():
                 # Create a fresh environment for each parallel instance
-                train_env = create_env(training_phase=args.training_phase)
+                train_env = create_env()
                 # Setup the environment without vectorizing it
                 wrapped_env = setup_env(train_env, phase=args.training_phase)
                 # Set the seed for randomization
@@ -236,7 +235,7 @@ if __name__ == "__main__":
         if args.enable_viewer:
             print("\nLaunching viewer with trained model...")
             # For viewing, we need a single environment
-            view_env = create_env(training_phase=args.training_phase, view_only=True)
+            view_env = create_env()
             viewer.launch(view_env, policy=create_policy(model, args.training_phase))
         else:
             print("\nViewer disabled. Run with --enable-viewer to launch the viewer after training.")

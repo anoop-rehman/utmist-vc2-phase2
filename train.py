@@ -1175,7 +1175,7 @@ class RolloutDebugCallback(BaseCallback):
         """Required method that is called at each step."""
         return True  # Return True to continue training
 
-def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="combined", n_envs=1, target_updates=None):
+def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=None, save_dir=None, tensorboard_log=None, start_timesteps=None, keep_checkpoints=False, checkpoint_stride=1, keep_previous_model=False, training_phase="rotation", n_envs=1, target_updates=None):
     """Train a creature using PPO.
     
     Args:
@@ -1189,7 +1189,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
         keep_checkpoints: Whether to keep all checkpoints
         checkpoint_stride: DEPRECATED - kept for backward compatibility
         keep_previous_model: Whether to keep the previous model folder
-        training_phase: Which training phase is being used ("combined", "walking", or "rotation")
+        training_phase: Which training phase is being used ("combined", "walking", "rotation", or "chase_ball")
         n_envs: Number of parallel environments being used
         target_updates: The exact number of updates to train for (overrides total_timesteps for stopping)
     """

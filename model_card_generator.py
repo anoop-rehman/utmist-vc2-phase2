@@ -133,6 +133,13 @@ def get_env_params():
         with open("main.py", "r") as f:
             main_content = f.read()
             # Extract the time_limit value set in main.py's create_env function
+            # Regex to find time_limit parameter in main.py:
+            # time_limit=      : Matches literal "time_limit=" text
+            # (               : Start capture group
+            #   \d+          : Match 1+ digits
+            #   \.?          : Match optional decimal point
+            #   \d*          : Match 0+ digits after decimal point
+            # )               : End capture group
             time_limit_match = re.search(r'time_limit=(\d+\.?\d*)', main_content)
             if time_limit_match:
                 time_limit = float(time_limit_match.group(1))

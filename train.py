@@ -14,9 +14,6 @@ import psutil
 import threading
 import time
 
-# Global variable to store observation size when it's first calculated
-GLOBAL_OBS_SIZE = 0
-
 # Add quaternion utility function
 def quaternion_to_forward_vector(quaternion):
     """Convert a quaternion to a forward vector (x-axis in local coordinates)."""
@@ -187,9 +184,6 @@ def calculate_reward(timestep, action, distance_in_window):
     return reward, vel_to_ball
 
 class DMControlWrapper(gym.Env):
-    # Class attribute to store observation size
-    obs_size = 0
-    
     def __init__(self, env):
         self.env = env
         self.reward = 0
@@ -216,12 +210,8 @@ class DMControlWrapper(gym.Env):
         
         self.obs_concat = process_observation(timestep)
         obs_size = self.obs_concat.shape[0]
-        # Store on the instance and class for reference
+        # Store on the instance for reference
         self.obs_size = obs_size
-        DMControlWrapper.obs_size = obs_size
-        # Also store in global variable
-        global GLOBAL_OBS_SIZE
-        GLOBAL_OBS_SIZE = obs_size
         print(f"Filtered observation space size: {obs_size}")
         # Expected sizes: 9 (root_mat) + 27 (bodies_pos) + 8 (joints_pos) = 44
         
@@ -1109,29 +1099,6 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
     
     # Get observation size directly from environment
     obs_size = get_observation_size(env)
-    print(f"Using environment observation space size: {obs_size}")
-    
-    # If still zero, try the other methods
-    if obs_size == 0:
-        try:
-            # Try global variable
-            if GLOBAL_OBS_SIZE > 0:
-                obs_size = GLOBAL_OBS_SIZE
-                print(f"Using observation size from global: {obs_size}")
-            # Try class attribute
-            elif DMControlWrapper.obs_size > 0:
-                obs_size = DMControlWrapper.obs_size
-                print(f"Using observation size from class: {obs_size}")
-            # Try to access wrapped environments
-            elif hasattr(env, 'envs') and len(env.envs) > 0:
-                for i, sub_env in enumerate(env.envs):
-                    sub_size = get_observation_size(sub_env)
-                    if sub_size > 0:
-                        obs_size = sub_size
-                        print(f"Using observation size from wrapped env {i}: {obs_size}")
-                        break
-        except Exception as e:
-            print(f"Note: Could not extract observation size: {e}")
     
     # Log the number of parallel environments
     if n_envs > 1:

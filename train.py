@@ -60,7 +60,7 @@ default_hyperparameters = dict(
     ),
 )
 
-# Define core observation components at module level
+# Define filtered observation components at module level
 filtered_observations = ['touch_sensors', 'absolute_root_pos', 'absolute_root_mat',
                         'bodies_pos', 'joints_pos', 'joints_vel', 'prev_action',
                         'sensors_accelerometer', 'sensors_gyro', 'sensors_velocimeter',
@@ -77,6 +77,8 @@ def setup_env(env, phase="combined"):
         wrapped_env = WalkingPhaseWrapper(env)
     elif phase == "rotation":
         wrapped_env = RotationPhaseWrapper(env)
+    elif phase == "chase_ball":
+        wrapped_env = ChaseBallPhaseWrapper(env)
     else:
         wrapped_env = DMControlWrapper(env)  # Original combined phase
     
@@ -694,6 +696,140 @@ class RotationPhaseWrapper(DMControlWrapper):
         
         return obs
 
+class ChaseBallPhaseWrapper(DMControlWrapper):
+    """Environment wrapper for the rotation phase of training."""
+    def __init__(self, env):
+        super().__init__(env)
+        # Track initial orientation for debuggging
+        self.verbose = True
+        
+        print("\n==== Using simple chase ball reward (vel_to_ball) ====\n")
+        
+    def seed(self, seed=None):
+        """Seed the environment's random number generator."""
+        self.np_random = np.random.RandomState(seed)
+        # Debug print to verify seeding
+        print(f"ChaseBallPhaseWrapper: Seeding environment with seed {seed}")
+        
+        # Also seed the underlying DM Control environment physics engine
+        if hasattr(self.env, 'physics') and hasattr(self.env.physics, 'set_random_state'):
+            # For DM Control environments, also seed the physics engine
+            try:
+                self.env.physics.set_random_state(seed)
+                print(f"  -> Successfully seeded physics engine with {seed}")
+            except Exception as e:
+                print(f"  -> Failed to seed physics engine: {e}")
+        
+        return [seed]
+    
+    def step(self, action):
+        # Take a step in the environment
+        timestep = self.env.step([action])
+        
+        # Get observation 
+        obs = process_observation(timestep)
+
+        # Calculate reward
+        vel_to_ball = timestep.observation[0]['vel_to_ball']
+        reward = vel_to_ball
+
+        # Calculate metrics
+        ball_pos = timestep.observation[0]['ball_ego_position']
+        ball_direction = ball_pos / np.linalg.norm(ball_pos)
+        ball_alignment = ball_direction[2]
+
+        # Log reward and metrics
+        self.reward = reward
+
+        self.last_vel_to_ball = vel_to_ball 
+        # self.last_ball_alignment = ball_alignment
+
+        # Print debug info periodically
+        if hasattr(process_observation, "should_print") and process_observation.should_print:
+            print(f"reward = {reward:.3f}")
+            print(f"vel_to_ball = {vel_to_ball:.3f}")
+            print(f"ball_alignment = {ball_alignment:.3f}")
+        
+        # Match the expected output format
+        done = timestep.last()
+        info = {}
+
+        return obs, reward, done, info
+    
+    def reset(self):
+        timestep = self.env.reset()
+        obs = process_observation(timestep)
+        
+        # Debug print - verify this is a fresh reset with proper randomization
+        env_id = id(self)  # Unique identifier for this environment instance
+        seed_val = self.np_random.randint(0, 10000) if hasattr(self, 'np_random') else "UNSEEDED"
+        print(f"ChaseBallPhaseWrapper {env_id}: Resetting environment (random check: {seed_val})")
+        
+        # Randomize the creature's orientation by applying a random rotation
+        # This is done via the internal physics engine
+        if hasattr(self.env, 'physics'):
+            try:
+                # Try to get the root body of the creature
+                # In DM Control soccer environment, the creature is the first walker
+                if hasattr(self.env, '_task') and hasattr(self.env._task, 'players'):
+                    # Access the first player's root body
+                    player = self.env._task.players[0]
+                    root_body = self.env.physics.bind(player.walker.root_body)
+                    
+                    # Generate a random quaternion for orientation
+                    # Method: Generate random rotation axis and angle
+                    if not hasattr(self, 'np_random'):
+                        print(f"WARNING: ChaseBallPhaseWrapper {env_id} has no np_random - creating one with random seed")
+                        self.np_random = np.random.RandomState()
+                    
+                    axis = self.np_random.randn(3)  # Use seeded RNG instead of global np.random
+                    axis = axis / np.linalg.norm(axis)  # Normalize to unit vector
+                    angle = self.np_random.uniform(0, 2 * np.pi)  # Use seeded RNG for random angle
+                    
+                    # Debug print to verify randomization
+                    # print(f"ChaseBallPhaseWrapper {env_id}: Random rotation: axis={axis}, angle={angle:.2f}")
+                    
+                    # Convert to quaternion (w,x,y,z format)
+                    quat = np.zeros(4)
+                    quat[0] = np.cos(angle/2)  # w component
+                    quat[1:] = axis * np.sin(angle/2)  # x,y,z components
+                    
+                    # Apply the rotation to the root body
+                    root_body.xquat = quat
+                    
+                    # Run a single physics step to apply the changes
+                    self.env.physics.step()
+                    
+                    if self.verbose:
+                        print(f"Applied random rotation: axis={axis}, angle={angle:.2f} rad")
+                else:
+                    print("Warning: Could not access creature's body for orientation randomization")
+            except Exception as e:
+                print(f"Error randomizing orientation: {e}")
+        
+        
+        self.last_vel_to_ball = 0.0 #TODO: Try running with this line commented out to see if anything changes, if not remove it
+        
+        # Print episode start info
+        self.episode_count += 1
+        print(f"\nEpisode {self.episode_count} started:")
+
+        # We need to re-process the observation after applying the random rotation
+        if hasattr(self.env, 'physics') and hasattr(self.env, '_task') and hasattr(self.env._task, 'players'):
+            try:
+                # Get fresh observation after randomization
+                # Instead of using physics.get_state() directly, reset the environment to get a valid timestep
+                fresh_timestep = self.env.physics.step()  # Take a zero-action step
+                if hasattr(fresh_timestep, 'observation') and fresh_timestep.observation:
+                    obs = process_observation(fresh_timestep)
+                else:
+                    # If stepping doesn't return a valid timestep, use the existing observation
+                    print("Warning: Could not get fresh observation, using existing one")
+            except Exception as e:
+                print(f"Error getting fresh observation: {e}")
+        
+        return obs
+
 class TrainingCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
@@ -877,6 +1013,7 @@ class TensorboardCallback(BaseCallback):
                     episode_reward_mean = np.mean(episode_rewards)
                     episode_reward_min = np.min(episode_rewards)
                     episode_reward_max = np.max(episode_rewards)
+
                     episode_velocity_mean = np.mean(episode_velocities) if episode_velocities else 0.0
                     
                     # Store episode summary metrics - track for all environments
@@ -889,7 +1026,8 @@ class TensorboardCallback(BaseCallback):
                     
                     # Log aggregated statistics after we've collected data from all environments
                     self.episode_count += 1
-                    if self.episode_count % 192 == 0:  # After all 192 envs report
+                    if self.episode_count % n_envs == 0:  # After all envs report s
+
                         # Calculate global averages across all environments
                         all_rewards = [r for rewards in self.all_episode_rewards for r in rewards[-1:]]
                         all_velocities = [v for velocities in self.all_episode_velocities for v in velocities[-1:]]
@@ -897,8 +1035,10 @@ class TensorboardCallback(BaseCallback):
                         # Log aggregated metrics
                         self.logger.record('train/episode_reward_mean', np.mean(all_rewards))
                         self.logger.record('train/episode_reward_min', np.min(all_rewards))
-                        self.logger.record('train/episode_reward_max', np.max(all_rewards))
-                        self.logger.record('train/episode_velocity_mean', np.mean(all_velocities))
+                        self.logger.record('train/episode_reward_max', np.max(all_rewards)) 
+
+                        self.logger.record('train/episode_velocity_mean', np.mean(all_velocities)) 
+
                         
                         # Print summary for user feedback
                         print(f"\nAggregated stats across {len(all_rewards)} environments:")

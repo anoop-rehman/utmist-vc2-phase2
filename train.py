@@ -851,10 +851,12 @@ class TensorboardCallback(BaseCallback):
         # For tracking complete episodes
         self.episode_rewards = []
         self.episode_velocities = []
+        self.episode_alignments = []
         
         # For tracking current episode
         self.current_episode_rewards = []
         self.current_episode_velocities = []
+        self.current_episode_alignments = []
         self.episode_count = 0
         self.last_obs = None
         
@@ -926,7 +928,9 @@ class TensorboardCallback(BaseCallback):
             rewards = self.training_env.get_attr('reward')
 
             vel_to_balls = self.training_env.get_attr('last_vel_to_ball')
-            ball_alignments = self.training_env.get_attr('last_ball_alignment')
+            
+            # TODO: placeholder 0.0 for now for rotation phase, later do this properly
+            ball_alignments = [0.0] * len(vel_to_balls)
         
         # Track metrics for all environments
         for i, (reward, vel, alignment) in enumerate(zip(rewards, vel_to_balls, ball_alignments)):

@@ -77,7 +77,7 @@ def setup_env(env, phase="combined"):
         wrapped_env = WalkingPhaseWrapper(env)
     elif phase == "rotation":
         wrapped_env = RotationPhaseWrapper(env)
-    elif phase == "chase_ball":
+    elif phase == "chase-ball":
         wrapped_env = ChaseBallPhaseWrapper(env)
     else:
         wrapped_env = DMControlWrapper(env)  # Original combined phase
@@ -730,13 +730,13 @@ class ChaseBallPhaseWrapper(DMControlWrapper):
         obs = process_observation(timestep)
 
         # Calculate reward
-        vel_to_ball = timestep.observation[0]['vel_to_ball']
+        vel_to_ball = timestep.observation[0]['stats_vel_to_ball']
         reward = vel_to_ball
 
         # Calculate metrics
         ball_pos = timestep.observation[0]['ball_ego_position']
         ball_direction = ball_pos / np.linalg.norm(ball_pos)
-        ball_alignment = ball_direction[2]
+        ball_alignment = ball_direction[0][2]
 
         # Log reward and metrics
         self.reward = reward
@@ -852,7 +852,7 @@ class TensorboardCallback(BaseCallback):
         self.episode_rewards = []
         self.episode_velocities = []
         self.episode_alignments = []
-        
+
         # For tracking current episode
         self.current_episode_rewards = []
         self.current_episode_velocities = []
@@ -1193,7 +1193,7 @@ def train_creature(env, total_timesteps=5000, checkpoint_freq=1000, load_path=No
         keep_checkpoints: Whether to keep all checkpoints
         checkpoint_stride: DEPRECATED - kept for backward compatibility
         keep_previous_model: Whether to keep the previous model folder
-        training_phase: Which training phase is being used ("combined", "walking", "rotation", or "chase_ball")
+        training_phase: Which training phase is being used ("combined", "walking", "rotation", or "chase-ball")
         n_envs: Number of parallel environments being used
         target_updates: The exact number of updates to train for (overrides total_timesteps for stopping)
     """

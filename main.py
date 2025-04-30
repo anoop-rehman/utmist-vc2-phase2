@@ -154,7 +154,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train or view a creature model')
     parser.add_argument('--load-model', type=str, help='Path to model to load')
     parser.add_argument('--view-only', action='store_true', help='Only view the model, no training')
-    parser.add_argument('--training-phase', type=str, default="combined", choices=["walking", "rotation", "combined"], help='Training phase to use')
+    parser.add_argument('--training-phase', type=str, default="combined", choices=["walking", "rotation", "combined", 'chase-ball'], help='Training phase to use')
     parser.add_argument('--n-updates', type=int, default=3, help=f'Number of policy updates to perform (each update = {default_hyperparameters["n_steps"]} timesteps)')
     parser.add_argument('--load-path', type=str, default=None, help='Path to load a saved model from')
     parser.add_argument('--checkpoint-freq', type=int, default=1000, help='Save a checkpoint every N updates (e.g., 40000 saves at updates 40000, 80000, etc.)')

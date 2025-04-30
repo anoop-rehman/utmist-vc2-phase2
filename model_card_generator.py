@@ -95,6 +95,27 @@ def get_reward_function_text(training_phase="combined"):
                 step_method_end = len(content)
                 
         function_text = content[step_method_start:step_method_end].strip()
+    
+    elif training_phase == "chase-ball":
+        # Find the step method in ChaseBallPhaseWrapper
+        chaseball_class_start = content.find("class ChaseBallPhaseWrapper")
+        if chaseball_class_start == -1:
+            return "ChaseBallPhaseWrapper not found in train.py"
+            
+        step_method_start = content.find("    def step(self, action):", chaseball_class_start)
+        if step_method_start == -1:
+            return "step method not found in ChaseBallPhaseWrapper"
+
+        # Find the end of the step method by looking for the next method at the same indentation level
+        step_method_end = content.find("\n    def ", step_method_start + 1)
+        if step_method_end == -1:  # If not found, try finding the end of the class
+            step_method_end = content.find("\nclass ", step_method_start + 1)
+            if step_method_end == -1:  # If still not found, use the end of the file
+                step_method_end = len(content)
+        
+        function_text = content[step_method_start:step_method_end].strip()
+                
+    
     else:
         return f"Unknown training phase: {training_phase}"
     

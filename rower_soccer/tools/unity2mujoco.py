@@ -55,10 +55,17 @@ def _gear(p, scale, depth):
     return 2.5 * _subtree_mass(p) ** 1.67 * (2.36 if depth >= 2 else 1.0) * scale
 
 
-ROOT_EXTRAS = """
-      <camera name="floating" pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" />
-      <camera name="egocentric" pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
+ROOT_EXTRAS_TEMPLATE = """
+      <camera name="floating" pos="-{d:.2f} 0 {h:.2f}" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="70" />
+      <camera name="egocentric" pos="{ego:.2f} 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
 """
+
+
+def _root_extras(phenotypes):
+    # camera distance scaled to creature size so it never sits inside geometry
+    max_half = max(float(np.max(p.half_size)) for p in phenotypes)
+    return ROOT_EXTRAS_TEMPLATE.format(d=5.0 * max_half, h=2.5 * max_half,
+                                       ego=max_half * 1.1)
 
 
 def emit_xml(phenotypes, model_name, gear_scale=1.0, joint_range=(-75, 75)):
@@ -70,7 +77,7 @@ def emit_xml(phenotypes, model_name, gear_scale=1.0, joint_range=(-75, 75)):
         parent = by_uid.get(p.parent_uid) if p.parent_uid is not None else None
         lines = [f'{pad}<body name="seg{p.uid}" pos="{_fmt(_mj_pos(p, parent))}">']
         if parent is None:
-            lines.append(ROOT_EXTRAS.rstrip())
+            lines.append(_root_extras(phenotypes).rstrip())
         if p.joint_type == "hinge":
             lines.append(
                 f'{pad}  <joint name="seg{p.parent_uid}_to_{p.uid}" range="{joint_range[0]} {joint_range[1]}" '

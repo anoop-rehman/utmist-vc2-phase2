@@ -17,7 +17,7 @@
     <worldbody>
         <body name="seg0" pos="0 0 1.3171674">
             
-            <camera name="floating" pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" />
+            <camera name="floating" pos="-8 0 4" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="70" />
 
             <!-- KEEP THIS -->
             <camera name="egocentric" pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />

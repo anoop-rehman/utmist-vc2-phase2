@@ -1,0 +1,54 @@
+<mujoco model="orn-gigasvermis">
+    <compiler angle="degree" />
+    <default>
+        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="16000" />
+        <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50" />
+        <joint limited="true" armature="1" damping="1" stiffness="1" solreflimit=".04 1"
+            solimplimit="0 .8 .03" />
+    </default>
+    <asset>
+        <material name="self" rgba=".8 .6 .4 1" />
+    </asset>
+
+    <worldbody>
+        <body name="seg0" pos="0 0 1.478059">
+
+      <camera name="floating" pos="-2 0 1" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="90" />
+      <camera name="egocentric" pos=".25 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
+          <geom name="seg0_geom" type="box" pos="0 0 0" size="0.7242545 0.6810365 1.478059" euler="0 0 0" />
+          <site name="seg0_site" type="box" pos="0 0 0" size="0.7966799 0.7491402 1.625865" zaxis="0 0 1" rgba="1 1 0 0.15" />
+
+          <body name="seg1" pos="0.6911752 0.216633 3.082208">
+            <joint name="seg0_to_1" range="-75 75" type="hinge" axis="0 1 0" pos="-0.4771632 -0.1590465 -1 "/>
+            <geom name="seg1_geom" type="box" pos="0 0 0" size="1.121028 1.196607 1.604149" euler="0.004153203 -0.000728891 -0.001950957" />
+            <site name="seg1_site" type="box" pos="0 0 0" size="1.233131 1.316268 1.764564" zaxis="0 0 1" rgba="1 1 0 0.15" />
+
+            <body name="seg2" pos="1.12109 1.049619 3.001386">
+              <joint name="seg1_to_2" range="-75 75" type="hinge" axis="0 1 0" pos="-0.5 -0.4385078 -0.6921012 "/>
+              <geom name="seg2_geom" type="box" pos="0 0 0" size="1.666838 1.779215 2.385182" euler="0.005932046 -0.002004978 -0.0047394" />
+              <site name="seg2_site" type="box" pos="0 0 0" size="1.833521 1.957137 2.6237" zaxis="0 0 1" rgba="1 1 0 0.15" />
+            </body>
+          </body>
+        </body>
+    </worldbody>
+
+    <actuator>
+    <motor name="motor0_to_1" joint="seg0_to_1" gear="2.26419e+06" />
+    <motor name="motor1_to_2" joint="seg1_to_2" gear="3.42923e+06" />
+    </actuator>
+
+    <sensor>
+    <touch name="seg0_touch" site="seg0_site" />
+    <touch name="seg1_touch" site="seg1_site" />
+    <touch name="seg2_touch" site="seg2_site" />
+        <velocimeter name="torso_vel" site="seg0_site" />
+        <gyro name="torso_gyro" site="seg0_site" />
+        <accelerometer name="torso_accel" site="seg0_site" />
+    </sensor>
+
+    <contact>
+    <exclude body1="seg0" body2="seg1" />
+    <exclude body1="seg0" body2="seg2" />
+    <exclude body1="seg1" body2="seg2" />
+    </contact>
+</mujoco>

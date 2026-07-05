@@ -54,8 +54,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
     parser.add_argument("--seconds", type=float, default=20.0)
-    parser.add_argument("--players", type=int, nargs=2, default=[2, 2],
-                        help="home away team sizes")
+    parser.add_argument("--teams", nargs=2, default=["rower,worm", "rower,worm"],
+                        help="comma-separated creature kinds per team, e.g. rower,worm rower,worm")
     parser.add_argument("--camera", default="auto",
                         help="'auto' picks a wide camera, or a camera name/index")
     parser.add_argument("--wh", type=int, nargs=2, default=[1280, 720])
@@ -66,7 +66,8 @@ def main():
 
     from rower_soccer.envs.build import make_soccer_env
 
-    env = make_soccer_env(n_home=args.players[0], n_away=args.players[1],
+    env = make_soccer_env(home_team=tuple(args.teams[0].split(",")),
+                          away_team=tuple(args.teams[1].split(",")),
                           time_limit=args.seconds)
     cams = list_cameras(env.physics)
     print(f"cameras: {cams}")

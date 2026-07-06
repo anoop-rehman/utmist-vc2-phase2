@@ -72,6 +72,9 @@ def main():
                    help="wallclock seconds between full checkpoints (overwrite)")
     p.add_argument("--resume", action="store_true",
                    help="resume from <run_dir>/checkpoint.pt if present")
+    p.add_argument("--gcs-bucket", default=None,
+                   help="upload each checkpoint to gs://<bucket>/<run_name>/ "
+                        "(e.g. vc2-2026-checkpoints); best-effort, non-blocking")
     p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--no-wandb", action="store_true")
     args = p.parse_args()
@@ -162,9 +165,18 @@ def main():
             save_checkpoint(trainer, ckpt_path)
             print(f"[monitor] checkpoint saved at step {trainer.total_steps:,} "
                   f"({os.path.getsize(ckpt_path)/1e6:.1f} MB, overwrite)", flush=True)
+            if args.gcs_bucket:
+                from rower_soccer.warp_port.gcs import sync_async
+                sync_async(ckpt_path, args.gcs_bucket, args.run_name)
+                sync_async(os.path.join(run_dir, "config.json"),
+                           args.gcs_bucket, args.run_name)
 
     save_checkpoint(trainer, ckpt_path)
     export_sb3_compatible(ac, os.path.join(run_dir, "final.pt"))
+    if args.gcs_bucket:
+        from rower_soccer.warp_port.gcs import sync_async
+        sync_async(ckpt_path, args.gcs_bucket, args.run_name)
+        sync_async(os.path.join(run_dir, "final.pt"), args.gcs_bucket, args.run_name)
     print(f"[setup] done in {(time.perf_counter()-t0)/60:.1f}min; saved final.pt",
           flush=True)
 

@@ -31,7 +31,9 @@ class WarpFollowEnv:
     def __init__(self, num_worlds=2048, creature_xml="creature_configs/three_seg_worm.xml",
                  episode_seconds=15.0, target_speed_range=(0.25, 2.0),
                  lookahead=1.0, reward_coef=0.5, bounds=27.0, device="cuda",
-                 seed=0, use_graph=True, w_vel_shaping=0.0):
+                 seed=0, use_graph=True, w_vel_shaping=0.0,
+                 reward_mode="paper", progress_scale=2.0, settle_coef=0.5,
+                 arrival_radius=1.0, arrival_bonus=0.5):
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
@@ -39,7 +41,16 @@ class WarpFollowEnv:
         self.lookahead = lookahead
         self.reward_coef = reward_coef
         self.w_vel_shaping = w_vel_shaping
+        # reward_mode: "paper" (exp(-c d)), "velshape" (paper + velocity bonus,
+        # hackable), "progress" (potential-based: reward closing distance;
+        # dense everywhere and unhackable, Ng et al. 1999).
+        self.reward_mode = reward_mode
+        self.progress_scale = progress_scale
+        self.settle_coef = settle_coef
+        self.arrival_radius = arrival_radius
+        self.arrival_bonus = arrival_bonus
         self.bounds = bounds
+        self.prev_dist = torch.zeros(num_worlds, device=device)
         self.gen = torch.Generator(device=device).manual_seed(seed)
 
         self.model, self.meta = build_creature_scene(creature_xml)
@@ -116,6 +127,9 @@ class WarpFollowEnv:
         self.target_vel = torch.stack([spd * torch.cos(vang), spd * torch.sin(vang)], -1)
         self.t = 0
         self._forward()
+        # seed prev_dist so the first progress delta is well-defined
+        pos, _ = self._root_frames()
+        self.prev_dist = torch.linalg.norm(pos[:, :2] - self.target_xy, dim=-1)
         return self._obs()
 
     def _forward(self):
@@ -153,11 +167,22 @@ class WarpFollowEnv:
         pos, _ = self._root_frames()
         d = self.target_xy - pos[:, :2]
         dist = torch.linalg.norm(d, dim=-1)
+
+        if self.reward_mode == "progress":
+            # potential-based: reward for closing the gap this step. Telescopes
+            # to total distance reduced, so oscillating nets zero (unhackable);
+            # dense at any range (no flat far-field). Plus a small proximity
+            # "settle" term and an arrival bonus for staying on target.
+            progress = self.prev_dist - dist
+            self.prev_dist = dist.detach()
+            r = self.progress_scale * progress
+            r = r + self.settle_coef * torch.exp(-self.reward_coef * dist)
+            r = r + self.arrival_bonus * (dist < self.arrival_radius).float()
+            return r
+
         r = torch.exp(-self.reward_coef * dist)
-        if self.w_vel_shaping > 0:
-            # root velocity toward target (substitute for mocap-borne
-            # locomotion prior; helps escape the stand-still local optimum)
-            sv = self.sensordata  # velocimeter is body-frame; use qvel world
+        if self.reward_mode == "velshape" or self.w_vel_shaping > 0:
+            # root velocity toward target (hackable — kept for comparison)
             vel_xy = self.qvel[:, self.meta.qvel_root:self.meta.qvel_root + 2]
             v_to_t = (vel_xy * (d / dist.clamp(min=1e-6).unsqueeze(-1))).sum(-1)
             r = r + self.w_vel_shaping * v_to_t.clamp(min=0.0)

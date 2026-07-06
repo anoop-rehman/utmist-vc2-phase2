@@ -20,13 +20,19 @@ import numpy as np
 import torch
 
 
-def cpu_eval_video(ac, path, seed=7, deterministic=True):
-    """Runs current weights in the dm_control env; returns ep reward."""
+def cpu_eval_video(ac, path, seed=7, deterministic=True, target_speed=None):
+    """Runs current weights in the dm_control env; returns ep reward. Reward
+    here is always the pure exp(-c d) follow reward (reward-mode-agnostic),
+    so it is a fair 'how close does it get' metric across training modes.
+    Target speed is matched to training for a fair transfer eval."""
     from rower_soccer.drills.follow import make_follow_env
     from rower_soccer.drills.gym_wrap import DrillGymEnv
     env = getattr(cpu_eval_video, "_env", None)
     if env is None:
-        env = cpu_eval_video._env = DrillGymEnv(make_follow_env, seed=seed)
+        def factory(random_state=None):
+            kw = {} if target_speed is None else {"target_speed_range": tuple(target_speed)}
+            return make_follow_env(random_state=random_state, **kw)
+        env = cpu_eval_video._env = DrillGymEnv(factory, seed=seed)
     obs, _ = env.reset()
     done, ep_rew, frames = False, 0.0, []
     while not done:
@@ -56,6 +62,9 @@ def main():
     p.add_argument("--target-speed", type=float, nargs=2, default=[0.25, 2.0])
     p.add_argument("--reward-coef", type=float, default=0.5)
     p.add_argument("--vel-shaping", type=float, default=0.0)
+    p.add_argument("--reward-mode", default="paper",
+                   choices=["paper", "velshape", "progress"])
+    p.add_argument("--progress-scale", type=float, default=2.0)
     p.add_argument("--episode-secs", type=float, default=15.0)
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)
@@ -89,7 +98,9 @@ def main():
                         target_speed_range=tuple(args.target_speed),
                         reward_coef=args.reward_coef,
                         episode_seconds=args.episode_secs,
-                        w_vel_shaping=args.vel_shaping)
+                        w_vel_shaping=args.vel_shaping,
+                        reward_mode=args.reward_mode,
+                        progress_scale=args.progress_scale)
     ac = ActorCritic(env.obs_dim, env.act_dim,
                      proprio_indices=env.proprio_indices.tolist(),
                      task_indices=env.task_indices.tolist(), z_dim=args.z_dim)
@@ -130,7 +141,7 @@ def main():
             last_video = now
             vpath = os.path.join(run_dir, "videos",
                                  f"eval_step_{trainer.total_steps:010d}.mp4")
-            ep_rew = cpu_eval_video(ac, vpath)
+            ep_rew = cpu_eval_video(ac, vpath, target_speed=args.target_speed)
             print(f"[monitor] video: {vpath} (dm_control transfer eval "
                   f"ep_rew={ep_rew:.1f})", flush=True)
             if use_wandb:

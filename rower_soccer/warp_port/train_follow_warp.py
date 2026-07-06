@@ -88,6 +88,13 @@ def main():
         import wandb
         wandb.init(project=args.wandb_project, name=args.run_name, config=config,
                    dir=run_dir, id=args.run_name.replace("/", "-"), resume="allow")
+        # Use env_step as an explicit x-axis metric and let wandb's own internal
+        # step auto-increment. On resume the checkpoint's env_step may be behind
+        # wandb's internal counter (e.g. a prior run logged further before being
+        # killed without checkpointing); logging against wandb's auto step avoids
+        # the monotonic-step drop that silently discards replayed points.
+        wandb.define_metric("env_step")
+        wandb.define_metric("*", step_metric="env_step")
 
     from rower_soccer.warp_port.follow_env import WarpFollowEnv
     from rower_soccer.warp_port.ppo import (ActorCritic, PPOTrainer,
@@ -132,11 +139,11 @@ def main():
                   f"std={stats['std']:.3f}", flush=True)
             if use_wandb:
                 import wandb
-                wandb.log({"monitor/fps": fps, "monitor/eta_min": eta_min,
+                wandb.log({"env_step": trainer.total_steps,
+                           "monitor/fps": fps, "monitor/eta_min": eta_min,
                            "train/ep_rew": stats["ep_rew_env_mean"],
                            "train/entropy": stats["ent"], "train/std": stats["std"],
-                           "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"]},
-                          step=trainer.total_steps)
+                           "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"]})
         if args.video_secs > 0 and now - last_video >= args.video_secs:
             last_video = now
             vpath = os.path.join(run_dir, "videos",
@@ -146,9 +153,9 @@ def main():
                   f"ep_rew={ep_rew:.1f})", flush=True)
             if use_wandb:
                 import wandb
-                wandb.log({"eval/video": wandb.Video(vpath, format="mp4"),
-                           "eval/ep_rew_dm_control": ep_rew},
-                          step=trainer.total_steps)
+                wandb.log({"env_step": trainer.total_steps,
+                           "eval/video": wandb.Video(vpath, format="mp4"),
+                           "eval/ep_rew_dm_control": ep_rew})
             export_sb3_compatible(ac, os.path.join(run_dir, "latest.pt"))
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now

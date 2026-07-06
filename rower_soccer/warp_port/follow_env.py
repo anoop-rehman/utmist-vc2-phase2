@@ -31,13 +31,14 @@ class WarpFollowEnv:
     def __init__(self, num_worlds=2048, creature_xml="creature_configs/three_seg_worm.xml",
                  episode_seconds=15.0, target_speed_range=(0.25, 2.0),
                  lookahead=1.0, reward_coef=0.5, bounds=27.0, device="cuda",
-                 seed=0, use_graph=True):
+                 seed=0, use_graph=True, w_vel_shaping=0.0):
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
         self.speed_range = target_speed_range
         self.lookahead = lookahead
         self.reward_coef = reward_coef
+        self.w_vel_shaping = w_vel_shaping
         self.bounds = bounds
         self.gen = torch.Generator(device=device).manual_seed(seed)
 
@@ -150,8 +151,17 @@ class WarpFollowEnv:
 
     def _reward(self):
         pos, _ = self._root_frames()
-        dist = torch.linalg.norm(pos[:, :2] - self.target_xy, dim=-1)
-        return torch.exp(-self.reward_coef * dist)
+        d = self.target_xy - pos[:, :2]
+        dist = torch.linalg.norm(d, dim=-1)
+        r = torch.exp(-self.reward_coef * dist)
+        if self.w_vel_shaping > 0:
+            # root velocity toward target (substitute for mocap-borne
+            # locomotion prior; helps escape the stand-still local optimum)
+            sv = self.sensordata  # velocimeter is body-frame; use qvel world
+            vel_xy = self.qvel[:, self.meta.qvel_root:self.meta.qvel_root + 2]
+            v_to_t = (vel_xy * (d / dist.clamp(min=1e-6).unsqueeze(-1))).sum(-1)
+            r = r + self.w_vel_shaping * v_to_t.clamp(min=0.0)
+        return r
 
     def _obs(self):
         n = self.n

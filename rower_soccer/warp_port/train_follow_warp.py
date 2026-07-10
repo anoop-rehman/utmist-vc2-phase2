@@ -12,6 +12,7 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import time
 
@@ -58,6 +59,9 @@ def main():
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--ent-coef", type=float, default=0.005)
     p.add_argument("--ent-floor", type=float, default=None)
+    p.add_argument("--ent-ceil", type=float, default=0.0,
+                   help="max log_std (default 0.0 => std<=1.0, matching the "
+                        "[-1,1] action clamp); pass a large value to disable")
     p.add_argument("--z-dim", type=int, default=16)
     p.add_argument("--target-speed", type=float, nargs=2, default=[0.25, 2.0])
     p.add_argument("--reward-coef", type=float, default=0.5)
@@ -70,6 +74,10 @@ def main():
     p.add_argument("--video-secs", type=float, default=300.0)
     p.add_argument("--ckpt-secs", type=float, default=1800.0,
                    help="wallclock seconds between full checkpoints (overwrite)")
+    p.add_argument("--mid-ckpt-frac", type=float, default=0.5,
+                   help="write a one-shot rollback copy (checkpoint_mid.pt) at "
+                        "the first checkpoint past this fraction of --steps; "
+                        "0 disables")
     p.add_argument("--resume", action="store_true",
                    help="resume from <run_dir>/checkpoint.pt if present")
     p.add_argument("--gcs-bucket", default=None,
@@ -80,12 +88,33 @@ def main():
     args = p.parse_args()
 
     run_dir = os.path.join("runs_v2", args.run_name)
+    # Reusing a run name without --resume silently mixes artifacts from two
+    # different runs into one directory (and one GCS prefix): config.json gets
+    # clobbered, and a final.pt left by the earlier run outlives the later one.
+    if os.path.isdir(run_dir) and os.listdir(run_dir) and not args.resume:
+        p.error(f"{run_dir} exists and is non-empty. Pass --resume to continue "
+                f"that run, or pick a different --run-name.")
     os.makedirs(os.path.join(run_dir, "videos"), exist_ok=True)
     git_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                              capture_output=True, text=True).stdout.strip()
     config = {**vars(args), "git_sha": git_sha, "backend": "mujoco_warp"}
-    with open(os.path.join(run_dir, "config.json"), "w") as f:
+    # Never overwrite the originating run's config: each resume leg records its
+    # own args/git_sha alongside it, so provenance survives.
+    cfg_path = os.path.join(run_dir, "config.json")
+    if os.path.exists(cfg_path):
+        n = sum(f.startswith("config_resume_") for f in os.listdir(run_dir))
+        cfg_path = os.path.join(run_dir, f"config_resume_{n + 1}.json")
+    with open(cfg_path, "w") as f:
         json.dump(config, f, indent=1)
+
+    # final.pt is only written on a clean exit, so any copy present now belongs
+    # to an earlier run under this name. Drop it rather than let its
+    # authoritative-sounding name outrank the checkpoint we are about to train.
+    final_path = os.path.join(run_dir, "final.pt")
+    if os.path.exists(final_path):
+        os.remove(final_path)
+        print(f"[setup] removed stale {final_path} (from a previous run)",
+              flush=True)
     use_wandb = not args.no_wandb
     if use_wandb:
         import wandb
@@ -115,9 +144,13 @@ def main():
                      proprio_indices=env.proprio_indices.tolist(),
                      task_indices=env.task_indices.tolist(), z_dim=args.z_dim)
     trainer = PPOTrainer(env, ac, lr=args.lr, rollout_len=args.rollout,
-                         ent_coef=args.ent_coef, ent_floor=args.ent_floor)
+                         ent_coef=args.ent_coef, ent_floor=args.ent_floor,
+                         ent_ceil=args.ent_ceil)
 
     ckpt_path = os.path.join(run_dir, "checkpoint.pt")
+    latest_path = os.path.join(run_dir, "latest.pt")
+    mid_path = os.path.join(run_dir, "checkpoint_mid.pt")
+    mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
     if args.resume and os.path.exists(ckpt_path):
         start_steps = load_checkpoint(trainer, ckpt_path)
@@ -159,24 +192,46 @@ def main():
                 wandb.log({"env_step": trainer.total_steps,
                            "eval/video": wandb.Video(vpath, format="mp4"),
                            "eval/ep_rew_dm_control": ep_rew})
-            export_sb3_compatible(ac, os.path.join(run_dir, "latest.pt"))
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now
             save_checkpoint(trainer, ckpt_path)
+            # latest.pt is the weights-only view of checkpoint.pt, written in
+            # the same breath so the two never disagree. It used to be exported
+            # from the video block, which meant no videos => no latest.pt.
+            export_sb3_compatible(ac, latest_path)
             print(f"[monitor] checkpoint saved at step {trainer.total_steps:,} "
                   f"({os.path.getsize(ckpt_path)/1e6:.1f} MB, overwrite)", flush=True)
+            # One extra restore point, written once at the first checkpoint past
+            # --mid-ckpt-frac. checkpoint.pt is overwritten in place, so without
+            # this a policy collapse leaves nothing to roll back to.
+            wrote_mid = False
+            if mid_target and not os.path.exists(mid_path) \
+                    and trainer.total_steps >= mid_target:
+                shutil.copy2(ckpt_path, mid_path)
+                wrote_mid = True
+                print(f"[monitor] rollback copy -> {mid_path} at step "
+                      f"{trainer.total_steps:,}", flush=True)
             if args.gcs_bucket:
                 from rower_soccer.warp_port.gcs import sync_async
                 sync_async(ckpt_path, args.gcs_bucket, args.run_name)
-                sync_async(os.path.join(run_dir, "config.json"),
-                           args.gcs_bucket, args.run_name)
+                sync_async(cfg_path, args.gcs_bucket, args.run_name)
+                # latest.pt is the export used for inference; it was previously
+                # written but never uploaded.
+                sync_async(latest_path, args.gcs_bucket, args.run_name)
+                if wrote_mid:
+                    sync_async(mid_path, args.gcs_bucket, args.run_name)
 
     save_checkpoint(trainer, ckpt_path)
-    export_sb3_compatible(ac, os.path.join(run_dir, "final.pt"))
+    export_sb3_compatible(ac, latest_path)
+    export_sb3_compatible(ac, final_path)
     if args.gcs_bucket:
-        from rower_soccer.warp_port.gcs import sync_async
-        sync_async(ckpt_path, args.gcs_bucket, args.run_name)
-        sync_async(os.path.join(run_dir, "final.pt"), args.gcs_bucket, args.run_name)
+        from rower_soccer.warp_port.gcs import sync_blocking, wait_all
+        # Drain any mid-run uploads first so their (older) bytes cannot land on
+        # top of the final ones, then upload synchronously: returning from
+        # main() kills the daemon upload threads mid-transfer.
+        wait_all()
+        for path in (cfg_path, ckpt_path, latest_path, final_path):
+            sync_blocking(path, args.gcs_bucket, args.run_name)
     print(f"[setup] done in {(time.perf_counter()-t0)/60:.1f}min; saved final.pt",
           flush=True)
 

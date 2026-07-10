@@ -48,7 +48,7 @@ class PPOTrainer:
     def __init__(self, env, ac: ActorCritic, lr=3e-4, rollout_len=64,
                  minibatches=8, epochs=4, gamma=0.99, gae_lambda=0.95,
                  clip=0.2, ent_coef=0.005, vf_coef=0.5, max_grad_norm=0.5,
-                 z_smooth_coef=0.0, ent_floor=None, device="cuda"):
+                 z_smooth_coef=0.0, ent_floor=None, ent_ceil=None, device="cuda"):
         self.env, self.ac = env, ac.to(device)
         self.opt = torch.optim.Adam(ac.parameters(), lr=lr)
         self.T, self.N = rollout_len, env.n
@@ -58,6 +58,10 @@ class PPOTrainer:
         self.max_grad_norm = max_grad_norm
         self.z_smooth_coef = z_smooth_coef
         self.ent_floor = ent_floor  # min log_std, e.g. -1.5
+        # max log_std. Actions are clamped to [-1, 1] in collect(), so a std
+        # much above ~1 samples almost entirely into the clamp and explores at
+        # random. Without a ceiling log_std drifts up unboundedly.
+        self.ent_ceil = ent_ceil
         self.device = device
         d = device
         self.obs_buf = torch.zeros(self.T, self.N, env.obs_dim, device=d)
@@ -133,9 +137,9 @@ class PPOTrainer:
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
                 self.opt.step()
-                if self.ent_floor is not None:
+                if self.ent_floor is not None or self.ent_ceil is not None:
                     with torch.no_grad():
-                        self.ac.log_std.clamp_(min=self.ent_floor)
+                        self.ac.log_std.clamp_(min=self.ent_floor, max=self.ent_ceil)
                 stats = {"pg": float(pg), "vf": float(vloss), "ent": float(ent),
                          "std": float(self.ac.log_std.exp().mean())}
         return stats

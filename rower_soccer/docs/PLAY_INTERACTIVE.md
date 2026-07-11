@@ -1,7 +1,10 @@
 # Interactive Multi-Model Human-Control Mode
 
-**Status:** implemented, core logic verified in-tree (no compatible checkpoints exist yet, so a
-full model-driven run is still pending trained rower follow/dribble weights).
+**Status:** implemented and verified in-tree against the real dm_control + SB3 stack. The full
+inference path (obs plumbing → `model.predict` with the custom `LatentActorCriticPolicy` → env step
+→ top-down render → pygame blit) is exercised end-to-end; only the live pygame window on a physical
+display and a one-time click→world calibration remain unexercised. No trained rower follow/dribble
+checkpoints exist in-repo yet, so a real model-driven run is still pending those weights.
 
 Report covering the new `rower_soccer/play_interactive.py` — an inference-only mode where one rower
 stands in the drill arena on an effectively infinite episode and a human drives it like a game
@@ -29,14 +32,13 @@ the rower simply holds at the target until the next command — exactly as reque
 | File | Change |
 |---|---|
 | `rower_soccer/play_interactive.py` | **New.** The entire feature (task subclass, env factory, obs builder, camera/unprojection helpers, pygame control loop). |
-| `rower_soccer/eval_drill.py` | Added earlier this session — single-model, fixed-episode inference. `play_interactive` is the multi-model, infinite-episode, human-driven sibling. |
 
 No existing modules were modified. `play_interactive` reuses the drill/creature/model machinery
-read-only.
+read-only. It is a self-contained, multi-model, infinite-episode, human-driven inference mode.
 
-Environment note (not a code change): the working `.venv` had `mujoco 3.10.0`, which is incompatible
-with `dm-control 1.0.16` (fails on `flex_xvert0`). Aligning to the project-pinned `mujoco==3.1.3`
-fixes it — this affects **every** drill env, not just this feature.
+Environment note (not a code change): the drill envs require `mujoco==3.1.3` (a newer `mujoco 3.10.0`
+is incompatible with `dm-control 1.0.16` — fails on `flex_xvert0`). The project `.venv` is already on
+`mujoco 3.1.3`, so no realignment was needed here.
 
 ---
 
@@ -90,7 +92,7 @@ to the standalone follow env (which has no ball) — so trained weights transfer
                     │                                              │
                     │   per step:                                  │
                     │     obs_vec = build_obs(obs, KEYS[active])    │
-                    │     action  = models[active].predict(obs_vec) │  ← FOLLOW or DRIBBLE PPO
+                    │     action  = models[active].predict(obs_vec) │  ← FOLLOW/DRIBBLE PPO (LatentActorCriticPolicy)
                     │              (or zero_action if idle)         │
                     │     ts = env.step(action);  obs = ts.obs      │
                     │     frame = physics.render('topdown')         │
@@ -113,7 +115,7 @@ to the standalone follow env (which has no ball) — so trained weights transfer
 |---|---|
 | `InteractivePlayTask(DribbleTask)` | Adapts the dribble scene: adds a straight-down `topdown` camera (fovy derived from `cam_height`/`view_half`), sets an infinite episode, and provides `set_command_target()` for a **static** target (`_target_vel = 0`, so the inherited `after_step` leaves it fixed and `target_ego_future == target_ego`). |
 | `make_interactive_env()` | Mirror of `make_dribble_env` but instantiating `InteractivePlayTask`. |
-| `build_obs(obs_dict, keys)` | Flatten selected observables in sorted-key order — the same contract as `gym_wrap.py:44-46`, restricted to the active skill's key list. |
+| `build_obs(obs_dict, keys)` | Flatten selected observables in sorted-key order — the same contract as `drills/gym_wrap.py:44-46` (`DrillGymEnv._flatten`), restricted to the active skill's key list. |
 | `resolve_topdown_camera(physics)` | Finds the camera id whose name ends in `topdown` (handles model-prefixing). |
 | `pixel_to_world(px, py, W, H, view_half)` | Affine unprojection for the straight-down camera: center→origin, corners→±`view_half`. |
 | `main()` | Loads both checkpoints once, computes the two key layouts off the live scene, runs the pygame loop. Heavy imports (`stable_baselines3`, `pygame`) are lazy so the module's env/task logic is importable without them. |
@@ -141,15 +143,30 @@ to the standalone follow env (which has no ball) — so trained weights transfer
 
 ## 6. How to run
 
-Requires a machine **with a display**, plus `stable_baselines3` + `torch` + `pygame`, and trained
-**rower** follow/dribble checkpoints (none exist in-repo yet).
+Requires a machine **with a display**, plus `stable_baselines3` + `torch` + `pygame`.
+
+**Current temporary setup (dribble disabled, worm follow).** The only trained checkpoint in-repo is
+`runs_v2/follow_drill_model.pt` — a **worm** follow policy (obs 41, act 2), exported in the
+`warp_port.ppo.export_sb3_compatible` layout and loaded via `load_into_sb3_policy`. Dribble is off
+via the `ENABLE_DRIBBLE = False` toggle in `play_interactive.py`. Defaults match this, so:
+
+```bash
+MUJOCO_GL=egl .venv/bin/python -m rower_soccer.play_interactive
+# == --creature worm --follow-model runs_v2/follow_drill_model.pt
+```
+
+Only the **Q** (follow) command is live; **W** is inert until `ENABLE_DRIBBLE` is flipped back on and
+a dribble checkpoint is passed via `--dribble-model`.
+
+Once trained **rower** weights exist, run e.g.:
 
 ```bash
 MUJOCO_GL=egl .venv/bin/python -m rower_soccer.play_interactive \
-    --creature rower \
-    --follow-model  runs_v2/follow_rower/final_model.zip \
-    --dribble-model runs_v2/dribble_rower/final_model.zip
+    --creature rower --follow-model runs_v2/follow_rower.pt
 ```
+
+The follow loader validates the checkpoint's dims against the live scene and errors clearly on a
+mismatch (obs=41/act=2 → worm, obs=77/act=8 → rower), so a wrong `--creature` fails fast.
 
 Useful flags: `--window` (square render/window px, default 800), `--cam-height` / `--view-half`
 (top-down framing), `--device {cuda,cpu}`.
@@ -158,18 +175,24 @@ Useful flags: `--window` (square render/window px, default 800), `--cam-height` 
 
 ## 7. Verification status
 
-Smoke-tested in-tree against the real dm_control stack (no models / no window needed):
+Verified in-tree against the real dm_control + SB3 stack:
 
-- ✅ Env builds; `topdown` camera resolves.
+- ✅ Env builds; `topdown` camera resolves (id 1, name `topdown`).
 - ✅ Obs dims: FOLLOW **77**, DRIBBLE **81** (differ by exactly the 4-dim `ball_ego`).
-- ✅ Static target holds: set `[5,-3]` → stays `[5,-3]` with zero velocity across steps.
+- ✅ Static target holds: set `[5,-3]` → stays `[5,-3]` with zero velocity across steps, and
+  `target_ego_future == target_ego`.
 - ✅ `pixel_to_world`: center → origin, corners → ±view_half.
 - ✅ Offscreen render returns frames (EGL).
+- ✅ `model.predict` path end-to-end with the actual `LatentActorCriticPolicy`: the real
+  `runs_v2/follow_drill_model.pt` (worm follow) loads via `load_into_sb3_policy` and produces
+  in-range 2-dim actions fed from `build_obs`. A rower-scene load of the same file is correctly
+  rejected with a dimension-mismatch error.
+- ✅ pygame surface path: `physics.render` frame → `surfarray.make_surface` → blit (headless SDL).
 
-Still unexercised (needs the heavy deps + real checkpoints):
+Still unexercised (needs a physical display, and trained rower weights for the rower path):
 
-- ⬜ `model.predict` path (standard SB3) with trained rower weights.
-- ⬜ The pygame window loop on a live display.
+- ⬜ `model.predict` with trained *rower* follow/dribble weights (worm follow is the only real net).
+- ⬜ The pygame window loop on a live display (keyboard/mouse interaction).
 - ⬜ One-time calibration of click→world axis signs against a visible landmark.
 
 ---

@@ -53,13 +53,13 @@ class FollowTask(composer.Task):
                  creature_kind="worm",
                  episode_seconds=15.0,
                  arena_size=(30.0, 30.0),
-                 bounds=27.0,
-                 target_speed_range=(0.25, 2.0),
-                 spawn_dist_range=(2.0, 6.0),
+                 bounds=10.0,
+                 target_speed_range=(0.10, 0.85),
+                 spawn_dist_range=(1.76, 5.28),
                  direction_change_prob=0.0,   # per control step; 0 = constant velocity (v1)
                  lookahead_seconds=(1.0,),
                  reward_coef=0.5,
-                 target_height=1.0):
+                 target_height=0.5):
         # These MUST track WarpFollowEnv's defaults: this task is the CPU
         # transfer/parity eval for the Warp-trained policy, so a mismatch in
         # target speed or spawn distance would show up as a phantom sim2sim gap.

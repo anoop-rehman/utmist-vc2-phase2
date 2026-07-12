@@ -29,25 +29,27 @@ SUBSTEPS = 10  # physics dt 0.0025
 
 class WarpFollowEnv:
     def __init__(self, num_worlds=2048, creature_xml="creature_configs/three_seg_worm.xml",
-                 episode_seconds=15.0, target_speed_range=(0.25, 2.0),
-                 lookahead=1.0, reward_coef=0.5, bounds=27.0, device="cuda",
+                 episode_seconds=15.0, target_speed_range=(0.10, 0.85),
+                 lookahead=1.0, reward_coef=0.5, bounds=10.0, device="cuda",
                  seed=0, use_graph=True, w_vel_shaping=0.0,
                  reward_mode="paper", progress_scale=2.0, settle_coef=0.5,
                  arrival_radius=1.0, arrival_bonus=0.5,
-                 spawn_dist_range=(2.0, 6.0)):
-        # Calibrated to the 9.95 m / 3982 kg Unity-evolved worm. probe_speed.py
-        # measures its achievable speed at 2.83 m/s (best open-loop
-        # travelling-wave gait: 0.75 Hz, full amplitude, 225deg phase), so the
-        # 2.0 m/s target cap is catchable with margin.
+                 spawn_dist_range=(1.76, 5.28)):
+        # Calibrated to the 1.76 m / 22 kg worm (unity2mujoco --length-scale
+        # 0.1768 --gear-scale 0.03), which is the body that can actually control
+        # DeepMind's ball -- see docs/STAGE2_MULTITASK.md 0.5.
         #
-        # Keep that check in mind if the creature is ever rescaled
-        # (tools/unity2mujoco.py --length-scale): a target faster than the
-        # creature can possibly move makes the drill unlearnable no matter how
-        # good the policy gets, and nothing in the training loop reports it --
-        # reward just stays low and it reads as "needs more steps". Recalibrate
-        # with probe_speed.py and keep drills/follow.py in step, since that is
-        # the CPU transfer/parity eval and a mismatch shows up as a phantom
-        # sim2sim gap.
+        # target_speed_range: probe_speed.py measures achievable speed at
+        # 1.04-1.64 m/s. That spread is real, not sampling error: the worm spawns
+        # as an unstable vertical stack and topples chaotically, so take the LOW
+        # end. The cap is 80% of the minimum (0.8 * 1.04), so the target stays
+        # catchable even on a bad roll. A target the creature cannot physically
+        # catch makes the drill unlearnable no matter how good the policy gets,
+        # and nothing in the training loop reports it -- reward just stays low and
+        # reads as "needs more steps".
+        #
+        # drills/follow.py MUST stay in step: it is the CPU transfer/parity eval,
+        # so a mismatch shows up as a phantom sim2sim gap.
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))

@@ -40,10 +40,10 @@ SUBSTEPS = 10
 
 class WarpDribbleEnv:
     def __init__(self, num_worlds=2048, creature_xml="creature_configs/three_seg_worm.xml",
-                 episode_seconds=15.0, target_speed_range=(0.1, 1.0),
-                 lookahead=1.0, reward_coef=0.5, bounds=27.0, device="cuda",
+                 episode_seconds=15.0, target_speed_range=(0.10, 0.60),
+                 lookahead=1.0, reward_coef=0.5, bounds=10.0, device="cuda",
                  seed=0, use_graph=True,
-                 target_dist_range=(2.0, 6.0), ball_spawn_range=(5.0, 8.0),
+                 target_dist_range=(2.0, 5.0), ball_spawn_range=(1.5, 3.0),
                  w_player_to_ball=0.1, w_ball_to_target=0.3,
                  reward_mode="paper", progress_scale=2.0, approach_scale=0.5,
                  ball: BallSpec = None, nconmax=64, njmax=512):
@@ -54,18 +54,17 @@ class WarpDribbleEnv:
         self.lookahead = lookahead
         self.reward_coef = reward_coef
         self.bounds = bounds
-        # The target spawns relative to the BALL, not the creature. This matters
-        # more than it looks. dm_control's drill spawns both relative to the
-        # walker (ball 1-3 m, target 2-6 m), which for a 1.5 m humanoid leaves
-        # them ~4 m apart. Do the same around a 9.95 m worm -- whose own
-        # footprint is 4.65 m, so the ball has to start >=5 m out -- and ball and
-        # target land ~13 m apart. exp(-0.5*13) = 0.0015: the fitness is flat
-        # zero out there, the drill has no gradient at all, and no amount of
-        # training fixes it. Anchoring the target to the ball keeps
-        # ||ball-target|| in 2-6 m, i.e. the same spread dm_control actually gets.
+        # The target spawns relative to the BALL, not the creature. On the old
+        # 9.95 m worm this was forced: its footprint was 4.65 m, so the ball had
+        # to start >=5 m out, and anchoring the target to the worm as well left
+        # ball and target ~13 m apart -- exp(-0.5*13) = 0.0015, a flat-zero
+        # fitness with no gradient anywhere. The 1.76 m worm's footprint is only
+        # 0.82 m so the pressure is off, but anchoring to the ball is still the
+        # right call: it bounds ||ball-target|| directly instead of letting it
+        # fall out of two independent draws.
         self.target_dist_range = target_dist_range
-        # ...and the ball spawns just outside the creature's 4.65 m footprint,
-        # so it is reachable but not interpenetrating the body at t=0.
+        # Ball spawn now matches dm_control's own 1-3 m, which the 0.82 m
+        # footprint finally permits.
         self.ball_spawn_range = ball_spawn_range
         self.w_p2b = w_player_to_ball
         self.w_b2t = w_ball_to_target

@@ -68,12 +68,13 @@ def main():
                         "latest.pt), e.g. a follow policy trained on the same "
                         "body at a different mass scale. Weights only, fresh "
                         "optimizer. Ignored when --resume finds a checkpoint.")
-    # Catchable: the 9.95 m worm's achievable speed is 2.83 m/s (probe_speed.py).
-    p.add_argument("--target-speed", type=float, nargs=2, default=[0.25, 2.0])
-    p.add_argument("--bounds", type=float, default=27.0,
+    # 80% of the LOW end of the 1.76 m worm's achievable speed (probe_speed.py
+    # measures 1.04-1.64 m/s; the spread is chaotic toppling, so trust the min).
+    p.add_argument("--target-speed", type=float, nargs=2, default=[0.10, 0.85])
+    p.add_argument("--bounds", type=float, default=10.0,
                    help="target roaming half-extent (m)")
-    p.add_argument("--spawn-dist", type=float, nargs=2, default=[2.0, 6.0],
-                   help="target spawn distance (m)")
+    p.add_argument("--spawn-dist", type=float, nargs=2, default=[1.76, 5.28],
+                   help="target spawn distance (m): 1-3 body lengths")
     p.add_argument("--reward-coef", type=float, default=0.5)
     p.add_argument("--vel-shaping", type=float, default=0.0)
     p.add_argument("--reward-mode", default="paper",

@@ -74,14 +74,14 @@ def main():
                    help="follow checkpoint to warm-start from (checkpoint.pt or "
                         "latest.pt). Task encoder + critic input layer re-init; "
                         "the decoder (the low-level controller) carries over.")
-    p.add_argument("--target-speed", type=float, nargs=2, default=[0.1, 1.0],
+    p.add_argument("--target-speed", type=float, nargs=2, default=[0.10, 0.60],
                    help="dribbling is harder than following, so the target is "
-                        "slower than follow's [0.25, 2.0]")
-    p.add_argument("--bounds", type=float, default=27.0)
-    p.add_argument("--ball-spawn", type=float, nargs=2, default=[5.0, 8.0],
-                   help="ball spawn distance from the worm (m); must clear its "
-                        "4.65 m footprint radius")
-    p.add_argument("--target-dist", type=float, nargs=2, default=[2.0, 6.0],
+                        "slower than follow's [0.10, 0.85] cap")
+    p.add_argument("--bounds", type=float, default=10.0)
+    p.add_argument("--ball-spawn", type=float, nargs=2, default=[1.5, 3.0],
+                   help="ball spawn distance from the worm (m); dm_control's own "
+                        "1-3 m, which the 1.76 m worm's 0.82 m footprint allows")
+    p.add_argument("--target-dist", type=float, nargs=2, default=[2.0, 5.0],
                    help="target spawn distance from the BALL (m), not from the "
                         "worm: anchoring it to the worm leaves ball and target "
                         "~13 m apart, where exp(-c*d) is flat zero and the drill "

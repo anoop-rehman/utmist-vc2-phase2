@@ -4,6 +4,14 @@ Supersedes the earlier WASD plan (PLAN v1 / CONTRACTS.md §1 command scheme).
 Reference: Liu et al. 2022, "From Motor Control to Team Play in Simulated
 Humanoid Football" (Science Robotics; papers in project_management/).
 
+> **North-star doc.** For stages 1-2 the concrete engineering plan is
+> `STAGE2_MULTITASK.md`, which supersedes three things here: it adds the
+> **freeze-and-retrain** stage (missing below, but assumed by stages 4-6 —
+> they all require a fixed z-space), it corrects "task introduction = config
+> change" (line 91: only `follow` exists as a Warp env, and it has no ball —
+> dribble/kick/shoot need a real physics ball), and it reconciles the §1-3
+> CONTRACTS interface, whose input is now `z`, not `Command`.
+
 ## The architecture (one diagram to rule them all)
 
 ```

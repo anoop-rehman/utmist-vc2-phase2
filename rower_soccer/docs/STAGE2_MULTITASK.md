@@ -34,20 +34,62 @@ route stays open — see §8.
 
 ---
 
-## 0.5 Scale (an open risk, deliberately accepted for now)
+## 0.5 Scale — the mass ratio, and why the worm is being lightened
 
-**Current state: the worm stays at its Unity-evolved scale, 9.95 m / 3981 kg,
-and the ball stays at DeepMind's, 0.35 m / 0.045 kg.** That is a ball:player
-mass ratio of **1:88,485**, against dm_soccer's own 1:489 and real football's
-1:163 — roughly 180x lighter, relative to the body, than a football should be.
-We are accepting that for now and finding out empirically whether dribble
-trains; the rescale below is the fix if it does not.
+### What we tried, and what it cost
 
-The reason to accept it: the 691M-step follow checkpoint was trained on this
-worm, so keeping it means dribble can warm-start from that policy instead of
-retraining follow from scratch.
+The ball is DeepMind's and is internally consistent: `SoccerBall` at 0.35 m /
+0.045 kg, sized against the goal (ball:goal-width 0.035, vs 0.030 in real
+football). The worm came out of Unity at **9.95 m / 3981 kg**. That is a
+ball:player mass ratio of **1:88,485**, against dm_soccer's own 1:489 and real
+football's 1:163 — the ball is ~180x lighter, relative to the body, than a
+football should be.
 
-Measured on this worm (`warp_port/probe_speed.py`):
+We accepted that deliberately, to keep the 691M-step follow checkpoint valid so
+dribble could warm-start from it, and ran three dribble configs to find out
+empirically whether it mattered. **It does.** Measured with the warm-started
+policy on the dribble drill (512 worlds, one 15 s episode):
+
+| | |
+|---|---|
+| worm gets within 2 m of the ball | **10% of worlds** |
+| worlds where the ball moves at all | 12.9% |
+| ball displacement | mean 0.85 m, **max 74.9 m** (drill bounds are ±27 m) |
+
+So the ball is mostly untouched, and on the occasions it *is* touched it gets
+ejected clean out of the drill. The tell in the training logs was subtle and
+worth remembering: **all three runs reported near-identical `fitness` at every
+step** (0.113/0.115/0.117 → 0.166/0.166/0.165 → 0.107/0.107/0.107) despite three
+different reward functions. Fitness that does not depend on the policy means the
+policy is not touching the ball — what was actually being plotted was the target
+drifting away from a stationary ball, modulated by episode phase.
+
+### The fix being applied: lighten the worm, keep its size
+
+Scale **mass and torque by the same factor k**, leaving all lengths alone.
+
+This is not a compromise, it is the physically clean lever. With force and mass
+both scaled by k, F = ma gives identical accelerations; gravity is an
+acceleration and does not care about mass; ground friction scales too (μN ∝ m,
+and the force needed to accelerate ∝ m). **The worm's own locomotion is exactly
+invariant** — same gait, same speed, same everything. What changes is the
+momentum ratio against the ball, which does *not* scale, and that is precisely
+the quantity that is broken.
+
+So it fixes the ball interaction at zero cost to the creature, and the follow
+policy should transfer nearly intact. (One caveat: touch sensors read contact
+*force*, which scales with mass, so that slice of the proprio observation does
+change. Everything else — joint angles, velocities, gyro, accelerometer — is
+unchanged.)
+
+`tools/unity2mujoco.py --mass-scale` implements it: density ∝ k, gear ∝ k,
+armature ∝ k, joint damping ∝ k, stiffness ∝ k. Pick k by measuring, not by
+arithmetic — the contacting *segment's* mass is what governs the collision, and
+the worm's 22 kg would be spread across three segments, so matching BoxHead's
+total mass is not automatically the right target.
+
+Measured on this worm (`warp_port/probe_speed.py`), and unchanged by mass
+scaling:
 
 | quantity | value |
 |---|---|
@@ -60,31 +102,30 @@ are catchable against 2.83 m/s, so they stand. They live in
 CPU drill is the transfer/parity eval, so a mismatch reads as a phantom sim2sim
 gap.
 
-### The rescale, if we need it
+### The other lever: shrink the worm (`--length-scale`)
 
-`tools/unity2mujoco.py --length-scale` does a Froude-similar rescale (mass ∝ s³,
-torque ∝ s⁴, armature ∝ s⁵, joint damping ∝ s^4.5, stiffness ∝ s⁴). At
-`--length-scale 0.1768 --gear-scale 0.03` the worm becomes **1.76 m / 22.01 kg**
-— BoxHead's mass exactly, and dm_soccer's 1:489 mass ratio to the digit. Ball
-physics then checks out (`warp_port/probe_ball.py`): the ball settles at rest,
-12.9% of random-action worlds displace it at peak 0.2–5.4 m/s, and a ball kicked
-at 5 m/s comes to rest in 2.2 s.
+Kept available, not currently used. `--length-scale` does a Froude-similar
+rescale (mass ∝ s³, torque ∝ s⁴, armature ∝ s⁵, joint damping ∝ s^4.5,
+stiffness ∝ s⁴). At `--length-scale 0.1768 --gear-scale 0.03` the worm becomes
+1.76 m / 22.01 kg — BoxHead's mass exactly, and dm_soccer's 1:489 ratio to the
+digit. Ball physics checks out there (`probe_ball.py`): ball settles at rest,
+12.9% of random-action worlds displace it at 0.2–5.4 m/s, and a 5 m/s ball comes
+to rest in 2.2 s.
 
-Two things to know before pulling that lever:
+Why we are not using it:
 
-- **It invalidates the follow checkpoint** (different body ⇒ different policy),
-  so follow must be retrained first. That is the whole cost.
-- **Every drill constant must be recalibrated** with `probe_speed.py`. Not
-  optional: at 1.76 m the worm's achievable speed drops to 1.64 m/s, so the
-  existing 2.0 m/s target cap becomes *uncatchable* and the drill unlearnable
-  no matter how good the policy is — and nothing in the training loop reports
-  that. Reward just stays low and it reads as "needs more steps".
-- The rescale is **not** behaviourally similar. `solref` and the timestep are
-  pinned to dm_control's convention (which the ball shares — a creature with a
-  different contact timescale from the ball in the same scene would be
-  incoherent) rather than Froude-scaled, and worm locomotion *is* ground
-  contact. Measured: the small worm runs at 0.93 body-len/s vs the original's
-  0.28. A better creature, but do not assume gaits carry over.
+- It **changes the creature**, so every drill constant must be recalibrated with
+  `probe_speed.py`. At 1.76 m the worm's achievable speed drops to 1.64 m/s, so
+  the existing 2.0 m/s follow target cap becomes *uncatchable* and the drill
+  unlearnable no matter how good the policy is — with nothing in the training
+  loop to report it. Reward just stays low and reads as "needs more steps".
+- It is **not** behaviourally similar. `solref` and the timestep are pinned to
+  dm_control's convention (which the ball shares — a creature with a different
+  contact timescale from the ball in the same scene would be incoherent) rather
+  than Froude-scaled, and worm locomotion *is* ground contact. Measured: the
+  small worm runs at 0.93 body-len/s vs the original's 0.28.
+
+Mass scaling has neither problem, which is why it is the one we reach for.
 
 ## 1. Mapping onto the paper
 

@@ -10,24 +10,50 @@ notebook pipeline (unity2mujoco.ipynb) and the checked-in rower XML:
   scaled by --gear-scale. Gears are a free design parameter here (we train
   our own controllers), so tune for controllability, not realism.
 
---length-scale: Unity emits creatures at whatever scale the evolution ran at,
-which for the 3-segment worm is ~10 m and ~3980 kg. That is unusable against
-DeepMind's soccer env, whose ball is fixed at 0.35 m / 0.045 kg: the ball:player
-mass ratio would be 1:88,485 against dm_soccer's own 1:489, i.e. a freight train
-kicking a balloon. The ball, pitch and goal are DeepMind's and stay put; the
-creature is what gets scaled to meet them (s=0.1768 puts the worm at 1.76 m and
-22.0 kg -- BoxHead's mass exactly, and dm_soccer's mass ratio to the digit).
+Unity emits creatures at whatever scale the evolution ran at, which for the
+3-segment worm is ~10 m and ~3980 kg. Against DeepMind's soccer env, whose ball
+is fixed at 0.35 m / 0.045 kg, that is a ball:player mass ratio of 1:88,485
+versus dm_soccer's own 1:489 -- a freight train kicking a balloon. Measured
+consequence: the worm ejects the ball 75 m out of a +/-27 m drill. The ball,
+pitch and goal are DeepMind's and stay put; the creature is what moves. Two
+independent levers do that:
 
-Scaling is Froude-similar, not merely geometric, so the scaled creature is a
-time-rescaled copy of the original rather than a differently-behaved one. With
-gravity fixed and density fixed, length ~ s implies:
+--mass-scale k  (PREFERRED)
+    Scales mass and every force-like parameter by k, leaving all LENGTHS alone:
 
-    mass ~ s^3    torque ~ s^4    armature ~ s^5
-    (Froude time ~ sqrt(s), so joint damping [N.m.s/rad] ~ s^4.5, stiffness ~ s^4)
+        density ~ k   gear ~ k   armature ~ k   damping ~ k   stiffness ~ k
 
-solref/solimp and the sim timestep are deliberately NOT scaled: their dm_control
-defaults (contact timeconst 0.02 s, dt 0.0025) are already tuned for exactly the
-humanoid scale we are scaling *to*. The 10 m creature was the anomaly.
+    This leaves the creature's own locomotion EXACTLY invariant. F = ma with
+    both force and mass scaled by k gives identical accelerations; gravity is an
+    acceleration and does not care about mass; ground friction scales the same
+    way (mu*N ~ m, and the force to accelerate ~ m). Same gait, same speed, same
+    everything -- so drill constants need no recalibration and a trained policy
+    transfers nearly intact (only the touch sensors change, since they read
+    contact force, which scales with mass).
+
+    What DOES change is the momentum ratio against the ball, whose mass is fixed
+    by DeepMind. That is the one quantity that is broken, so this lever fixes it
+    at zero cost to the creature. Choose k by measuring with probe_ball.py, not
+    by arithmetic: the CONTACTING SEGMENT's mass governs the collision, and the
+    worm's mass is spread over three segments of very different size, so hitting
+    BoxHead's 22 kg total is not automatically the right target.
+
+--length-scale s
+    Froude-similar geometric rescale (the creature actually shrinks). With
+    gravity and density fixed, length ~ s implies:
+
+        mass ~ s^3    torque ~ s^4    armature ~ s^5
+        (Froude time ~ sqrt(s), so damping [N.m.s/rad] ~ s^4.5, stiffness ~ s^4)
+
+    s=0.1768 puts the worm at 1.76 m / 22.0 kg -- BoxHead's mass exactly. But it
+    changes the creature: achievable speed drops 2.83 -> 1.64 m/s, so every drill
+    constant must be recalibrated with probe_speed.py (the existing 2.0 m/s
+    follow target cap becomes physically uncatchable, which makes the drill
+    unlearnable with no error to tell you so). Prefer --mass-scale.
+
+solref/solimp and the sim timestep are deliberately NOT scaled by either lever.
+solref is a time constant, and MuJoCo normalises contact stiffness by the
+effective mass, so contact behaviour is already mass-invariant.
 """
 
 import numpy as np
@@ -94,10 +120,11 @@ def _root_extras(phenotypes, s):
 
 
 def emit_xml(phenotypes, model_name, gear_scale=1.0, joint_range=(-75, 75),
-             length_scale=1.0):
+             length_scale=1.0, mass_scale=1.0):
     by_uid = {p.uid: p for p in phenotypes}
     root = phenotypes[0]
     s = length_scale
+    k = mass_scale
 
     def body_xml(p, indent):
         pad = " " * indent
@@ -130,9 +157,11 @@ def emit_xml(phenotypes, model_name, gear_scale=1.0, joint_range=(-75, 75),
         return d
 
     # Gears fit the ORIGINAL (unscaled) subtree masses -- that empirical fit is
-    # what makes the creature controllable -- then carry the s^4 torque exponent,
-    # which preserves torque-to-weight and so the creature's relative strength.
-    torque_s = s ** _E_TORQUE
+    # what makes the creature controllable -- then carry the s^4 torque exponent
+    # (preserves torque-to-weight, hence relative strength) and the k mass factor
+    # (torque must track mass, or the creature gets relatively stronger/weaker and
+    # its gait changes -- the whole point of --mass-scale is that it does not).
+    torque_s = s ** _E_TORQUE * k
     motors = []
     for p in phenotypes:
         if p.joint_type == "hinge":
@@ -149,21 +178,30 @@ def emit_xml(phenotypes, model_name, gear_scale=1.0, joint_range=(-75, 75),
         for b in uids[i + 1:]:
             excludes.append(f'    <exclude body1="seg{a}" body2="seg{b}" />')
 
-    total_mass = sum(_mass(p) for p in phenotypes) * s ** 3
+    density = DENSITY * k
+    total_mass = sum(_mass(p) for p in phenotypes) * s ** 3 * k
+    armature = s ** _E_ARMATURE * k
+    damping = s ** _E_DAMPING * k
+    stiffness = s ** _E_STIFFNESS * k
     return f"""<mujoco model="{model_name}">
     <!-- GENERATED by rower_soccer/tools/unity2mujoco.py. Do not hand-edit.
-         gear_scale={gear_scale:g}  length_scale={s:g}  density={DENSITY:g}
-         total mass {total_mass:.2f} kg
+         gear_scale={gear_scale:g}  length_scale={s:g}  mass_scale={k:g}
+         density={density:g}  total mass {total_mass:.3f} kg
 
          Regenerate with python -m rower_soccer.tools.unity2mujoco and flags:
            input=(.creature file)  out=(this file)  name={model_name}
-           gear-scale={gear_scale:g}  length-scale={s:g}
+           gear-scale={gear_scale:g}  length-scale={s:g}  mass-scale={k:g}
 
          gear_scale is NOT reconstructible from the XML alone. An earlier worm
          was checked in at gear_scale=0.03 with that fact recorded nowhere, so
          regenerating at the tool default of 1.0 silently produced a creature
          33x stronger, which compiles and runs and looks plausible. Hence this
          header.
+
+         mass_scale multiplies density, gear, armature, damping and stiffness
+         together, which leaves the creature's own motion exactly invariant
+         (F = ma: force and mass scale alike) while changing its momentum ratio
+         against the fixed-mass ball. Do not scale one without the others.
 
          (Flags are written as name=value, without their leading dashes: a
          double hyphen cannot appear inside an XML comment. lxml, which
@@ -173,8 +211,8 @@ def emit_xml(phenotypes, model_name, gear_scale=1.0, joint_range=(-75, 75),
     <compiler angle="degree" />
     <default>
         <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="{16000 * torque_s:.6g}" />
-        <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="{DENSITY:g}" />
-        <joint limited="true" armature="{s ** _E_ARMATURE:.6g}" damping="{s ** _E_DAMPING:.6g}" stiffness="{s ** _E_STIFFNESS:.6g}" solreflimit=".04 1"
+        <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="{density:g}" />
+        <joint limited="true" armature="{armature:.6g}" damping="{damping:.6g}" stiffness="{stiffness:.6g}" solreflimit=".04 1"
             solimplimit="0 .8 .03" />
     </default>
     <asset>
@@ -215,22 +253,28 @@ def main():
     parser.add_argument("--name", default=None, help="model name (default: genotype name)")
     parser.add_argument("--gear-scale", type=float, default=1.0)
     parser.add_argument("--length-scale", type=float, default=1.0,
-                        help="Froude-similar rescale of the whole creature. "
-                             "0.1768 puts the 3-seg worm at DeepMind's soccer "
-                             "scale (1.76 m, 22 kg -- BoxHead's mass).")
+                        help="Froude-similar rescale of the whole creature "
+                             "(it actually shrinks). Changes the creature, so "
+                             "every drill constant must be recalibrated.")
+    parser.add_argument("--mass-scale", type=float, default=1.0,
+                        help="Scale mass and all force-like params (density, "
+                             "gear, armature, damping, stiffness) by k, leaving "
+                             "lengths alone. Locomotion is exactly invariant; "
+                             "only the momentum ratio against the fixed-mass "
+                             "ball changes. Prefer this over --length-scale.")
     args = parser.parse_args()
 
     genotype = load_creature(args.input)
     phenotypes = expand(genotype)
     xml = emit_xml(phenotypes, args.name or genotype["name"], args.gear_scale,
-                   length_scale=args.length_scale)
+                   length_scale=args.length_scale, mass_scale=args.mass_scale)
     with open(args.out, "w") as f:
         f.write(xml)
-    s = args.length_scale
-    mass = sum(_mass(p) for p in phenotypes) * s ** 3
+    s, k = args.length_scale, args.mass_scale
+    mass = sum(_mass(p) for p in phenotypes) * s ** 3 * k
     print(f"wrote {args.out}: {len(phenotypes)} bodies, "
           f"{sum(1 for p in phenotypes if p.joint_type)} joints, "
-          f"length_scale {s:g}, total mass {mass:,.1f} kg")
+          f"length_scale {s:g}, mass_scale {k:g}, total mass {mass:,.3f} kg")
 
 
 if __name__ == "__main__":

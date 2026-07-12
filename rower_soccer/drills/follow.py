@@ -123,6 +123,15 @@ class FollowTask(composer.Task):
         d = world_xy - pos
         return np.array([np.dot(d, fwd), np.dot(d, left)], dtype=np.float32)
 
+    def _vec_to_ego(self, physics, world_vec):
+        """Rotate a world-frame vector (velocity, not a position) into the root
+        frame: direction only, no translation."""
+        root = physics.bind(self._walker.root_body)
+        xmat = np.array(root.xmat).reshape(3, 3)
+        fwd, left = xmat[:2, 0], xmat[:2, 1]
+        return np.array([np.dot(world_vec, fwd), np.dot(world_vec, left)],
+                        dtype=np.float32)
+
     # --- composer API ------------------------------------------------------
     @property
     def root_entity(self):

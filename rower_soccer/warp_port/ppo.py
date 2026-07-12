@@ -183,6 +183,62 @@ def export_sb3_compatible(ac: ActorCritic, path):
     }, path)
 
 
+def _flatten_checkpoint(sd):
+    """Accept either a resume checkpoint ({'ac': ...}) or an
+    export_sb3_compatible export, and return one flat ActorCritic state_dict."""
+    if "ac" in sd:
+        return sd["ac"]
+    flat = {f"mlp_extractor.{k}": v for k, v in sd["mlp_extractor"].items()}
+    flat.update({f"action_net.{k}": v for k, v in sd["action_net"].items()})
+    flat.update({f"value_net.{k}": v for k, v in sd["value_net"].items()})
+    flat["log_std"] = sd["log_std"]
+    return flat
+
+
+def load_pretrained(ac: ActorCritic, path, device="cpu", verbose=True):
+    """Warm-start one drill's ActorCritic from another drill's checkpoint.
+
+    Copies every parameter whose shape matches and skips the rest, because the
+    two drills differ only in their task-observation width:
+
+      transfers : proprio_enc, expert, z_proj, decoder, action_net, log_std,
+                  value_net  -- crucially the DECODER, which is the motor skill
+                  (it sees proprio + z only, never task obs, so it is
+                  task-width-independent by construction)
+      re-init   : task_enc.0 (follow's task obs is 4 wide, dribble's is 8) and
+                  critic.0 (input is proprio+task, so it widens too)
+
+    The index buffers p_idx/t_idx are never copied: they describe THIS env's
+    observation layout, and overwriting them with the source env's would slice
+    the wrong columns out of every observation -- silently, since the shapes of
+    everything downstream would still line up.
+
+    Returns (n_loaded, n_skipped).
+    """
+    sd = _flatten_checkpoint(torch.load(path, map_location=device, weights_only=True))
+    own = ac.state_dict()
+    skip_buffers = {"mlp_extractor.p_idx", "mlp_extractor.t_idx"}
+    loaded, skipped = [], []
+    for k, v in own.items():
+        if k in skip_buffers or k not in sd:
+            skipped.append(k)
+            continue
+        if sd[k].shape != v.shape:
+            skipped.append(f"{k} {tuple(sd[k].shape)}->{tuple(v.shape)}")
+            continue
+        v.copy_(sd[k].to(v.device))
+        loaded.append(k)
+    ac.load_state_dict(own)
+    if verbose:
+        print(f"[warm-start] {path}", flush=True)
+        print(f"[warm-start] loaded {len(loaded)} tensors "
+              f"(incl. decoder + action_net = the low-level controller)", flush=True)
+        for s in skipped:
+            if not any(s.startswith(b) for b in skip_buffers):
+                print(f"[warm-start]   re-init: {s}", flush=True)
+    return len(loaded), len(skipped)
+
+
 def load_into_sb3_policy(policy, path):
     sd = torch.load(path, map_location=policy.device, weights_only=True)
     policy.mlp_extractor.load_state_dict(sd["mlp_extractor"])

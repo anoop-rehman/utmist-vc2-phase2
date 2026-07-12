@@ -22,16 +22,29 @@ from rower_soccer.drills.follow import FollowTask, _CONTROL_DT
 
 class DribbleTask(FollowTask):
     def __init__(self, w_player_to_ball=0.1, w_ball_to_target=0.3,
-                 target_speed_range=(0.1, 1.0), **kwargs):
+                 target_speed_range=(0.1, 1.0),
+                 ball_spawn_range=(5.0, 12.0), **kwargs):
         super().__init__(target_speed_range=target_speed_range, **kwargs)
         self._w_p2b = w_player_to_ball
         self._w_b2t = w_ball_to_target
+        # The 9.95 m worm's own footprint is several metres across, so the
+        # ball cannot spawn at the 1-3 m the drill originally used: it would
+        # start inside the creature.
+        self._ball_spawn_range = ball_spawn_range
         self._ball = SoccerBall()
         self._arena.add_free_entity(self._ball)
 
         def ball_ego(physics):
+            # Both position AND velocity egocentric. This used to report the
+            # ball's velocity in the WORLD frame (cvel[3:5]) alongside an
+            # egocentric position, which breaks the egocentric invariance the
+            # whole observation is built on -- the same ball, same relative
+            # motion, would look different depending on which way the creature
+            # happened to be facing. Safe to fix: dribble has never been trained.
+            # Must stay in step with warp_port/dribble_env.py.
             pos = self._to_ego(physics, physics.bind(self._ball.root_body).xpos[:2])
-            vel = physics.bind(self._ball.root_body).cvel[3:5]
+            vel = self._vec_to_ego(
+                physics, np.array(physics.bind(self._ball.root_body).cvel[3:5]))
             return np.concatenate([pos, vel]).astype(np.float32)
 
         self._task_observables["ball_ego"] = observable.Generic(ball_ego)
@@ -39,12 +52,13 @@ class DribbleTask(FollowTask):
 
     def initialize_episode(self, physics, random_state):
         super().initialize_episode(physics, random_state)
-        # ball starts near the walker
+        # ball starts outside the walker's own footprint
         root_xy = physics.bind(self._walker.root_body).xpos[:2]
         angle = random_state.uniform(0, 2 * np.pi)
-        dist = random_state.uniform(1.0, 3.0)
+        dist = random_state.uniform(*self._ball_spawn_range)
         ball_xy = root_xy + dist * np.array([np.cos(angle), np.sin(angle)])
-        self._ball.set_pose(physics, position=np.array([*ball_xy, 0.5]))
+        radius = float(physics.bind(self._ball.geom).size[0])
+        self._ball.set_pose(physics, position=np.array([*ball_xy, radius]))
         self._ball.set_velocity(physics, velocity=np.zeros(3),
                                 angular_velocity=np.zeros(3))
 

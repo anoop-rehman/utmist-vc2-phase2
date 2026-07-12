@@ -63,7 +63,12 @@ def main():
                    help="max log_std (default 0.0 => std<=1.0, matching the "
                         "[-1,1] action clamp); pass a large value to disable")
     p.add_argument("--z-dim", type=int, default=16)
+    # Catchable: the 9.95 m worm's achievable speed is 2.83 m/s (probe_speed.py).
     p.add_argument("--target-speed", type=float, nargs=2, default=[0.25, 2.0])
+    p.add_argument("--bounds", type=float, default=27.0,
+                   help="target roaming half-extent (m)")
+    p.add_argument("--spawn-dist", type=float, nargs=2, default=[2.0, 6.0],
+                   help="target spawn distance (m)")
     p.add_argument("--reward-coef", type=float, default=0.5)
     p.add_argument("--vel-shaping", type=float, default=0.0)
     p.add_argument("--reward-mode", default="paper",
@@ -139,7 +144,9 @@ def main():
                         episode_seconds=args.episode_secs,
                         w_vel_shaping=args.vel_shaping,
                         reward_mode=args.reward_mode,
-                        progress_scale=args.progress_scale)
+                        progress_scale=args.progress_scale,
+                        bounds=args.bounds,
+                        spawn_dist_range=tuple(args.spawn_dist))
     ac = ActorCritic(env.obs_dim, env.act_dim,
                      proprio_indices=env.proprio_indices.tolist(),
                      task_indices=env.task_indices.tolist(), z_dim=args.z_dim)

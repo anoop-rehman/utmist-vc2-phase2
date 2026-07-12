@@ -33,7 +33,21 @@ class WarpFollowEnv:
                  lookahead=1.0, reward_coef=0.5, bounds=27.0, device="cuda",
                  seed=0, use_graph=True, w_vel_shaping=0.0,
                  reward_mode="paper", progress_scale=2.0, settle_coef=0.5,
-                 arrival_radius=1.0, arrival_bonus=0.5):
+                 arrival_radius=1.0, arrival_bonus=0.5,
+                 spawn_dist_range=(2.0, 6.0)):
+        # Calibrated to the 9.95 m / 3982 kg Unity-evolved worm. probe_speed.py
+        # measures its achievable speed at 2.83 m/s (best open-loop
+        # travelling-wave gait: 0.75 Hz, full amplitude, 225deg phase), so the
+        # 2.0 m/s target cap is catchable with margin.
+        #
+        # Keep that check in mind if the creature is ever rescaled
+        # (tools/unity2mujoco.py --length-scale): a target faster than the
+        # creature can possibly move makes the drill unlearnable no matter how
+        # good the policy gets, and nothing in the training loop reports it --
+        # reward just stays low and it reads as "needs more steps". Recalibrate
+        # with probe_speed.py and keep drills/follow.py in step, since that is
+        # the CPU transfer/parity eval and a mismatch shows up as a phantom
+        # sim2sim gap.
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
@@ -50,6 +64,7 @@ class WarpFollowEnv:
         self.arrival_radius = arrival_radius
         self.arrival_bonus = arrival_bonus
         self.bounds = bounds
+        self.spawn_dist_range = spawn_dist_range
         self.prev_dist = torch.zeros(num_worlds, device=device)
         self.gen = torch.Generator(device=device).manual_seed(seed)
 
@@ -117,9 +132,10 @@ class WarpFollowEnv:
         self.qpos[:, qr + 2] = m.spawn_z
         self.qpos[:, qr + 3] = torch.cos(yaw / 2)
         self.qpos[:, qr + 6] = torch.sin(yaw / 2)  # yaw about z
-        # target init: 2-6m away, random direction & speed
+        # target init: 1-3 body lengths away, random direction & speed
         ang = torch.rand(self.n, generator=self.gen, device=self.device) * (2 * np.pi)
-        dist = 2.0 + 4.0 * torch.rand(self.n, generator=self.gen, device=self.device)
+        d0, d1 = self.spawn_dist_range
+        dist = d0 + (d1 - d0) * torch.rand(self.n, generator=self.gen, device=self.device)
         self.target_xy = torch.stack([dist * torch.cos(ang), dist * torch.sin(ang)], -1)
         vang = torch.rand(self.n, generator=self.gen, device=self.device) * (2 * np.pi)
         spd = self.speed_range[0] + (self.speed_range[1] - self.speed_range[0]) * \

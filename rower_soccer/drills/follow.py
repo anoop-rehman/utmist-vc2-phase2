@@ -53,11 +53,16 @@ class FollowTask(composer.Task):
                  creature_kind="worm",
                  episode_seconds=15.0,
                  arena_size=(30.0, 30.0),
+                 bounds=27.0,
                  target_speed_range=(0.25, 2.0),
+                 spawn_dist_range=(2.0, 6.0),
                  direction_change_prob=0.0,   # per control step; 0 = constant velocity (v1)
                  lookahead_seconds=(1.0,),
                  reward_coef=0.5,
                  target_height=1.0):
+        # These MUST track WarpFollowEnv's defaults: this task is the CPU
+        # transfer/parity eval for the Warp-trained policy, so a mismatch in
+        # target speed or spawn distance would show up as a phantom sim2sim gap.
         self._arena = floors.Floor(size=arena_size)
         self._walker = make_creature(creature_kind, "home")
         self._arena.add_free_entity(self._walker)
@@ -70,7 +75,11 @@ class FollowTask(composer.Task):
         self._lookahead = lookahead_seconds
         self._reward_coef = reward_coef
         self._target_height = target_height
-        self._bounds = np.array(arena_size) * 0.9
+        self._spawn_dist_range = spawn_dist_range
+        # Explicit, not arena_size * 0.9: the floor is just ground to stand on
+        # and can stay large, while the target's roaming box has to match the
+        # Warp env's `bounds`.
+        self._bounds = np.array([bounds, bounds], dtype=np.float64)
         self._target_xy = np.zeros(2)
         self._target_vel = np.zeros(2)
 
@@ -131,7 +140,7 @@ class FollowTask(composer.Task):
         self._target_vel = speed * np.array([np.cos(angle), np.sin(angle)])
         # target starts within a few meters of the walker
         start_angle = random_state.uniform(0, 2 * np.pi)
-        start_dist = random_state.uniform(2.0, 6.0)
+        start_dist = random_state.uniform(*self._spawn_dist_range)
         # np.array(...) casts are load-bearing: physics.bind views are
         # SynchronizingArrayWrapper, and numpy propagates the subclass through
         # arithmetic — item-assignment on a stale wrapper crashes workers.

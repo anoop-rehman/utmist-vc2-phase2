@@ -78,13 +78,21 @@ def main():
                    help="dribbling is harder than following, so the target is "
                         "slower than follow's [0.25, 2.0]")
     p.add_argument("--bounds", type=float, default=27.0)
-    p.add_argument("--spawn-dist", type=float, nargs=2, default=[2.0, 6.0])
-    p.add_argument("--ball-spawn", type=float, nargs=2, default=[5.0, 12.0],
-                   help="ball spawn distance (m); must clear the 9.95 m worm's "
-                        "own footprint")
+    p.add_argument("--ball-spawn", type=float, nargs=2, default=[5.0, 8.0],
+                   help="ball spawn distance from the worm (m); must clear its "
+                        "4.65 m footprint radius")
+    p.add_argument("--target-dist", type=float, nargs=2, default=[2.0, 6.0],
+                   help="target spawn distance from the BALL (m), not from the "
+                        "worm: anchoring it to the worm leaves ball and target "
+                        "~13 m apart, where exp(-c*d) is flat zero and the drill "
+                        "has no gradient at all")
     p.add_argument("--reward-coef", type=float, default=0.5)
     p.add_argument("--reward-mode", default="paper", choices=["paper", "progress"])
     p.add_argument("--progress-scale", type=float, default=2.0)
+    p.add_argument("--approach-scale", type=float, default=0.5,
+                   help="progress mode: weight on the player->ball potential. "
+                        "Without it nothing rewards walking to the ball and the "
+                        "ball->target term stays identically zero forever")
     p.add_argument("--w-player-to-ball", type=float, default=0.1)
     p.add_argument("--w-ball-to-target", type=float, default=0.3)
     p.add_argument("--episode-secs", type=float, default=15.0)
@@ -139,10 +147,11 @@ def main():
                          episode_seconds=args.episode_secs,
                          reward_mode=args.reward_mode,
                          progress_scale=args.progress_scale,
+                         approach_scale=args.approach_scale,
                          w_player_to_ball=args.w_player_to_ball,
                          w_ball_to_target=args.w_ball_to_target,
                          bounds=args.bounds,
-                         spawn_dist_range=tuple(args.spawn_dist),
+                         target_dist_range=tuple(args.target_dist),
                          ball_spawn_range=tuple(args.ball_spawn))
     ac = ActorCritic(env.obs_dim, env.act_dim,
                      proprio_indices=env.proprio_indices.tolist(),
@@ -199,7 +208,8 @@ def main():
                                  f"eval_step_{trainer.total_steps:010d}.mp4")
             ep_rew, fit = cpu_eval_video(
                 ac, vpath, target_speed_range=tuple(args.target_speed),
-                ball_spawn_range=tuple(args.ball_spawn))
+                ball_spawn_range=tuple(args.ball_spawn),
+                target_dist_range=tuple(args.target_dist))
             print(f"[monitor] video: {vpath} (dm_control transfer eval "
                   f"ep_rew={ep_rew:.1f} fitness={fit:.3f})", flush=True)
             if use_wandb:

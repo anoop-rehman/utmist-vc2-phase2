@@ -43,9 +43,9 @@ class WarpDribbleEnv:
                  episode_seconds=15.0, target_speed_range=(0.1, 1.0),
                  lookahead=1.0, reward_coef=0.5, bounds=27.0, device="cuda",
                  seed=0, use_graph=True,
-                 spawn_dist_range=(2.0, 6.0), ball_spawn_range=(5.0, 12.0),
+                 target_dist_range=(2.0, 6.0), ball_spawn_range=(5.0, 8.0),
                  w_player_to_ball=0.1, w_ball_to_target=0.3,
-                 reward_mode="paper", progress_scale=2.0,
+                 reward_mode="paper", progress_scale=2.0, approach_scale=0.5,
                  ball: BallSpec = None, nconmax=64, njmax=512):
         self.n = num_worlds
         self.device = device
@@ -54,22 +54,35 @@ class WarpDribbleEnv:
         self.lookahead = lookahead
         self.reward_coef = reward_coef
         self.bounds = bounds
-        self.spawn_dist_range = spawn_dist_range
-        # The ball spawns outside the creature's own footprint. The CPU drill
-        # uses 1-3 m, which is *inside* this 9.95 m worm -- it would spawn the
-        # ball interpenetrating the body.
+        # The target spawns relative to the BALL, not the creature. This matters
+        # more than it looks. dm_control's drill spawns both relative to the
+        # walker (ball 1-3 m, target 2-6 m), which for a 1.5 m humanoid leaves
+        # them ~4 m apart. Do the same around a 9.95 m worm -- whose own
+        # footprint is 4.65 m, so the ball has to start >=5 m out -- and ball and
+        # target land ~13 m apart. exp(-0.5*13) = 0.0015: the fitness is flat
+        # zero out there, the drill has no gradient at all, and no amount of
+        # training fixes it. Anchoring the target to the ball keeps
+        # ||ball-target|| in 2-6 m, i.e. the same spread dm_control actually gets.
+        self.target_dist_range = target_dist_range
+        # ...and the ball spawns just outside the creature's 4.65 m footprint,
+        # so it is reachable but not interpenetrating the body at t=0.
         self.ball_spawn_range = ball_spawn_range
         self.w_p2b = w_player_to_ball
         self.w_b2t = w_ball_to_target
         # "paper": Table S3 -- exp(-c*||ball-target||) plus the two velocity
         # shaping terms. Those terms are velocity-based and therefore hackable
-        # in the same way follow's `velshape` mode was. "progress" is the
-        # potential-based alternative: reward closing the ball->target gap, which
-        # telescopes to total distance reduced, so oscillating nets zero.
+        # in the same way follow's `velshape` mode was.
+        # "progress": potential-based, and it needs BOTH potentials. Rewarding
+        # only the ball->target gap is a dead drill: until the creature touches
+        # the ball that term is identically zero, so nothing ever rewards walking
+        # over to the ball in the first place. The player->ball potential is what
+        # gets it there. Both telescope, so neither can be farmed by oscillating.
         self.reward_mode = reward_mode
         self.progress_scale = progress_scale
+        self.approach_scale = approach_scale
         self.gen = torch.Generator(device=device).manual_seed(seed)
         self.prev_bt = torch.zeros(num_worlds, device=device)
+        self.prev_pb = torch.zeros(num_worlds, device=device)
 
         self.model, self.meta = build_creature_ball_scene(
             creature_xml, ball=ball or BallSpec())
@@ -143,20 +156,24 @@ class WarpDribbleEnv:
         self.qpos[:, qr + 3] = torch.cos(yaw / 2)
         self.qpos[:, qr + 6] = torch.sin(yaw / 2)
 
-        # ball: random direction, outside the body footprint
+        # ball: random direction, just outside the body footprint
         bang = self._rand(n) * (2 * np.pi)
         b0, b1 = self.ball_spawn_range
         bdist = b0 + (b1 - b0) * self._rand(n)
-        self.qpos[:, self.bq + 0] = bdist * torch.cos(bang)
-        self.qpos[:, self.bq + 1] = bdist * torch.sin(bang)
+        ball_xy = torch.stack([bdist * torch.cos(bang), bdist * torch.sin(bang)], -1)
+        self.qpos[:, self.bq + 0] = ball_xy[:, 0]
+        self.qpos[:, self.bq + 1] = ball_xy[:, 1]
         self.qpos[:, self.bq + 2] = self.ball_radius
         self.qpos[:, self.bq + 3] = 1.0  # unit quat
 
-        # target: same kinematics as the follow drill
+        # target: anchored to the BALL, so ||ball - target|| stays in a range
+        # where exp(-c*d) still has a usable gradient (see __init__).
         ang = self._rand(n) * (2 * np.pi)
-        d0, d1 = self.spawn_dist_range
+        d0, d1 = self.target_dist_range
         dist = d0 + (d1 - d0) * self._rand(n)
-        self.target_xy = torch.stack([dist * torch.cos(ang), dist * torch.sin(ang)], -1)
+        self.target_xy = ball_xy + torch.stack(
+            [dist * torch.cos(ang), dist * torch.sin(ang)], -1)
+        self.target_xy = self.target_xy.clamp(-self.bounds, self.bounds)
         vang = self._rand(n) * (2 * np.pi)
         s0, s1 = self.speed_range
         spd = s0 + (s1 - s0) * self._rand(n)
@@ -164,7 +181,9 @@ class WarpDribbleEnv:
 
         self.t = 0
         self._forward()
+        pos, _ = self._root_frames()
         self.prev_bt = torch.linalg.norm(self._ball_xy() - self.target_xy, dim=-1)
+        self.prev_pb = torch.linalg.norm(self._ball_xy() - pos[:, :2], dim=-1)
         return self._obs()
 
     def _forward(self):
@@ -216,17 +235,26 @@ class WarpDribbleEnv:
 
         d_bt = self.target_xy - ball_xy
         dist_bt = torch.linalg.norm(d_bt, dim=-1)
+        d_pb = ball_xy - root_xy
+        dist_pb = torch.linalg.norm(d_pb, dim=-1)
 
         if self.reward_mode == "progress":
+            # Two potentials, both telescoping (Ng et al. 1999), so oscillating
+            # nets zero on each. The player->ball term is not optional: without
+            # it nothing rewards walking to the ball, and until the creature
+            # reaches the ball the ball->target term is identically zero -- the
+            # drill would have no gradient anywhere and could never start.
+            approach = self.prev_pb - dist_pb
             progress = self.prev_bt - dist_bt
+            self.prev_pb = dist_pb.detach()
             self.prev_bt = dist_bt.detach()
-            return (self.progress_scale * progress
+            return (self.approach_scale * approach
+                    + self.progress_scale * progress
                     + torch.exp(-self.reward_coef * dist_bt))
 
         # paper (Table S3): fitness + two velocity shaping terms
         fitness = torch.exp(-self.reward_coef * dist_bt)
-        d_pb = ball_xy - root_xy
-        n_pb = torch.linalg.norm(d_pb, dim=-1).clamp(min=1e-6)
+        n_pb = dist_pb.clamp(min=1e-6)
         v_p2b = (root_vel * (d_pb / n_pb.unsqueeze(-1))).sum(-1)
         n_bt = dist_bt.clamp(min=1e-6)
         v_b2t = (ball_vel * (d_bt / n_bt.unsqueeze(-1))).sum(-1)

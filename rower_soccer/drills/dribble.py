@@ -23,14 +23,22 @@ from rower_soccer.drills.follow import FollowTask, _CONTROL_DT
 class DribbleTask(FollowTask):
     def __init__(self, w_player_to_ball=0.1, w_ball_to_target=0.3,
                  target_speed_range=(0.1, 1.0),
-                 ball_spawn_range=(5.0, 12.0), **kwargs):
+                 ball_spawn_range=(5.0, 8.0),
+                 target_dist_range=(2.0, 6.0), **kwargs):
         super().__init__(target_speed_range=target_speed_range, **kwargs)
         self._w_p2b = w_player_to_ball
         self._w_b2t = w_ball_to_target
-        # The 9.95 m worm's own footprint is several metres across, so the
-        # ball cannot spawn at the 1-3 m the drill originally used: it would
-        # start inside the creature.
+        # The 9.95 m worm's footprint is 4.65 m in radius, so the ball cannot
+        # spawn at the 1-3 m the drill originally used -- it would start inside
+        # the creature.
         self._ball_spawn_range = ball_spawn_range
+        # ...but pushing the ball out to 5-8 m while the target still spawns
+        # 2-6 m from the WORM leaves ball and target ~13 m apart, where
+        # exp(-0.5*13) = 0.0015 and the fitness is flat zero. So the target is
+        # anchored to the BALL instead, which reproduces the ~2-6 m ball-target
+        # spread dm_control's own drill gets around a 1.5 m humanoid.
+        # Must stay in step with warp_port/dribble_env.py.
+        self._target_dist_range = target_dist_range
         self._ball = SoccerBall()
         self._arena.add_free_entity(self._ball)
 
@@ -61,6 +69,16 @@ class DribbleTask(FollowTask):
         self._ball.set_pose(physics, position=np.array([*ball_xy, radius]))
         self._ball.set_velocity(physics, velocity=np.zeros(3),
                                 angular_velocity=np.zeros(3))
+        # Re-anchor the target to the ball. super() placed it relative to the
+        # WALKER (FollowTask's behaviour), which here would leave it ~13 m from
+        # the ball, in the flat-zero tail of exp(-c*d) where the drill has no
+        # gradient at all.
+        t_angle = random_state.uniform(0, 2 * np.pi)
+        t_dist = random_state.uniform(*self._target_dist_range)
+        self._target_xy = np.clip(
+            ball_xy + t_dist * np.array([np.cos(t_angle), np.sin(t_angle)]),
+            -self._bounds, self._bounds).astype(np.float64)
+        self._target.set_pose_xy(physics, self._target_xy, self._target_height)
 
     def _ball_xy(self, physics):
         return physics.bind(self._ball.root_body).xpos[:2].copy()

@@ -179,3 +179,9 @@ cython_debug/
 !/tensorboard_logs/20250421__am_07_08_34_0/
 !/tensorboard_logs/20250421__pm_03_58_24_0/
 !/tensorboard_logs/PPO_2/
+
+# Training artifacts. These are large (runs_v2 is ~470 MB and grows during a
+# run: checkpoints, wandb state, eval videos) and are already backed up to
+# gs://vc2-2026-checkpoints/<run_name>/ by the trainers' --gcs-bucket sync.
+runs_v2/
+videos/

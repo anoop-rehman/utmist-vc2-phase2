@@ -63,6 +63,11 @@ def main():
                    help="max log_std (default 0.0 => std<=1.0, matching the "
                         "[-1,1] action clamp); pass a large value to disable")
     p.add_argument("--z-dim", type=int, default=16)
+    p.add_argument("--init-from", default=None,
+                   help="checkpoint to warm-start weights from (checkpoint.pt or "
+                        "latest.pt), e.g. a follow policy trained on the same "
+                        "body at a different mass scale. Weights only, fresh "
+                        "optimizer. Ignored when --resume finds a checkpoint.")
     # Catchable: the 9.95 m worm's achievable speed is 2.83 m/s (probe_speed.py).
     p.add_argument("--target-speed", type=float, nargs=2, default=[0.25, 2.0])
     p.add_argument("--bounds", type=float, default=27.0,
@@ -136,7 +141,8 @@ def main():
     from rower_soccer.warp_port.follow_env import WarpFollowEnv
     from rower_soccer.warp_port.ppo import (ActorCritic, PPOTrainer,
                                             export_sb3_compatible,
-                                            load_checkpoint, save_checkpoint)
+                                            load_checkpoint, load_pretrained,
+                                            save_checkpoint)
 
     env = WarpFollowEnv(num_worlds=args.worlds,
                         target_speed_range=tuple(args.target_speed),
@@ -162,6 +168,10 @@ def main():
     if args.resume and os.path.exists(ckpt_path):
         start_steps = load_checkpoint(trainer, ckpt_path)
         print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
+    elif args.init_from:
+        # Fresh run only: on a real --resume the checkpoint already holds these
+        # weights, further trained, and re-seeding would throw that away.
+        load_pretrained(ac, args.init_from, device=trainer.device)
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)

@@ -68,9 +68,11 @@ def main():
                         "latest.pt), e.g. a follow policy trained on the same "
                         "body at a different mass scale. Weights only, fresh "
                         "optimizer. Ignored when --resume finds a checkpoint.")
-    # 80% of the LOW end of the 1.76 m worm's achievable speed (probe_speed.py
-    # measures 1.04-1.64 m/s; the spread is chaotic toppling, so trust the min).
-    p.add_argument("--target-speed", type=float, nargs=2, default=[0.10, 0.85])
+    # Froude-scale of C's [0.1, 0.8] (sqrt(0.1768) = 0.4205), NOT of the old
+    # [0.25, 2.0] default -- that is the abandoned FAST target earlier runs failed
+    # on, and C's "slowtgt" name is precisely that finding. Keeps target speed at
+    # ~0.3x the worm's achievable speed, matching C's ratio.
+    p.add_argument("--target-speed", type=float, nargs=2, default=[0.04, 0.34])
     p.add_argument("--bounds", type=float, default=10.0,
                    help="target roaming half-extent (m)")
     p.add_argument("--spawn-dist", type=float, nargs=2, default=[1.76, 5.28],

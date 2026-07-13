@@ -74,9 +74,9 @@ def main():
                    help="follow checkpoint to warm-start from (checkpoint.pt or "
                         "latest.pt). Task encoder + critic input layer re-init; "
                         "the decoder (the low-level controller) carries over.")
-    p.add_argument("--target-speed", type=float, nargs=2, default=[0.10, 0.60],
+    p.add_argument("--target-speed", type=float, nargs=2, default=[0.04, 0.25],
                    help="dribbling is harder than following, so the target is "
-                        "slower than follow's [0.10, 0.85] cap")
+                        "slower still than follow's [0.04, 0.34] cap")
     p.add_argument("--bounds", type=float, default=10.0)
     p.add_argument("--ball-spawn", type=float, nargs=2, default=[1.5, 3.0],
                    help="ball spawn distance from the worm (m); dm_control's own "

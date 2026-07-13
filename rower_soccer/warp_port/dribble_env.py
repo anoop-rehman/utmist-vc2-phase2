@@ -40,7 +40,7 @@ SUBSTEPS = 10
 
 class WarpDribbleEnv:
     def __init__(self, num_worlds=2048, creature_xml="creature_configs/three_seg_worm.xml",
-                 episode_seconds=15.0, target_speed_range=(0.10, 0.60),
+                 episode_seconds=15.0, target_speed_range=(0.04, 0.25),
                  lookahead=1.0, reward_coef=0.5, bounds=10.0, device="cuda",
                  seed=0, use_graph=True,
                  target_dist_range=(2.0, 5.0), ball_spawn_range=(1.5, 3.0),

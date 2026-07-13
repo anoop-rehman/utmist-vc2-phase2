@@ -29,7 +29,7 @@ SUBSTEPS = 10  # physics dt 0.0025
 
 class WarpFollowEnv:
     def __init__(self, num_worlds=2048, creature_xml="creature_configs/three_seg_worm.xml",
-                 episode_seconds=15.0, target_speed_range=(0.10, 0.85),
+                 episode_seconds=15.0, target_speed_range=(0.04, 0.34),
                  lookahead=1.0, reward_coef=0.5, bounds=10.0, device="cuda",
                  seed=0, use_graph=True, w_vel_shaping=0.0,
                  reward_mode="paper", progress_scale=2.0, settle_coef=0.5,
@@ -39,14 +39,21 @@ class WarpFollowEnv:
         # 0.1768 --gear-scale 0.03), which is the body that can actually control
         # DeepMind's ball -- see docs/STAGE2_MULTITASK.md 0.5.
         #
-        # target_speed_range: probe_speed.py measures achievable speed at
-        # 1.04-1.64 m/s. That spread is real, not sampling error: the worm spawns
-        # as an unstable vertical stack and topples chaotically, so take the LOW
-        # end. The cap is 80% of the minimum (0.8 * 1.04), so the target stays
-        # catchable even on a bad roll. A target the creature cannot physically
-        # catch makes the drill unlearnable no matter how good the policy gets,
-        # and nothing in the training loop reports it -- reward just stays low and
-        # reads as "needs more steps".
+        # target_speed_range: Froude-scale C's [0.1, 0.8], NOT the code default
+        # [0.25, 2.0]. C ("warp_C_velshape_slowtgt") is the run that actually
+        # learned to follow (transfer eval 445-495/600); the [0.25, 2.0] default
+        # is the abandoned FAST target that earlier runs failed on -- the
+        # "slowtgt" in C's name IS that finding. sqrt(0.1768) = 0.4205, so
+        # [0.1, 0.8] -> [0.042, 0.336].
+        #
+        # What matters is the ratio of target speed to the creature's achievable
+        # speed (probe_speed.py: 1.04-1.64 m/s, low end, chaotic toppling):
+        #     C           0.8 / 2.83  = 0.28   comfortable margin, learned well
+        #     corrected   0.34 / 1.04 = 0.32   matches C
+        # A first attempt scaled the [0.25, 2.0] default instead, giving a cap of
+        # 0.85 -- 82% of the worm's top speed. It has to catch AND hold the target
+        # while turning and correcting, so that leaves no margin at all: the run
+        # plateaued at 182/600 against 88/600 for doing nothing.
         #
         # drills/follow.py MUST stay in step: it is the CPU transfer/parity eval,
         # so a mismatch shows up as a phantom sim2sim gap.

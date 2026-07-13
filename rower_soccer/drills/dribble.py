@@ -22,7 +22,7 @@ from rower_soccer.drills.follow import FollowTask, _CONTROL_DT
 
 class DribbleTask(FollowTask):
     def __init__(self, w_player_to_ball=0.1, w_ball_to_target=0.3,
-                 target_speed_range=(0.10, 0.60),
+                 target_speed_range=(0.04, 0.25),
                  ball_spawn_range=(1.5, 3.0),
                  target_dist_range=(2.0, 5.0), **kwargs):
         super().__init__(target_speed_range=target_speed_range, **kwargs)

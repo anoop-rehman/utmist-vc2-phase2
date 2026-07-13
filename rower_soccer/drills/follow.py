@@ -169,12 +169,17 @@ class FollowTask(composer.Task):
             angle = random_state.uniform(0, 2 * np.pi)
             self._target_vel = np.linalg.norm(self._target_vel) * np.array(
                 [np.cos(angle), np.sin(angle)])
-        self._target_xy = self._target_xy + self._target_vel * dt
-        # bounce at bounds
-        for i in range(2):
-            if abs(self._target_xy[i]) > self._bounds[i]:
-                self._target_xy[i] = np.sign(self._target_xy[i]) * self._bounds[i]
-                self._target_vel[i] *= -1
+        # np.asarray (subok=False) strips any array SUBCLASS that leaked in from a
+        # physics.bind() view -- those are SynchronizingArrayWrappers, numpy
+        # propagates the subclass through arithmetic, and writing into one routes
+        # back into dm_control's physics binding and raises. The bounce below is
+        # written without item-assignment for the same reason, and it now matches
+        # WarpFollowEnv.step()'s where/clamp form exactly rather than paraphrasing
+        # it in a loop.
+        pos = np.asarray(self._target_xy, dtype=np.float64) + self._target_vel * dt
+        over = np.abs(pos) > self._bounds
+        self._target_vel = np.where(over, -self._target_vel, self._target_vel)
+        self._target_xy = np.clip(pos, -self._bounds, self._bounds)
         self._target.set_pose_xy(physics, self._target_xy, self._target_height)
 
     def get_reward(self, physics):

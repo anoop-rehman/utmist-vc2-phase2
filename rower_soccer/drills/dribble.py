@@ -57,8 +57,21 @@ class DribbleTask(FollowTask):
 
     def initialize_episode(self, physics, random_state):
         super().initialize_episode(physics, random_state)
-        # ball starts outside the walker's own footprint
-        root_xy = physics.bind(self._walker.root_body).xpos[:2]
+        # ball starts outside the walker's own footprint.
+        #
+        # The np.array(...) cast is load-bearing, for the same reason FollowTask
+        # casts: physics.bind() returns a SynchronizingArrayWrapper, and numpy
+        # PROPAGATES that subclass through arithmetic. Without the cast, ball_xy
+        # and then self._target_xy stay wrappers, and FollowTask.after_step's
+        # bounce (`self._target_xy[i] = ...`) does item-assignment on one --
+        # which routes into dm_control's physics binding and raises
+        # AttributeError: 'SynchronizingArrayWrapper' object has no attribute
+        # '_physics'.
+        #
+        # It only fires once the target first reaches the bounds, so a short
+        # smoke test never sees it: both dribble runs trained happily for
+        # 8-22M steps and then died on their first CPU eval video.
+        root_xy = np.array(physics.bind(self._walker.root_body).xpos[:2])
         angle = random_state.uniform(0, 2 * np.pi)
         dist = random_state.uniform(*self._ball_spawn_range)
         ball_xy = root_xy + dist * np.array([np.cos(angle), np.sin(angle)])
@@ -67,14 +80,14 @@ class DribbleTask(FollowTask):
         self._ball.set_velocity(physics, velocity=np.zeros(3),
                                 angular_velocity=np.zeros(3))
         # Re-anchor the target to the ball. super() placed it relative to the
-        # WALKER (FollowTask's behaviour), which here would leave it ~13 m from
-        # the ball, in the flat-zero tail of exp(-c*d) where the drill has no
-        # gradient at all.
+        # WALKER (FollowTask's behaviour), which would leave it far enough from
+        # the ball to sit in the flat-zero tail of exp(-c*d), where the drill has
+        # no gradient at all.
         t_angle = random_state.uniform(0, 2 * np.pi)
         t_dist = random_state.uniform(*self._target_dist_range)
-        self._target_xy = np.clip(
+        self._target_xy = np.array(np.clip(
             ball_xy + t_dist * np.array([np.cos(t_angle), np.sin(t_angle)]),
-            -self._bounds, self._bounds).astype(np.float64)
+            -self._bounds, self._bounds), dtype=np.float64)
         self._target.set_pose_xy(physics, self._target_xy, self._target_height)
 
     def _ball_xy(self, physics):

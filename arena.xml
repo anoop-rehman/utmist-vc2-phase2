@@ -1,7 +1,26 @@
 <mujoco model="base">
   <compiler coordinate='local' angle='degree' eulerseq='xyz' boundmass='1e-5' boundinertia='1e-11'/>
 
-  <option cone='elliptic' noslip_iterations='5' noslip_tolerance='0' timestep='0.0025'/>
+  <!-- noslip_iterations MUST stay 0. mujoco_warp does not implement the noslip
+       solver, and all training happens in Warp. This file used to say 5, so every
+       dm_control eval graded Warp-trained policies under friction they had never
+       seen. The worm propels itself entirely by pushing against the ground, which
+       makes this the worst possible flag to have mismatched.
+
+       Measured on follow_v2/final.pt over 12 fixed episodes, changing ONLY this
+       value moved individual episodes by up to 330 points out of 600 (one
+       "catastrophic failure" scoring 37.8 was actually 367.7 in the physics the
+       policy trains in) and the mean by 44. It was inflating our failure rate and
+       hiding real progress.
+
+       The cost is accepted knowingly. Without the noslip pass, MuJoCo's soft
+       constraint formulation lets contacts creep slightly under friction. We are
+       not targeting real world transfer, so slightly soft contacts are fine.
+       Being lied to by our own eval is not.
+
+       (No doubled dashes in this comment: XML forbids them, and lxml, which
+       dm_control's mjcf parser uses, rejects the whole file for it.) -->
+  <option cone='elliptic' noslip_iterations='0' noslip_tolerance='0' timestep='0.0025'/>
 
   <visual>
     <global offwidth='1920' offheight='1080'/>

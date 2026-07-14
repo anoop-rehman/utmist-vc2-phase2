@@ -211,10 +211,14 @@ def main():
         eta_min = (args.steps - trainer.total_steps) / fps / 60
         if it % 5 == 0:
             fit = float(env.fitness().mean())
+            # diverged: world-steps whose physics went non-finite (see ppo.collect).
+            # Expected to be 0 or a trickle. If it climbs, the contact model is wrong
+            # and the run is training on garbage -- do not ignore it.
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
-                  f"fitness={fit:.3f} std={stats['std']:.3f}", flush=True)
+                  f"fitness={fit:.3f} std={stats['std']:.3f} "
+                  f"diverged={trainer.n_diverged:,}", flush=True)
             if use_wandb:
                 import wandb
                 wandb.log({"env_step": trainer.total_steps,

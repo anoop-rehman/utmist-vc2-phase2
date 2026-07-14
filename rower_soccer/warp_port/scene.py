@@ -27,9 +27,12 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-# Contact time constant used for the Warp backend only; see build_creature_scene.
+# Contact time constants used for the Warp backend only; see build_creature_scene.
 # CPU (arena.xml) stays at MuJoCo's 0.02. These differ ON PURPOSE.
-WARP_SOLREF_TIMECONST = 0.005
+WARP_SOLREF_TIMECONST = 0.005        # creature, ground, walls, goals  (2x dt)
+# The ball needs its own, softer value: it is 45 g, and 2x dt is MuJoCo's stability
+# floor, where a very light body diverges. 4x dt. See build_creature_scene.
+WARP_BALL_SOLREF_TIMECONST = 0.010
 
 # dm_soccer's 2v2 pitch, transcribed from the compiled dm_control model so the
 # Warp scene and the CPU drill (rower_soccer/drills/follow.py -> Pitch) are the
@@ -192,22 +195,32 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None):
     # This deliberately makes Warp's solref DIFFER from the CPU drill's 0.02; the
     # two backends need different nominal values to produce the same physics.
     #
-    # THE BALL IS EXCLUDED, and must stay excluded.
+    # THE BALL GETS ITS OWN VALUE. Both extremes were tried and both killed a run:
     #
-    # Applying this to the ball too is what killed dribble_paper_v5: it diverged to
-    # NaN after ~2.5M steps (NaN action means -> ValueError out of Normal()). A 45 g
-    # ball at a contact time constant of 2*dt is right on the stability floor, and a
-    # very light body against heavy geoms is exactly where that floor bites.
+    #   ball solref   margin    worst penetration   outcome
+    #   0.005         2x dt       -5.1 cm           dribble_paper_v5: NaN at 17.7M
+    #   0.02          8x dt      -20.6 cm           dribble_paper_v6: NaN at 106M
+    #   0.010         4x dt       -9.9 cm           <- this
     #
-    # It is also unnecessary, which is the real point. Penetration is set by contact
-    # FORCE over stiffness, and a 0.045 kg ball generates almost none -- it barely
-    # sinks even at the default 0.02. The thing that sinks is the 22 kg creature
-    # pushing itself along the ground. So the correction belongs on the body and the
-    # ground, not on the ball, and the ball keeps dm_control's SoccerBall spec
-    # verbatim (solref 0.02, condim 6, priority 1) as it should.
-    ball_geom = model.geom("ball_geom").id if ball is not None else -1
-    stiffen = [g for g in range(model.ngeom) if g != ball_geom]
-    model.geom_solref[stiffen, 0] = WARP_SOLREF_TIMECONST
+    # Why the ball needs a correction at all: it carries priority=1, so ITS solref
+    # governs every contact it is in -- including contact with the 22 kg creature,
+    # where the forces are large. (An earlier version of this comment argued the ball
+    # is too light to need stiffening. That is wrong: the contact force is set by what
+    # is pressing on the ball, not by the ball's own weight.) At 0.02 in Warp the ball
+    # is driven 20 cm into whatever it touches -- 57% of its own radius -- and then
+    # explosively ejected. That energy injection is the divergence.
+    #
+    # Why it cannot simply take the creature's 0.005: that is 2*timestep, MuJoCo's
+    # documented stability floor, and a 45 g body sitting exactly on the floor is
+    # where it bites. Reproduced: 0.005 NaNs within a few episodes under the trained
+    # policy. 0.010 keeps a 4x margin and still halves the penetration.
+    #
+    # This does not fully eliminate the energy injection (the ball still departs at
+    # 20-30 m/s off a 0.9 m/s worm), so PPOTrainer ALSO guards against non-finite
+    # states rather than trusting this to be airtight. Both are needed.
+    model.geom_solref[:, 0] = WARP_SOLREF_TIMECONST
+    if ball is not None:
+        model.geom_solref[model.geom("ball_geom").id, 0] = WARP_BALL_SOLREF_TIMECONST
 
     root_name = f"{prefix}seg0"
     root_body = model.body(root_name).id

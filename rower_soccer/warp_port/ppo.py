@@ -72,12 +72,39 @@ class PPOTrainer:
         self.done_buf = torch.zeros(self.T, self.N, device=d)
         self._obs = env.reset()
         self.total_steps = 0
+        # world-steps whose physics went non-finite; see collect(). Should stay at 0
+        # or very near it -- a climbing count means the contact model is wrong.
+        self.n_diverged = 0
 
     def collect(self):
         ep_returns = []
         for t in range(self.T):
             a, logp, v = self.ac.act(self._obs)
             obs2, rew, done = self.env.step(a.clamp(-1, 1))
+
+            # A single diverged world out of 2048 must not kill an 800M-step run.
+            #
+            # mujoco_warp occasionally blows a contact up: the ball (45 g, priority=1,
+            # so its solref governs contact with a 22 kg creature segment) gets driven
+            # deep into a geom and explosively ejected -- it leaves at 20-30 m/s off a
+            # 0.9 m/s worm, which is the solver injecting energy. Rarely, that state
+            # goes non-finite. It then propagates: obs -> network -> NaN action mean ->
+            # ValueError out of Normal(), and the process dies. This killed
+            # dribble_paper_v5 (17.7M steps) and dribble_paper_v6 (106M).
+            #
+            # scene.py's ball solref is tuned to make this rare; this makes it
+            # survivable. Zero the offending worlds' observations and rewards so they
+            # contribute nothing to the update, and count them. A steadily climbing
+            # count means the physics is wrong, not merely unlucky -- so it is logged,
+            # not silently swallowed.
+            bad = ~torch.isfinite(obs2).all(dim=-1)
+            if bad.any():
+                self.n_diverged += int(bad.sum())
+                obs2 = torch.where(bad.unsqueeze(-1), torch.zeros_like(obs2), obs2)
+                obs2 = torch.nan_to_num(obs2, nan=0.0, posinf=0.0, neginf=0.0)
+                rew = torch.where(bad, torch.zeros_like(rew), rew)
+                v = torch.where(bad, torch.zeros_like(v), v)
+
             self.obs_buf[t] = self._obs
             self.act_buf[t] = a
             self.logp_buf[t] = logp

@@ -6,9 +6,14 @@ inference path (obs plumbing → `model.predict` with the custom `LatentActorCri
 display and a one-time click→world calibration remain unexercised. No trained rower follow/dribble
 checkpoints exist in-repo yet, so a real model-driven run is still pending those weights.
 
-Report covering the new `rower_soccer/play_interactive.py` — an inference-only mode where one rower
-stands in the drill arena on an effectively infinite episode and a human drives it like a game
-character, switching trained skill policies on the fly.
+Report covering `rower_soccer/play_interactive.py` — an inference-only mode where one creature stands
+on an effectively infinite episode and a human drives it like a game character, switching trained skill
+policies on the fly. It runs on **two scenes**, selected with `--env`:
+
+- **`--env drill`** (default): the flat-floor drill scene (`InteractivePlayTask`).
+- **`--env soccer`**: the real soccer pitch (`RandomizedPitch`, 40×30), driven by the same
+  drill-trained **follow** model through the `soccer_bridge` observation adapter. See
+  [`SOCCER_BRIDGE.md`](SOCCER_BRIDGE.md) for the drill↔soccer obs mapping.
 
 ---
 
@@ -16,14 +21,14 @@ character, switching trained skill policies on the fly.
 
 | Input | Effect |
 |---|---|
-| **Q** then left-click | Arm FOLLOW; the click sets a destination and the **follow** policy drives the rower there |
-| **W** then left-click | Arm DRIBBLE; the click sets a destination and the **dribble** policy dribbles the ball there |
+| **Q** then left-click | Arm FOLLOW; the click sets a destination and the **follow** policy drives the creature there |
+| **W** then left-click | Arm DRIBBLE; the click dribbles the ball there — **drill env only** (inert on soccer, and while `ENABLE_DRIBBLE=False`) |
 | left-click (already active) | Retarget the current skill to the new point |
 | **ESC** | Quit |
-| *(no command yet)* | Rower sits still (zero action) |
+| *(no command yet)* | Creature sits still (zero action) |
 
 The program **never stops on its own**. After a command completes, the active policy keeps running and
-the rower simply holds at the target until the next command — exactly as requested.
+the creature simply holds at the target until the next command — exactly as requested.
 
 ---
 
@@ -31,10 +36,13 @@ the rower simply holds at the target until the next command — exactly as reque
 
 | File | Change |
 |---|---|
-| `rower_soccer/play_interactive.py` | **New.** The entire feature (task subclass, env factory, obs builder, camera/unprojection helpers, pygame control loop). |
+| `rower_soccer/play_interactive.py` | The whole feature: task subclass, env factory, obs/camera/unprojection helpers, `.pt` loader, the `DrillScene`/`SoccerScene` adapters, and the pygame control loop. |
+| `rower_soccer/soccer_bridge.py` | **Reused** by `SoccerScene` (`reference_follow_layout`, `soccer_to_drill_follow_dict`, `drill_follow_obs`) to reconstruct the drill FOLLOW vector from soccer obs. |
 
-No existing modules were modified. `play_interactive` reuses the drill/creature/model machinery
-read-only. It is a self-contained, multi-model, infinite-episode, human-driven inference mode.
+No existing modules were modified. `play_interactive` reuses the drill/creature/soccer/model machinery
+read-only. It is a self-contained, multi-scene, human-driven inference mode. The pygame event/render
+loop is env-agnostic: each scene adapter hides the env-specific plumbing (obs keying, action wrapping,
+target marker, camera), so the same loop drives both the drill floor and the soccer pitch.
 
 Environment note (not a code change): the drill envs require `mujoco==3.1.3` (a newer `mujoco 3.10.0`
 is incompatible with `dm-control 1.0.16` — fails on `flex_xvert0`). The project `.venv` is already on
@@ -109,6 +117,12 @@ to the standalone follow env (which has no ball) — so trained weights transfer
                     └──────────────────────────────────────────────┘
 ```
 
+The diagram shows the **drill** scene. `--env soccer` swaps the bottom box for `SoccerScene`
+(`make_soccer_env` + `soccer_bridge` obs adapter + a `topdown` camera/marker added to the pitch); the
+`main()` loop above is unchanged because both scenes share one adapter interface. `obs_vec` is built by
+`scene.obs_vector(obs, active)` (drill: `build_obs`; soccer: `soccer_bridge.drill_follow_obs`), and
+`step`/`render`/`set_target` are scene methods.
+
 ### Components in `play_interactive.py`
 
 | Symbol | Role |
@@ -118,7 +132,13 @@ to the standalone follow env (which has no ball) — so trained weights transfer
 | `build_obs(obs_dict, keys)` | Flatten selected observables in sorted-key order — the same contract as `drills/gym_wrap.py:44-46` (`DrillGymEnv._flatten`), restricted to the active skill's key list. |
 | `resolve_topdown_camera(physics)` | Finds the camera id whose name ends in `topdown` (handles model-prefixing). |
 | `pixel_to_world(px, py, W, H, view_half)` | Affine unprojection for the straight-down camera: center→origin, corners→±`view_half`. |
-| `main()` | Loads both checkpoints once, computes the two key layouts off the live scene, runs the pygame loop. Heavy imports (`stable_baselines3`, `pygame`) are lazy so the module's env/task logic is importable without them. |
+| `DrillScene` | Scene adapter over `InteractivePlayTask`: `obs = ts.observation`, `step(action)`, `set_command_target`, `build_obs`. FOLLOW (+ DRIBBLE when `ENABLE_DRIBBLE`). |
+| `SoccerScene` | Scene adapter over `make_soccer_env(home_team=(creature,), n_away=0)`. Adds a `topdown` camera + `play_target` marker geom to `task.arena.mjcf_model.worldbody` before reset; `obs = ts.observation[0]`; `step([action])`; `set_target` moves the marker via `physics.bind(marker).pos` and builds the obs vector with `soccer_bridge.drill_follow_obs`. FOLLOW only. |
+| `main()` | Picks the scene from `--env`, loads one policy per enabled skill via the scene's `policy_layout`, runs the env-agnostic pygame loop. Heavy imports (`stable_baselines3`, `pygame`) are lazy. |
+
+The two scenes share one interface (`init_obs`, `cam_id`, `act_dim`, `zero_action`, `control_hz`,
+`view_half`, `skills`; `obs_vector`, `policy_layout`, `set_target`, `step`, `render`), so the loop in
+`main()` never branches on the env.
 
 ---
 
@@ -158,6 +178,26 @@ MUJOCO_GL=egl .venv/bin/python -m rower_soccer.play_interactive
 Only the **Q** (follow) command is live; **W** is inert until `ENABLE_DRIBBLE` is flipped back on and
 a dribble checkpoint is passed via `--dribble-model`.
 
+**Play on the soccer pitch** — same worm follow model, driven through `soccer_bridge`:
+
+```bash
+MUJOCO_GL=egl .venv/bin/python -m rower_soccer.play_interactive --env soccer
+# worm on RandomizedPitch (40×30); Q + click steers it; W is inert (dribble N/A on soccer)
+```
+
+Soccer notes: the top-down camera defaults to a wider frame (`--cam-height 32 --view-half 22`) to fit
+the pitch; the ball, walls, and goalposts are physically present but ignored. **Shadows/MSAA are
+disabled by default** — the `RandomizedPitch` ships 4 lights each rendering an 8192×8192 shadowmap
+every frame (~100 ms/frame, a fixed cost independent of window size that capped the UI near ~9 FPS);
+turning them off is purely cosmetic and drops the frame to ~11 ms (smooth 40 Hz). Pass `--shadows` to
+restore them (e.g. for recording). The soccer physics
+timestep is **matched to the drill's 0.0025 by default** — soccer's native Task uses 0.005 (5
+substeps), but the follow policy trained at 0.0025 (10 substeps), so we set the pitch to 0.0025 to feed
+the creature the same integration it was optimized on (control rate is 40 Hz either way). Pass
+`--no-match-physics-dt` to keep soccer's native 0.005. The follow policy is egocentric, so it homes
+onto reachable clicks; targets tens of metres away (or across a wall) are out-of-distribution and may
+not converge.
+
 Once trained **rower** weights exist, run e.g.:
 
 ```bash
@@ -188,6 +228,17 @@ Verified in-tree against the real dm_control + SB3 stack:
   in-range 2-dim actions fed from `build_obs`. A rower-scene load of the same file is correctly
   rejected with a dimension-mismatch error.
 - ✅ pygame surface path: `physics.render` frame → `surfarray.make_surface` → blit (headless SDL).
+
+Soccer scene (`--env soccer`, worm), verified in-tree:
+
+- ✅ `SoccerScene` builds; the added `topdown` camera resolves (id 1) and renders; FOLLOW layout is
+  **41** (proprio 0..36 / task 37..40), act 2 — matching the checkpoint.
+- ✅ `set_target` moves the `play_target` marker geom (`physics.bind(marker).pos` → `[8,4,0.5]`).
+- ✅ End-to-end through the scene path: `runs_v2/follow_drill_model.pt` loaded via `load_latent_policy`,
+  and for a reachable click the worm homes in (e.g. **4.47m → 0.92m** over 500 steps). Far spawns
+  (~27m, across the pitch) stay out-of-distribution and don't converge — as documented.
+- ✅ Drill regression: `--env drill` still builds, resolves `topdown`, and yields FOLLOW **41** /
+  (with `ENABLE_DRIBBLE`) DRIBBLE **45** — unchanged.
 
 Still unexercised (needs a physical display, and trained rower weights for the rower path):
 

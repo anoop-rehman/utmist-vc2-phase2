@@ -74,9 +74,13 @@ def main():
                    help="follow checkpoint to warm-start from (checkpoint.pt or "
                         "latest.pt). Task encoder + critic input layer re-init; "
                         "the decoder (the low-level controller) carries over.")
-    p.add_argument("--target-speed", type=float, nargs=2, default=[0.04, 0.25],
+    # Rescaled off probe_speed's 0.759 m/s (post contact-stiffening), keeping dribble's
+    # target slower than follow's 0.21 cap because dribbling is harder: the worm must
+    # shepherd a ball, not just chase a point. 0.15 / 0.759 = 0.20 margin, vs follow's
+    # 0.28 and C's 0.28. See train_follow_warp's --target-speed for the full reasoning.
+    p.add_argument("--target-speed", type=float, nargs=2, default=[0.03, 0.15],
                    help="dribbling is harder than following, so the target is "
-                        "slower still than follow's [0.04, 0.34] cap")
+                        "slower still than follow's [0.03, 0.21] cap")
     p.add_argument("--bounds", type=float, default=10.0)
     p.add_argument("--ball-spawn", type=float, nargs=2, default=[1.5, 3.0],
                    help="ball spawn distance from the worm (m); dm_control's own "
@@ -93,7 +97,22 @@ def main():
                    help="progress mode: weight on the player->ball potential. "
                         "Without it nothing rewards walking to the ball and the "
                         "ball->target term stays identically zero forever")
-    p.add_argument("--w-player-to-ball", type=float, default=0.1)
+    # w_player_to_ball is dribble's locomotion signal -- the exact analogue of follow's
+    # --vel-shaping, and it was mis-scaled the same way. The `paper` reward is
+    #     fitness + w_p2b * v(player->ball) + w_b2t * v(ball->target)
+    # and a worm that never moves collects fitness = exp(-c*d_bt) ~ 0.19 EVERY step for
+    # free: 600 * 0.19 = 114. dribble_paper_v4 scored 116-137. It sat exactly on the
+    # do-nothing value for 800M steps, because at w=0.1 and 0.759 m/s the most it could
+    # earn for walking to the ball was 0.076/step -- less than the free fitness.
+    #
+    # Scaled to C's proven shaping magnitude (~0.14/step at full speed), as follow, off
+    # the MEDIAN achievable speed (~0.90 m/s; probe_speed is nondeterministic, spread
+    # 0.76-1.50 -- never calibrate off one sample):
+    #   0.15 * 0.900 m/s = 0.135
+    p.add_argument("--w-player-to-ball", type=float, default=0.15)
+    # NOT rescaled: this multiplies the BALL's velocity, which is not limited by the
+    # creature's speed (a struck ball reaches ~7 m/s). Only creature-velocity terms
+    # need the achievable-speed correction.
     p.add_argument("--w-ball-to-target", type=float, default=0.3)
     p.add_argument("--episode-secs", type=float, default=15.0)
     p.add_argument("--run-name", required=True)
@@ -210,10 +229,15 @@ def main():
             last_video = now
             vpath = os.path.join(run_dir, "videos",
                                  f"eval_step_{trainer.total_steps:010d}.mp4")
+            # The shaping weights must be passed too: the CPU task defaults to its own
+            # w_p2b/w_b2t, so without these the transfer eval would report ep_rew under
+            # a DIFFERENT reward than the one being trained on.
             ep_rew, fit = cpu_eval_video(
                 ac, vpath, target_speed_range=tuple(args.target_speed),
                 ball_spawn_range=tuple(args.ball_spawn),
-                target_dist_range=tuple(args.target_dist))
+                target_dist_range=tuple(args.target_dist),
+                w_player_to_ball=args.w_player_to_ball,
+                w_ball_to_target=args.w_ball_to_target)
             print(f"[monitor] video: {vpath} (dm_control transfer eval "
                   f"ep_rew={ep_rew:.1f} fitness={fit:.3f})", flush=True)
             if use_wandb:

@@ -72,13 +72,46 @@ def main():
     # [0.25, 2.0] default -- that is the abandoned FAST target earlier runs failed
     # on, and C's "slowtgt" name is precisely that finding. Keeps target speed at
     # ~0.3x the worm's achievable speed, matching C's ratio.
-    p.add_argument("--target-speed", type=float, nargs=2, default=[0.04, 0.34])
+    # Calibrated against the ONE follow run that ever worked (warp_C_velshape_slowtgt:
+    # 445-495 reward, follows to within 0.5-1.3 m). What matters is not the absolute
+    # speed but target_max / achievable_speed -- the margin the worm has to catch AND
+    # hold the target while turning and correcting:
+    #
+    #   C            0.80 / 2.830 = 0.28   <- worked
+    #   follow_s176  0.85 / 1.040 = 0.82   <- failed, plateaued at 182/600
+    #   follow_v4    0.34 / 0.759 = 0.45   <- stuck in the do-nothing optimum
+    #
+    # probe_speed is NONDETERMINISTIC run to run -- the worm spawns as an unstable
+    # vertical stack and topples chaotically, which amplifies float nondeterminism, so
+    # even a fixed seed varies. Measured spread: 0.76 / 0.87 / 0.87 / 0.88 / 1.06 /
+    # 1.32 / 1.50 m/s. Never calibrate off one sample.
+    #
+    # Target speed uses the MINIMUM (0.76), deliberately: a target the worm cannot
+    # physically catch makes the drill unlearnable, with nothing in the training loop
+    # to say so, while a slightly-too-slow target is merely easy. 0.283 * 0.76 = 0.215.
+    #
+    # Do NOT take probe_speed's old "80% of achievable" suggestion. That is exactly the
+    # number that produced follow_s176.
+    p.add_argument("--target-speed", type=float, nargs=2, default=[0.03, 0.21])
     p.add_argument("--bounds", type=float, default=10.0,
                    help="target roaming half-extent (m)")
     p.add_argument("--spawn-dist", type=float, nargs=2, default=[1.76, 5.28],
                    help="target spawn distance (m): 1-3 body lengths")
     p.add_argument("--reward-coef", type=float, default=0.5)
-    p.add_argument("--vel-shaping", type=float, default=0.0)
+    # NOT 0.0. The bare `paper` reward is exp(-c*dist), which pays a worm for standing
+    # still and gives it almost no gradient to discover locomotion -- follow_v4 sat in
+    # that do-nothing optimum for 800M steps (ep_rew 134 vs ~130 for doing nothing).
+    # Every follow run that ever learned had a dense per-step locomotion signal:
+    # C used paper + vel_shaping, follow_v2 used reward_mode=progress. A run with
+    # NEITHER cannot learn, and that is what follow_v4 was.
+    #
+    # Scaled to preserve C's shaping magnitude, since our worm is slower. This one uses
+    # the MEDIAN achievable speed (~0.90 m/s), not the minimum: it sets how strong the
+    # shaping is in typical motion, and calibrating it off the pessimistic tail would
+    # over-shape by ~2x at the top of the speed range.
+    #   C:    0.05 * 2.830 m/s = 0.1415 reward/step at full speed
+    #   ours: 0.15 * 0.900 m/s = 0.1350  ->  w = 0.15
+    p.add_argument("--vel-shaping", type=float, default=0.15)
     p.add_argument("--reward-mode", default="paper",
                    choices=["paper", "velshape", "progress"])
     p.add_argument("--progress-scale", type=float, default=2.0)

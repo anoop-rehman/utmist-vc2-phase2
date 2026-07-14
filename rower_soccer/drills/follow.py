@@ -64,7 +64,7 @@ class FollowTask(composer.Task):
                  episode_seconds=15.0,
                  arena_size=PITCH_SIZE,
                  bounds=10.0,
-                 target_speed_range=(0.04, 0.34),
+                 target_speed_range=(0.03, 0.21),
                  spawn_dist_range=(1.76, 5.28),
                  direction_change_prob=0.0,   # per control step; 0 = constant velocity (v1)
                  lookahead_seconds=(1.0,),

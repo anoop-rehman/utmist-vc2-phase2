@@ -128,8 +128,21 @@ def main():
           f"(max {float(rnd.max()):.3f})")
 
     print("\n[calibration] suggested follow-drill params")
-    print(f"  target_speed_range : (0.10, {0.8 * v_max:.2f})  "
-          f"# up to 80% of achievable, so the target is catchable")
+    # 0.28, NOT 0.8. This margin is the single most load-bearing constant in the
+    # follow drill, and it is calibrated against the runs, not against intuition:
+    #
+    #   C            0.80 / 2.830 = 0.28   worked (445-495, follows to 0.5-1.3 m)
+    #   follow_v4    0.34 / 0.759 = 0.45   stuck in the do-nothing optimum
+    #   follow_s176  0.85 / 1.040 = 0.82   failed, plateaued at 182/600
+    #
+    # "80% of achievable" sounds reasonable and is what this script used to print --
+    # it is what produced follow_s176. The worm does not merely have to REACH the
+    # target's speed, it has to catch it AND hold station on it while turning and
+    # correcting, on a body that topples. That needs a large margin, not a small one.
+    print(f"  target_speed_range : ({0.035 * v_max:.2f}, {0.283 * v_max:.2f})  "
+          f"# C's proven margin: max = 28% of achievable ({v_max:.3f} m/s)")
+    print(f"  vel_shaping        : {0.1415 / max(v_max, 1e-6):.3f}  "
+          f"# preserves C's 0.1415 reward/step shaping bonus at full speed")
     print(f"  spawn distance     : ({1.0 * c_height:.2f}, {3.0 * c_height:.2f})  "
           f"# 1-3 body lengths")
     print(f"  reward_coef        : 0.5   # the paper's value; the worm is now at "

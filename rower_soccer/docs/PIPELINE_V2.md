@@ -11,6 +11,22 @@ Humanoid Football" (Science Robotics; papers in project_management/).
 > change" (line 91: only `follow` exists as a Warp env, and it has no ball —
 > dribble/kick/shoot need a real physics ball), and it reconciles the §1-3
 > CONTRACTS interface, whose input is now `z`, not `Command`.
+>
+> **Before touching any observation, read `STAGE2_MULTITASK.md` §0.0 (the
+> observation contract).** Short version: **proprio** is the shared decoder's
+> entire input and is therefore a *hard contract* — it may contain only things
+> that exist in the 2v2 game and are invariant to pitch position/heading
+> (`world_zaxis` + `body_height`, never absolute root pos/mat). **Task obs** are
+> free to differ per expert, *but anything that survives distillation into a drill
+> prior (stage 3) must be a function of game obs, in the game's own form* — the
+> prior is evaluated on game observations to compute the KL. Do **not** "solve"
+> this by zero-padding the drills to the game's 119-dim obs: a weight on an
+> always-zero input gets gradient `δ·x = 0`, never leaves its random init, and
+> then fires noise the moment that input goes live at game time.
+>
+> **And treat Warp as a different simulator that must be calibrated against
+> MuJoCo, not as a fast MuJoCo** (§0.1): it resolves contacts ~6.7× softer on
+> byte-identical parameters, which the policy will happily farm as free traction.
 
 ## The architecture (one diagram to rule them all)
 

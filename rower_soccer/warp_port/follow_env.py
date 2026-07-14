@@ -4,10 +4,19 @@ Observation layout replicates rower_soccer.drills.gym_wrap.DrillGymEnv
 exactly (sorted-key order), so weights transfer between CPU and GPU
 training and the dm_control env doubles as the transfer/parity eval:
 
-  creature/absolute_root_mat (9), absolute_root_pos (3), bodies_pos (9),
-  joints_pos (2), joints_vel (2), sensors_accelerometer (3),
-  sensors_gyro (3), sensors_velocimeter (3), touch_sensors (3),
-  target_ego (2), target_ego_future (2)                       -> 41 dims
+  creature/bodies_pos (9), body_height (1), joints_pos (2), joints_vel (2),
+  sensors_accelerometer (3), sensors_gyro (3), sensors_velocimeter (3),
+  touch_sensors (3), world_zaxis (3)                          -> 0:29 [proprio]
+  target_ego (2), target_ego_future (2)                       -> 29:33 [task]
+                                                                 = 33 dims
+
+NOTE the ordering is dm_control's sorted-key order, and "bodies_pos" sorts
+BEFORE "body_height" ('i' < 'y'). Do not reorder to taste.
+
+Proprio carries world_zaxis + body_height, NOT absolute root pos/mat: it is the
+shared decoder's whole input contract, so it must hold only what exists in the
+2v2 game and is invariant to pitch position/heading. See creature.py's
+proprioception property for the full reasoning; the two must stay in lockstep.
 
 Target kinematics/reward are computed in torch (targets are not physics
 entities). Episodes are world-synchronized (global reset every
@@ -106,11 +115,11 @@ class WarpFollowEnv:
         self.target_vel = torch.zeros(self.n, 2, device=device)
         self.t = 0
 
-        self.obs_dim = 41
+        self.obs_dim = 33
         self.act_dim = m.nu
         # obs slices for the policy (matches DrillGymEnv layout)
-        self.proprio_indices = np.arange(0, 37)
-        self.task_indices = np.arange(37, 41)
+        self.proprio_indices = np.arange(0, 29)
+        self.task_indices = np.arange(29, 33)
 
         self._graph = None
         if use_graph:
@@ -228,13 +237,17 @@ class WarpFollowEnv:
         future = (self.target_xy + self.target_vel * self.lookahead).clamp(-self.bounds, self.bounds)
         tgt_fut = self._to_ego(future)
 
+        # world z-axis in the body frame == MuJoCo xmat[6:9] (third row), which is
+        # exactly what dm_control's WalkerObservables.world_zaxis returns.
+        world_zaxis = rot.reshape(n, 9)[:, 6:9]
+
         return torch.cat([
-            rot.reshape(n, 9),                 # creature/absolute_root_mat
-            pos,                               # creature/absolute_root_pos
-            bodies_ego,                        # creature/bodies_pos
-            self.qpos[:, self.jq],             # creature/joints_pos
-            self.qvel[:, self.jv],             # creature/joints_vel
-            sa, sg, sv,                        # accelerometer, gyro, velocimeter
-            touch,                             # touch_sensors
-            tgt_now, tgt_fut,                  # target_ego, target_ego_future
+            bodies_ego,                        # creature/bodies_pos       (9)
+            pos[:, 2:3],                       # creature/body_height      (1)
+            self.qpos[:, self.jq],             # creature/joints_pos       (2)
+            self.qvel[:, self.jv],             # creature/joints_vel       (2)
+            sa, sg, sv,                        # accel, gyro, velocimeter  (9)
+            touch,                             # creature/touch_sensors    (3)
+            world_zaxis,                       # creature/world_zaxis      (3)
+            tgt_now, tgt_fut,                  # target_ego, _future       (4)
         ], -1)

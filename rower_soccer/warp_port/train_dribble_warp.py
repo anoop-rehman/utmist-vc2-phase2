@@ -98,6 +98,8 @@ def main():
     p.add_argument("--episode-secs", type=float, default=15.0)
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)
+    # First transfer-eval video fires early so a broken run is visible in minutes.
+    p.add_argument("--first-video-secs", type=float, default=60.0)
     p.add_argument("--ckpt-secs", type=float, default=1800.0)
     p.add_argument("--mid-ckpt-frac", type=float, default=0.5)
     p.add_argument("--resume", action="store_true")
@@ -178,7 +180,9 @@ def main():
           f"proprio={len(env.proprio_indices)} task={len(env.task_indices)} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
     t0 = time.perf_counter()
-    last_video = last_ckpt = t0
+    last_ckpt = t0
+    # Back-date the video timer so the first one lands at --first-video-secs.
+    last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
     it = 0
     while trainer.total_steps < args.steps:
         stats = trainer.train_iter()

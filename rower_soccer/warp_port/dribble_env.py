@@ -13,12 +13,12 @@ sorts before "creature/*", so the ball block lands at the FRONT -- dribble's obs
 is not follow's obs with four numbers appended:
 
   ball_ego (4)                                            -> 0:4    [task]
-  creature/absolute_root_mat (9), absolute_root_pos (3),
-  bodies_pos (9), joints_pos (2), joints_vel (2),
-  sensors_accelerometer (3), sensors_gyro (3),
-  sensors_velocimeter (3), touch_sensors (3)              -> 4:41   [proprio]
-  target_ego (2), target_ego_future (2)                   -> 41:45  [task]
-                                                             = 45 dims
+  creature/bodies_pos (9), body_height (1), joints_pos (2),
+  joints_vel (2), sensors_accelerometer (3), sensors_gyro (3),
+  sensors_velocimeter (3), touch_sensors (3),
+  world_zaxis (3)                                         -> 4:33   [proprio]
+  target_ego (2), target_ego_future (2)                   -> 33:37  [task]
+                                                             = 37 dims
 
 The proprio block is byte-identical to follow's, and stays contiguous, so the
 decoder (proprio + z) transfers from a follow checkpoint unchanged. The task
@@ -119,11 +119,11 @@ class WarpDribbleEnv:
         self.target_vel = torch.zeros(self.n, 2, device=device)
         self.t = 0
 
-        self.obs_dim = 45
+        self.obs_dim = 37
         self.act_dim = m.nu
         # Sorted-key order: ball_ego first, then creature/*, then target_*.
-        self.proprio_indices = np.arange(4, 41)
-        self.task_indices = np.concatenate([np.arange(0, 4), np.arange(41, 45)])
+        self.proprio_indices = np.arange(4, 33)
+        self.task_indices = np.concatenate([np.arange(0, 4), np.arange(33, 37)])
 
         self._graph = None
         if use_graph:
@@ -282,14 +282,17 @@ class WarpDribbleEnv:
             -self.bounds, self.bounds)
         tgt_fut = self._to_ego(future)
 
+        # world z-axis in the body frame == MuJoCo xmat[6:9]; see follow_env.
+        world_zaxis = rot.reshape(n, 9)[:, 6:9]
+
         return torch.cat([
-            ball_ego,                          # ball_ego            (sorts first)
-            rot.reshape(n, 9),                 # creature/absolute_root_mat
-            pos,                               # creature/absolute_root_pos
-            bodies_ego,                        # creature/bodies_pos
-            self.qpos[:, self.jq],             # creature/joints_pos
-            self.qvel[:, self.jv],             # creature/joints_vel
-            sa, sg, sv,                        # accelerometer, gyro, velocimeter
-            touch,                             # touch_sensors
-            tgt_now, tgt_fut,                  # target_ego, target_ego_future
+            ball_ego,                          # ball_ego  (sorts first)   (4)
+            bodies_ego,                        # creature/bodies_pos       (9)
+            pos[:, 2:3],                       # creature/body_height      (1)
+            self.qpos[:, self.jq],             # creature/joints_pos       (2)
+            self.qvel[:, self.jv],             # creature/joints_vel       (2)
+            sa, sg, sv,                        # accel, gyro, velocimeter  (9)
+            touch,                             # creature/touch_sensors    (3)
+            world_zaxis,                       # creature/world_zaxis      (3)
+            tgt_now, tgt_fut,                  # target_ego, _future       (4)
         ], -1)

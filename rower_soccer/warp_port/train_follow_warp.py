@@ -85,6 +85,10 @@ def main():
     p.add_argument("--episode-secs", type=float, default=15.0)
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)
+    # Fire the FIRST transfer-eval video early, so a broken run (bad obs layout,
+    # bad reward, creature glitching) is visible in minutes instead of after the
+    # first full --video-secs interval. Subsequent videos keep the normal cadence.
+    p.add_argument("--first-video-secs", type=float, default=60.0)
     p.add_argument("--ckpt-secs", type=float, default=1800.0,
                    help="wallclock seconds between full checkpoints (overwrite)")
     p.add_argument("--mid-ckpt-frac", type=float, default=0.5,
@@ -179,7 +183,8 @@ def main():
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
     t0 = time.perf_counter()
-    last_video = t0
+    # Back-date the video timer so the first one lands at --first-video-secs.
+    last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
     last_ckpt = t0
     it = 0
     while trainer.total_steps < args.steps:

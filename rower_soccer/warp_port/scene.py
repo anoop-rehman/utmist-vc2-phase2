@@ -27,6 +27,10 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
+# Contact time constant used for the Warp backend only; see build_creature_scene.
+# CPU (arena.xml) stays at MuJoCo's 0.02. These differ ON PURPOSE.
+WARP_SOLREF_TIMECONST = 0.005
+
 _BASE_XML = """
 <mujoco model="warp_drill">
   <option cone="elliptic" timestep="0.0025"/>
@@ -119,6 +123,29 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None):
         g.rgba = list(ball.rgba)
 
     model = spec.compile()
+
+    # ---- Warp-only contact stiffening. DO NOT "fix" this back to 0.02. -------
+    # mujoco_warp resolves contacts far softer than MuJoCo CPU on byte-identical
+    # parameters -- same solref/solimp/condim/friction, same timestep, same 10
+    # substeps, same Newton solver, same 100 iterations. Measured with follow_v2:
+    #
+    #   mean floor penetration    Warp -2.28 cm     CPU -0.34 cm    (6.7x softer)
+    #
+    # It is NOT under-convergence: raising iterations 100 -> 500 and ls_iterations
+    # 50 -> 200 moves penetration by <5%. At convergence, penetration is set by
+    # constraint COMPLIANCE, not iteration count -- so solref is the only lever.
+    #
+    # This matters because the worm propels itself entirely by pushing against the
+    # ground. Sinking 2 cm into the floor is free traction, and the policy learns
+    # to farm it: stiffening contacts to CPU's level costs follow_v2 175 reward
+    # (413 -> 238). That soft-contact exploit is the bulk of the residual sim2sim
+    # gap -- noslip (fixed in 53971b6) was a much smaller contributor.
+    #
+    # 0.005 is 2*timestep, MuJoCo's documented stability floor. Verified stable:
+    # 600 steps x 256 worlds of random torque, zero NaNs, max|qvel| unchanged.
+    # This deliberately makes Warp's solref DIFFER from the CPU drill's 0.02; the
+    # two backends need different nominal values to produce the same physics.
+    model.geom_solref[:, 0] = WARP_SOLREF_TIMECONST
 
     root_name = f"{prefix}seg0"
     root_body = model.body(root_name).id

@@ -43,7 +43,7 @@ class WarpFollowEnv:
                  seed=0, use_graph=True, w_vel_shaping=0.0,
                  reward_mode="paper", progress_scale=2.0, settle_coef=0.5,
                  arrival_radius=1.0, arrival_bonus=0.5,
-                 spawn_dist_range=(1.76, 5.28)):
+                 spawn_dist_range=(1.76, 5.28), nconmax=64, njmax=512):
         # Calibrated to the 1.76 m / 22 kg worm (unity2mujoco --length-scale
         # 0.1768 --gear-scale 0.03), which is the body that can actually control
         # DeepMind's ball -- see docs/STAGE2_MULTITASK.md 0.5.
@@ -90,7 +90,15 @@ class WarpFollowEnv:
         data = mujoco.MjData(self.model)
         mujoco.mj_forward(self.model, data)
         self.wm = mjw.put_model(self.model)
-        self.wd = mjw.put_data(self.model, data, nworld=num_worlds)
+        # Size the contact/constraint buffers EXPLICITLY. put_data otherwise infers
+        # them from the initial MjData, where the creature is still in the air and
+        # nothing is touching -- so the buffers come out sized for a scene with no
+        # contacts, and any overflow at runtime silently DROPS constraints (the
+        # creature sinks or falls through). dribble_env has always done this;
+        # follow_env never did. Measured with the trained policy: 145 contacts and
+        # 19 efc rows at peak, so these are ~4x headroom.
+        self.wd = mjw.put_data(self.model, data, nworld=num_worlds,
+                               nconmax=nconmax, njmax=njmax)
 
         # torch views (zero-copy)
         self.qpos = wp.to_torch(self.wd.qpos)

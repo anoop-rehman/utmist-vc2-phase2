@@ -31,12 +31,58 @@ import numpy as np
 # CPU (arena.xml) stays at MuJoCo's 0.02. These differ ON PURPOSE.
 WARP_SOLREF_TIMECONST = 0.005
 
-_BASE_XML = """
+# dm_soccer's 2v2 pitch, transcribed from the compiled dm_control model so the
+# Warp scene and the CPU drill (rower_soccer/drills/follow.py -> Pitch) are the
+# same world. Ground 96 x 72 m, four bounding walls, two goals (10 capsules each;
+# posts at y = +/-11.88, crossbar at z = 5.33).
+#
+# At the drills' +/-10 m bounds the worm reaches NONE of this: it is here so the
+# scenes do not silently diverge, and so `shoot` has a real goal to aim at.
+# Measured cost of the extra 24 geoms under mujoco_warp's n-by-n broadphase:
+# 268k -> 252k env-steps/s at 2048 worlds, i.e. ~6%. Worth it.
+#
+# Ground friction is the pitch's (1, 0.005, 1e-4), not the old floor's
+# (1, 0.5, 0.5). This changes nothing: MuJoCo mixes contact friction as the
+# element-wise MAX against the creature's (1, 0.5, 0.5), so the creature-ground
+# contact is identical either way, and the ball wins its own contact outright via
+# priority=1.
+_PITCH_XML = """
+    <geom name="ground" type="plane" size="48 36 0.48" friction="1 0.005 0.0001"/>
+    <geom name="wall_nx" type="plane" pos="-48 0 0" zaxis="1 0 0"  size="0 0 .48"/>
+    <geom name="wall_px" type="plane" pos="48 0 0"  zaxis="-1 0 0" size="0 0 .48"/>
+    <geom name="wall_ny" type="plane" pos="0 -36 0" zaxis="0 1 0"  size="0 0 .48"/>
+    <geom name="wall_py" type="plane" pos="0 36 0"  zaxis="0 -1 0" size="0 0 .48"/>
+    <geom name="home_goal_right_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
+    <geom name="home_goal_left_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
+    <geom name="home_goal_top_post" type="capsule" size="0.4057 11.8800" pos="-42.6667 0.0000 5.3333" quat="0.70711 0.70711 0.00000 -0.00000"/>
+    <geom name="home_goal_right_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 -11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000"/>
+    <geom name="home_goal_left_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000"/>
+    <geom name="home_goal_back_base" type="capsule" size="0.4016 11.8800" pos="-48.0000 0.0000 0.0000" quat="0.70711 0.70711 0.00000 -0.00000"/>
+    <geom name="home_goal_right_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000"/>
+    <geom name="home_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 -11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000"/>
+    <geom name="home_goal_left_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000"/>
+    <geom name="home_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000"/>
+    <geom name="away_goal_right_post" type="capsule" size="0.4016 2.6667" pos="42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
+    <geom name="away_goal_left_post" type="capsule" size="0.4016 2.6667" pos="42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
+    <geom name="away_goal_top_post" type="capsule" size="0.4057 11.8800" pos="42.6667 0.0000 5.3333" quat="0.70711 -0.70711 0.00000 0.00000"/>
+    <geom name="away_goal_right_base" type="capsule" size="0.4016 2.6667" pos="45.3333 11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000"/>
+    <geom name="away_goal_left_base" type="capsule" size="0.4016 2.6667" pos="45.3333 -11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000"/>
+    <geom name="away_goal_back_base" type="capsule" size="0.4016 11.8800" pos="48.0000 0.0000 0.0000" quat="0.70711 -0.70711 0.00000 0.00000"/>
+    <geom name="away_goal_right_support" type="capsule" size="0.3012 3.1098" pos="46.4000 11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000"/>
+    <geom name="away_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000"/>
+    <geom name="away_goal_left_support" type="capsule" size="0.3012 3.1098" pos="46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000"/>
+    <geom name="away_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 -11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000"/>
+"""
+
+# Goal mouth centres, for the `shoot` task obs. Home goal is at -x, away at +x.
+GOAL_X = 42.6667
+GOAL_HALF_WIDTH = 11.88
+GOAL_HEIGHT = 5.3333
+
+_BASE_XML = f"""
 <mujoco model="warp_drill">
   <option cone="elliptic" timestep="0.0025"/>
-  <worldbody>
-    <geom name="floor" type="plane" size="60 60 1" friction="1 0.5 0.5"/>
-  </worldbody>
+  <worldbody>{_PITCH_XML}  </worldbody>
 </mujoco>
 """
 

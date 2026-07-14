@@ -40,16 +40,20 @@ class DribbleTask(FollowTask):
         self._arena.add_free_entity(self._ball)
 
         def ball_ego(physics):
-            # Both position AND velocity egocentric. This used to report the
-            # ball's velocity in the WORLD frame (cvel[3:5]) alongside an
-            # egocentric position, which breaks the egocentric invariance the
-            # whole observation is built on -- the same ball, same relative
-            # motion, would look different depending on which way the creature
-            # happened to be facing. Safe to fix: dribble has never been trained.
+            # 3-D, egocentric, position + linear velocity -- i.e. exactly the 2v2
+            # game's ball_ego_position (3) + ball_ego_linear_velocity (3), so the
+            # distilled dribble prior can be evaluated on game observations. It was
+            # 2-D, which the game could not have fed.
+            #
+            # Both position AND velocity are egocentric. This used to report the
+            # ball's velocity in the WORLD frame alongside an egocentric position,
+            # which breaks the egocentric invariance the whole observation is built
+            # on -- the same ball, same relative motion, would look different
+            # depending on which way the creature happened to be facing.
             # Must stay in step with warp_port/dribble_env.py.
-            pos = self._to_ego(physics, physics.bind(self._ball.root_body).xpos[:2])
-            vel = self._vec_to_ego(
-                physics, np.array(physics.bind(self._ball.root_body).cvel[3:5]))
+            b = physics.bind(self._ball.root_body)
+            pos = self._to_ego3(physics, np.array(b.xpos))
+            vel = self._vec_to_ego3(physics, np.array(b.cvel[3:6]))
             return np.concatenate([pos, vel]).astype(np.float32)
 
         self._task_observables["ball_ego"] = observable.Generic(ball_ego)

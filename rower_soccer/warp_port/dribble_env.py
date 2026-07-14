@@ -12,13 +12,17 @@ exactly, which flattens the observation dict in SORTED KEY order. "ball_ego"
 sorts before "creature/*", so the ball block lands at the FRONT -- dribble's obs
 is not follow's obs with four numbers appended:
 
-  ball_ego (4)                                            -> 0:4    [task]
+  ball_ego (6) = ego pos (3) + ego linear vel (3)         -> 0:6    [task]
   creature/bodies_pos (9), body_height (1), joints_pos (2),
   joints_vel (2), sensors_accelerometer (3), sensors_gyro (3),
   sensors_velocimeter (3), touch_sensors (3),
-  world_zaxis (3)                                         -> 4:33   [proprio]
-  target_ego (2), target_ego_future (2)                   -> 33:37  [task]
-                                                             = 37 dims
+  world_zaxis (3)                                         -> 6:35   [proprio]
+  target_ego (2), target_ego_future (2)                   -> 35:39  [task]
+                                                             = 39 dims
+
+ball_ego is 3-D, matching the 2v2 game's ball_ego_position (3) +
+ball_ego_linear_velocity (3). It has to be: the ball obs survives distillation
+into the dribble prior, and the prior is evaluated on GAME observations.
 
 The proprio block is byte-identical to follow's, and stays contiguous, so the
 decoder (proprio + z) transfers from a follow checkpoint unchanged. The task
@@ -119,11 +123,11 @@ class WarpDribbleEnv:
         self.target_vel = torch.zeros(self.n, 2, device=device)
         self.t = 0
 
-        self.obs_dim = 37
+        self.obs_dim = 39
         self.act_dim = m.nu
         # Sorted-key order: ball_ego first, then creature/*, then target_*.
-        self.proprio_indices = np.arange(4, 33)
-        self.task_indices = np.concatenate([np.arange(0, 4), np.arange(33, 37)])
+        self.proprio_indices = np.arange(6, 35)
+        self.task_indices = np.concatenate([np.arange(0, 6), np.arange(35, 39)])
 
         self._graph = None
         if use_graph:
@@ -226,6 +230,23 @@ class WarpDribbleEnv:
         return torch.stack([(world_vec * fwd).sum(-1),
                             (world_vec * left).sum(-1)], -1)
 
+    # 3-D variants -- the ball obs uses these. See drills/dribble.py: the ball
+    # observation survives distillation into the drill prior, and the prior is
+    # evaluated on the game's 3-D ball_ego_position / ball_ego_linear_velocity.
+    def _ball_xyz(self):
+        return self.qpos[:, self.bq:self.bq + 3]
+
+    def _ball_vel_xyz(self):
+        return self.qvel[:, self.bv:self.bv + 3]
+
+    def _to_ego3(self, world_xyz):
+        pos, rot = self._root_frames()
+        return torch.einsum("nij,nj->ni", rot.transpose(1, 2), world_xyz - pos)
+
+    def _vec_to_ego3(self, world_vec):
+        _, rot = self._root_frames()
+        return torch.einsum("nij,nj->ni", rot.transpose(1, 2), world_vec)
+
     def _reward(self):
         ball_xy, ball_vel = self._ball_xy(), self._ball_vel_xy()
         pos, _ = self._root_frames()
@@ -275,8 +296,8 @@ class WarpDribbleEnv:
         sv, sg, sa = (self.sensordata[:, s:s + d] for s, d in
                       (self.sl_vel, self.sl_gyro, self.sl_accel))
 
-        ball_ego = torch.cat([self._to_ego(self._ball_xy()),
-                              self._vec_to_ego(self._ball_vel_xy())], -1)
+        ball_ego = torch.cat([self._to_ego3(self._ball_xyz()),
+                              self._vec_to_ego3(self._ball_vel_xyz())], -1)
         tgt_now = self._to_ego(self.target_xy)
         future = (self.target_xy + self.target_vel * self.lookahead).clamp(
             -self.bounds, self.bounds)

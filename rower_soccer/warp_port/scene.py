@@ -191,7 +191,23 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None):
     # 600 steps x 256 worlds of random torque, zero NaNs, max|qvel| unchanged.
     # This deliberately makes Warp's solref DIFFER from the CPU drill's 0.02; the
     # two backends need different nominal values to produce the same physics.
-    model.geom_solref[:, 0] = WARP_SOLREF_TIMECONST
+    #
+    # THE BALL IS EXCLUDED, and must stay excluded.
+    #
+    # Applying this to the ball too is what killed dribble_paper_v5: it diverged to
+    # NaN after ~2.5M steps (NaN action means -> ValueError out of Normal()). A 45 g
+    # ball at a contact time constant of 2*dt is right on the stability floor, and a
+    # very light body against heavy geoms is exactly where that floor bites.
+    #
+    # It is also unnecessary, which is the real point. Penetration is set by contact
+    # FORCE over stiffness, and a 0.045 kg ball generates almost none -- it barely
+    # sinks even at the default 0.02. The thing that sinks is the 22 kg creature
+    # pushing itself along the ground. So the correction belongs on the body and the
+    # ground, not on the ball, and the ball keeps dm_control's SoccerBall spec
+    # verbatim (solref 0.02, condim 6, priority 1) as it should.
+    ball_geom = model.geom("ball_geom").id if ball is not None else -1
+    stiffen = [g for g in range(model.ngeom) if g != ball_geom]
+    model.geom_solref[stiffen, 0] = WARP_SOLREF_TIMECONST
 
     root_name = f"{prefix}seg0"
     root_body = model.body(root_name).id

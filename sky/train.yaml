@@ -1,0 +1,68 @@
+# SkyPilot managed-job task: one worm-training run on a spot GPU.
+#
+# Launch a single run:
+#   sky jobs launch sky/train.yaml --name follow_smooth \
+#       --env RUN_NAME=follow_smooth --env TASK=follow \
+#       --env EXTRA_ARGS="--smooth-coef 0.1 --ent-anneal-steps 400000000"
+#
+# Or fan out a whole sweep with sky/sweep.py (which calls this per arm).
+#
+# Why managed spot works for us: our checkpointing already syncs to GCS every 30
+# min, and gcs_pull_run.sh pulls it back on relaunch, so a preemption costs at most
+# ~30 min. SkyPilot auto-recovers the job onto fresh spot capacity; --resume picks
+# up where it left off.
+
+name: worm-train
+
+resources:
+  # A4000 is what we validated on; L4 (24 GB, Ada) is the GCP-spot equivalent.
+  # Override at launch: `--gpus L4:1` or `--cloud gcp`.
+  accelerators: {A4000:1}
+  use_spot: true                 # the whole point; ~50-80% cheaper
+  # cloud: runpod                # uncomment to pin; else SkyPilot picks cheapest
+
+# Sync the local repo to the instance (private repo, so no git clone needed).
+workdir: .
+
+envs:
+  RUN_NAME: unnamed
+  TASK: follow                   # follow | dribble
+  EXTRA_ARGS: ""                 # per-arm knobs, e.g. "--smooth-coef 0.1"
+  GCS_BUCKET: vc2-2026-checkpoints
+  MAX_HOURS: "48"
+  WANDB_API_KEY: ""              # pass with --env WANDB_API_KEY=$WANDB_API_KEY
+
+# Credentials the run needs. gcloud auth is mounted from the launching machine;
+# SkyPilot forwards GCP creds automatically when cloud=gcp, but for RunPod we mount
+# the ADC file explicitly so the trainer's GCS sync works.
+file_mounts:
+  ~/.config/gcloud/application_default_credentials.json: ~/.config/gcloud/application_default_credentials.json
+
+setup: |
+  set -e
+  # System lib for headless EGL rendering (POD_SETUP.md step 1).
+  sudo apt-get update -qq && sudo apt-get install -y libegl1
+  # Python env. Torch LAST and pinned to cu124 -- installing it after the rest lets
+  # a dependency silently swap in a cu13 wheel the driver can't run (POD_SETUP.md).
+  python3 -m venv .venv
+  .venv/bin/pip install -q uv
+  .venv/bin/uv pip install --python .venv/bin/python dm_control mujoco gymnasium \
+      stable-baselines3 wandb "imageio[ffmpeg]" warp-lang mujoco-warp
+  .venv/bin/uv pip install --python .venv/bin/python "torch==2.6.0+cu124" \
+      --index-url https://download.pytorch.org/whl/cu124
+  .venv/bin/python -c "import torch;assert torch.__version__.endswith('cu124'),torch.__version__"
+
+run: |
+  set -e
+  # Resume-after-preemption: pull the last checkpoint back before training.
+  bash scripts/gcs_pull_run.sh "$GCS_BUCKET" "$RUN_NAME" || true
+  RESUME=""
+  [ -f "runs_v2/$RUN_NAME/checkpoint.pt" ] && RESUME="--resume"
+
+  MUJOCO_GL=egl .venv/bin/python -m rower_soccer.warp_port.train_${TASK}_warp \
+      --run-name "$RUN_NAME" \
+      --worlds 2048 --max-hours "$MAX_HOURS" \
+      --ent-floor -1.2 --ent-ceil 0.0 \
+      --first-video-secs 60 --video-secs 900 --ckpt-secs 1800 \
+      --gcs-bucket "$GCS_BUCKET" \
+      $EXTRA_ARGS $RESUME

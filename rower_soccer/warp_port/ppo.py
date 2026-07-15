@@ -15,6 +15,13 @@ import torch.nn as nn
 
 from rower_soccer.models.latent_policy import LatentExtractor
 
+# A world whose |obs| exceeds this is diverging, not merely energetic. Everything in
+# the observation is bounded by real geometry -- the pitch is 48 m, the ball peaks
+# around 30 m/s, touch is divided by 10000 -- so anything past ~100 is unphysical and
+# 1e3 is a generous ceiling. Measured on the run that crashed: |obs| reached 8,168
+# while staying perfectly finite, which is precisely what an isfinite() check misses.
+OBS_SANITY_LIMIT = 1.0e3
+
 
 class ActorCritic(nn.Module):
     def __init__(self, obs_dim, act_dim, proprio_indices, task_indices,
@@ -48,13 +55,22 @@ class PPOTrainer:
     def __init__(self, env, ac: ActorCritic, lr=3e-4, rollout_len=64,
                  minibatches=8, epochs=4, gamma=0.99, gae_lambda=0.95,
                  clip=0.2, ent_coef=0.005, vf_coef=0.5, max_grad_norm=0.5,
-                 z_smooth_coef=0.0, ent_floor=None, ent_ceil=None, device="cuda"):
+                 z_smooth_coef=0.0, ent_floor=None, ent_ceil=None, device="cuda",
+                 ent_anneal_steps=0):
         self.env, self.ac = env, ac.to(device)
         self.opt = torch.optim.Adam(ac.parameters(), lr=lr)
         self.T, self.N = rollout_len, env.n
         self.minibatches, self.epochs = minibatches, epochs
         self.gamma, self.lam, self.clip = gamma, gae_lambda, clip
         self.ent_coef, self.vf_coef = ent_coef, vf_coef
+        # Linearly anneal the entropy bonus ent_coef -> 0 over the first
+        # ent_anneal_steps env-steps (0 = off, constant coef). This is the fix for
+        # the follow_v5 collapse: once the policy converges, the fixed entropy bonus
+        # became the loudest term left and inflated std back to the ceiling, drowning
+        # the policy in its own exploration noise. Decaying it removes that pressure
+        # exactly when it stops being useful.
+        self.ent_coef_start = ent_coef
+        self.ent_anneal_steps = ent_anneal_steps
         self.max_grad_norm = max_grad_norm
         self.z_smooth_coef = z_smooth_coef
         self.ent_floor = ent_floor  # min log_std, e.g. -1.5
@@ -72,9 +88,13 @@ class PPOTrainer:
         self.done_buf = torch.zeros(self.T, self.N, device=d)
         self._obs = env.reset()
         self.total_steps = 0
-        # world-steps whose physics went non-finite; see collect(). Should stay at 0
-        # or very near it -- a climbing count means the contact model is wrong.
+        # world-steps whose physics diverged (non-finite OR |obs| > OBS_SANITY_LIMIT);
+        # see collect(). Should stay at 0 or very near it -- a climbing count means the
+        # contact model is wrong and the run is training on garbage.
         self.n_diverged = 0
+        # minibatch updates dropped because the gradient was non-finite. The last line
+        # of defence; if this is nonzero the guards above are leaking.
+        self.n_bad_grads = 0
 
     def collect(self):
         ep_returns = []
@@ -97,7 +117,14 @@ class PPOTrainer:
             # contribute nothing to the update, and count them. A steadily climbing
             # count means the physics is wrong, not merely unlucky -- so it is logged,
             # not silently swallowed.
-            bad = ~torch.isfinite(obs2).all(dim=-1)
+            # NOT just isfinite. dribble_paper_v7 died at 149M with diverged=0: the
+            # poison was large-but-FINITE. A diverging contact produced |obs| = 8,168
+            # -- perfectly finite, ~80x anything physical (the pitch is 48 m; ball
+            # speed peaks ~30 m/s) -- which detonates exp(logp - logp_old) in the PPO
+            # ratio, yields a NaN gradient, and then clip_grad_norm_ SCALES EVERY
+            # GRADIENT BY NaN (it clips, it does not sanitise). Weights poisoned,
+            # action mean NaN, process dead, with the obs guard never firing.
+            bad = ~torch.isfinite(obs2).all(dim=-1) | (obs2.abs().amax(dim=-1) > OBS_SANITY_LIMIT)
             if bad.any():
                 self.n_diverged += int(bad.sum())
                 obs2 = torch.where(bad.unsqueeze(-1), torch.zeros_like(obs2), obs2)
@@ -162,7 +189,15 @@ class PPOTrainer:
                     loss = loss + self.z_smooth_coef * (z ** 2).mean()
                 self.opt.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
+                # clip_grad_norm_ CLIPS, it does not SANITISE: given one NaN gradient
+                # the total norm is NaN and every gradient is scaled by NaN, which
+                # poisons the weights permanently. It returns the pre-clip norm, so
+                # check it and drop the update rather than commit a NaN.
+                gnorm = nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
+                if not torch.isfinite(gnorm):
+                    self.n_bad_grads += 1
+                    self.opt.zero_grad(set_to_none=True)
+                    continue
                 self.opt.step()
                 if self.ent_floor is not None or self.ent_ceil is not None:
                     with torch.no_grad():
@@ -172,9 +207,13 @@ class PPOTrainer:
         return stats
 
     def train_iter(self):
+        if self.ent_anneal_steps > 0:
+            frac = min(1.0, self.total_steps / self.ent_anneal_steps)
+            self.ent_coef = self.ent_coef_start * (1.0 - frac)
         adv, ret = self.collect()
         stats = self.update(adv, ret)
         stats["ep_rew_env_mean"] = float(self.rew_buf.mean() * self.env.episode_steps)
+        stats["ent_coef"] = self.ent_coef
         return stats
 
 

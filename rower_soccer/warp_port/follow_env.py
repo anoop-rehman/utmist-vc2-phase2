@@ -43,7 +43,8 @@ class WarpFollowEnv:
                  seed=0, use_graph=True, w_vel_shaping=0.0,
                  reward_mode="paper", progress_scale=2.0, settle_coef=0.5,
                  arrival_radius=1.0, arrival_bonus=0.5,
-                 spawn_dist_range=(1.76, 5.28), nconmax=64, njmax=512):
+                 spawn_dist_range=(1.76, 5.28), nconmax=64, njmax=512,
+                 energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0)):
         # Calibrated to the 1.76 m / 22 kg worm (unity2mujoco --length-scale
         # 0.1768 --gear-scale 0.03), which is the body that can actually control
         # DeepMind's ball -- see docs/STAGE2_MULTITASK.md 0.5.
@@ -84,6 +85,16 @@ class WarpFollowEnv:
         self.bounds = bounds
         self.spawn_dist_range = spawn_dist_range
         self.prev_dist = torch.zeros(num_worlds, device=device)
+        # Regularizers (both default OFF): energy = -c*mean(a^2) discourages brute
+        # thrust; smooth = -c*mean((a_t - a_{t-1})^2) is CAPS temporal smoothness,
+        # penalising jerk (not speed). See docs. rew_clip bounds a diverged world's
+        # reward spike (a blown contact can produce a 5e5 shaping reward) without
+        # touching normal rewards, which live in ~[-1, 2].
+        self.energy_coef = energy_coef
+        self.smooth_coef = smooth_coef
+        self.rew_clip = rew_clip
+        self.prev_ctrl = torch.zeros(num_worlds, 0, device=device)  # sized after nu known
+        self.n_diverged = 0
         self.gen = torch.Generator(device=device).manual_seed(seed)
 
         self.model, self.meta = build_creature_scene(creature_xml)
@@ -125,6 +136,7 @@ class WarpFollowEnv:
 
         self.obs_dim = 33
         self.act_dim = m.nu
+        self.prev_ctrl = torch.zeros(self.n, m.nu, device=device)
         # obs slices for the policy (matches DrillGymEnv layout)
         self.proprio_indices = np.arange(0, 29)
         self.task_indices = np.arange(29, 33)
@@ -168,6 +180,7 @@ class WarpFollowEnv:
             torch.rand(self.n, generator=self.gen, device=self.device)
         self.target_vel = torch.stack([spd * torch.cos(vang), spd * torch.sin(vang)], -1)
         self.t = 0
+        self.prev_ctrl = torch.zeros(self.n, self.act_dim, device=self.device)
         self._forward()
         # seed prev_dist so the first progress delta is well-defined
         pos, _ = self._root_frames()
@@ -178,10 +191,42 @@ class WarpFollowEnv:
         mjw.forward(self.wm, self.wd)
         wp.synchronize_device()
 
+    def _sanitize(self):
+        """Reset any world whose PHYSICS has diverged, in place, BEFORE obs/reward.
+
+        This is the real fix for the recurring NaN death. mujoco_warp occasionally
+        blows a contact up; the world's qvel races to millions and then to inf/NaN.
+        Catching it here -- at the source -- means the observation and reward
+        computed just after are clean by construction, instead of leaking a
+        finite-but-insane 25e6 obs / 5e5 reward downstream (which is what actually
+        killed dribble_paper_v5/v6/v7). Downstream guards in ppo.collect stay as a
+        second layer, but this stops the poison being created.
+
+        qvel is bounded by real dynamics (max ~57 under random torque), so 500 is
+        far above anything physical and far below the divergence scale.
+        """
+        bad = ((~torch.isfinite(self.qvel).all(-1))
+               | (~torch.isfinite(self.qpos).all(-1))
+               | (self.qvel.abs().amax(-1) > 500.0))
+        if not bool(bad.any()):
+            return
+        self.n_diverged += int(bad.sum().item())
+        idx = bad.nonzero(as_tuple=True)[0]
+        qr = self.meta.qpos_root
+        # In-place writes: qpos/qvel are zero-copy views into the Warp buffers, so
+        # index-assignment must stay in place or the view is lost.
+        self.qvel[idx] = 0.0
+        self.qpos[idx] = 0.0
+        self.qpos[idx, qr + 2] = self.meta.spawn_z
+        self.qpos[idx, qr + 3] = 1.0  # identity quat (w=1)
+        self._forward()
+
     def step(self, actions):
         """actions: [n, nu] in [-1, 1]. Returns obs, reward, done(all-worlds)."""
-        self.ctrl.copy_(actions.clamp(-1.0, 1.0))
+        a = actions.clamp(-1.0, 1.0)
+        self.ctrl.copy_(a)
         self._physics_step()
+        self._sanitize()
         # target kinematics + bounce
         self.target_xy = self.target_xy + self.target_vel * CONTROL_DT
         over = self.target_xy.abs() > self.bounds
@@ -190,7 +235,18 @@ class WarpFollowEnv:
 
         self.t += 1
         done = self.t >= self.episode_steps
-        return self._obs(), self._reward(), done
+        rew = self._reward()
+        rew = self._regularize(rew, a)
+        return self._obs(), rew, done
+
+    def _regularize(self, rew, a):
+        """Energy + CAPS temporal-smoothness penalties, then reward clip."""
+        if self.energy_coef > 0:
+            rew = rew - self.energy_coef * (a ** 2).mean(-1)
+        if self.smooth_coef > 0:
+            rew = rew - self.smooth_coef * ((a - self.prev_ctrl) ** 2).mean(-1)
+        self.prev_ctrl = a
+        return rew.clamp(self.rew_clip[0], self.rew_clip[1])
 
     # ------------------------------------------------------------------
     def _root_frames(self):
@@ -230,6 +286,17 @@ class WarpFollowEnv:
             r = r + self.w_vel_shaping * v_to_t.clamp(min=0.0)
         return r
 
+    def fitness(self):
+        """Unshaped follow fitness, exp(-c * ||player - target||), per world.
+
+        The gate metric, and the one number --vel-shaping cannot inflate: the shaping
+        term pays for velocity TOWARD the target, so a policy can farm it while never
+        actually arriving. Fitness only rewards being there.
+        """
+        pos, _ = self._root_frames()
+        dist = torch.linalg.norm(self.target_xy - pos[:, :2], dim=-1)
+        return torch.exp(-self.reward_coef * dist)
+
     def _obs(self):
         n = self.n
         pos, rot = self._root_frames()
@@ -240,6 +307,25 @@ class WarpFollowEnv:
         touch = torch.cat([self.sensordata[:, s:s + d] for s, d in self.sl_touch], -1) / 10000.0
         sv, sg, sa = (self.sensordata[:, s:s + d] for s, d in
                       (self.sl_vel, self.sl_gyro, self.sl_accel))
+
+        # Accelerometer scaled and clipped. It is the ONLY unbounded thing in the
+        # observation: contact impacts spike it to ~5,700 m/s^2 while every other input
+        # sits near 1 (bodies_pos 1.1, world_zaxis 1.0, joints_pos 2.1). That is not a
+        # divergence, it is real physics -- and it is ruinous twice over:
+        #
+        #   1. It dominates the first layer, so the network is effectively conditioned
+        #      on impact spikes.
+        #   2. It killed dribble_paper_v7 at 149M steps. A ~6,000 input drives a huge
+        #      action mean, which makes logp extreme, which makes the PPO ratio
+        #      exp(logp - logp_old) overflow to inf, which makes the gradient NaN --
+        #      and clip_grad_norm_ then scales EVERY gradient by NaN, because it clips
+        #      rather than sanitises. The obs were finite the whole way down.
+        #
+        # touch already had exactly this treatment (/10000); accel never did. /100 puts
+        # a hard impact at ~57, and the clamp bounds the tail. Any future body must
+        # apply the same scaling at deployment -- it is part of the obs contract.
+        sa = (sa / 100.0).clamp(-50.0, 50.0)
+
 
         tgt_now = self._to_ego(self.target_xy)
         future = (self.target_xy + self.target_vel * self.lookahead).clamp(-self.bounds, self.bounds)

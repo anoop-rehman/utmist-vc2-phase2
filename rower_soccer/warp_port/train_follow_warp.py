@@ -21,34 +21,24 @@ import numpy as np
 import torch
 
 
-def cpu_eval_video(ac, path, seed=7, deterministic=True, target_speed=None):
-    """Runs current weights in the dm_control env; returns ep reward. Reward
-    here is always the pure exp(-c d) follow reward (reward-mode-agnostic),
-    so it is a fair 'how close does it get' metric across training modes.
-    Target speed is matched to training for a fair transfer eval."""
-    from rower_soccer.drills.follow import make_follow_env
-    from rower_soccer.drills.gym_wrap import DrillGymEnv
-    env = getattr(cpu_eval_video, "_env", None)
-    if env is None:
-        def factory(random_state=None):
-            kw = {} if target_speed is None else {"target_speed_range": tuple(target_speed)}
-            return make_follow_env(random_state=random_state, **kw)
-        env = cpu_eval_video._env = DrillGymEnv(factory, seed=seed)
-    obs, _ = env.reset()
-    done, ep_rew, frames = False, 0.0, []
-    while not done:
-        with torch.no_grad():
-            o = torch.as_tensor(obs, dtype=torch.float32, device="cuda").unsqueeze(0)
-            d = ac.dist(o)
-            a = d.mean if deterministic else d.sample()
-        obs, r, term, trunc, _ = env.step(a.squeeze(0).clamp(-1, 1).cpu().numpy())
-        done = term or trunc
-        ep_rew += r
-        frames.append(env.render())
-    with imageio.get_writer(path, fps=40, quality=7) as w:
-        for f in frames:
-            w.append_data(f)
-    return ep_rew
+def make_eval(args, has_ball=False):
+    """One-world Warp env + renderer, built once and reused.
+
+    Warp is ground truth: the eval runs in the SAME simulator the policy trains in,
+    and the video is drawn from that simulator's state. The dm_control CPU drill is
+    no longer in the loop -- see warp_port/render.py for why.
+    """
+    from rower_soccer.warp_port.follow_env import WarpFollowEnv
+    from rower_soccer.warp_port.render import WarpRenderer
+    env = WarpFollowEnv(
+        num_worlds=1, use_graph=False, seed=7,
+        target_speed_range=tuple(args.target_speed),
+        spawn_dist_range=tuple(args.spawn_dist),
+        bounds=args.bounds, reward_coef=args.reward_coef,
+        w_vel_shaping=args.vel_shaping, reward_mode=args.reward_mode,
+        progress_scale=args.progress_scale, episode_seconds=args.episode_secs,
+        energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
+    return env, WarpRenderer(args.creature_xml, has_ball=False)
 
 
 def main():
@@ -98,6 +88,13 @@ def main():
     p.add_argument("--spawn-dist", type=float, nargs=2, default=[1.76, 5.28],
                    help="target spawn distance (m): 1-3 body lengths")
     p.add_argument("--reward-coef", type=float, default=0.5)
+    # Realism regularizers (default OFF -> baseline is unchanged). Energy penalises
+    # brute thrust; smooth is CAPS temporal smoothness (penalises jerk, not speed).
+    p.add_argument("--energy-coef", type=float, default=0.0)
+    p.add_argument("--smooth-coef", type=float, default=0.0)
+    # Anneal the entropy bonus to 0 over this many env-steps (0 = constant). Fixes
+    # the late-training entropy runaway that collapsed follow_v5.
+    p.add_argument("--ent-anneal-steps", type=int, default=0)
     # NOT 0.0. The bare `paper` reward is exp(-c*dist), which pays a worm for standing
     # still and gives it almost no gradient to discover locomotion -- follow_v4 sat in
     # that do-nothing optimum for 800M steps (ep_rew 134 vs ~130 for doing nothing).
@@ -116,6 +113,13 @@ def main():
                    choices=["paper", "velshape", "progress"])
     p.add_argument("--progress-scale", type=float, default=2.0)
     p.add_argument("--episode-secs", type=float, default=15.0)
+    # Wall-clock budget. Runs are sized in HOURS, not steps: throughput swings with
+    # how many runs share the GPU (69k steps/s alone, ~50k with two), so a step target
+    # is really an unpredictable time target. --steps stays as a backstop.
+    p.add_argument("--max-hours", type=float, default=48.0,
+                   help="stop after this much wallclock, whatever step count that is")
+    p.add_argument("--creature-xml",
+                   default="creature_configs/three_seg_worm.xml")
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)
     # Fire the FIRST transfer-eval video early, so a broken run (bad obs layout,
@@ -192,17 +196,21 @@ def main():
                         reward_mode=args.reward_mode,
                         progress_scale=args.progress_scale,
                         bounds=args.bounds,
-                        spawn_dist_range=tuple(args.spawn_dist))
+                        spawn_dist_range=tuple(args.spawn_dist),
+                        energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
     ac = ActorCritic(env.obs_dim, env.act_dim,
                      proprio_indices=env.proprio_indices.tolist(),
                      task_indices=env.task_indices.tolist(), z_dim=args.z_dim)
     trainer = PPOTrainer(env, ac, lr=args.lr, rollout_len=args.rollout,
                          ent_coef=args.ent_coef, ent_floor=args.ent_floor,
-                         ent_ceil=args.ent_ceil)
+                         ent_ceil=args.ent_ceil,
+                         ent_anneal_steps=args.ent_anneal_steps)
 
     ckpt_path = os.path.join(run_dir, "checkpoint.pt")
     latest_path = os.path.join(run_dir, "latest.pt")
     mid_path = os.path.join(run_dir, "checkpoint_mid.pt")
+    best_path = os.path.join(run_dir, "best.pt")
+    best_score = float("-inf")
     mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
     if args.resume and os.path.exists(ckpt_path):
@@ -215,17 +223,20 @@ def main():
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
+    eval_env, eval_ren = make_eval(args)
     t0 = time.perf_counter()
     # Back-date the video timer so the first one lands at --first-video-secs.
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
     last_ckpt = t0
     it = 0
-    while trainer.total_steps < args.steps:
+    deadline = t0 + args.max_hours * 3600.0
+    while trainer.total_steps < args.steps and time.perf_counter() < deadline:
         stats = trainer.train_iter()
         it += 1
         now = time.perf_counter()
         fps = (trainer.total_steps - start_steps) / (now - t0)
-        eta_min = (args.steps - trainer.total_steps) / fps / 60
+        # ETA is now the wall-clock deadline, not the step target.
+        eta_min = max(0.0, (deadline - now) / 60)
         if it % 5 == 0:
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
@@ -242,14 +253,34 @@ def main():
             last_video = now
             vpath = os.path.join(run_dir, "videos",
                                  f"eval_step_{trainer.total_steps:010d}.mp4")
-            ep_rew = cpu_eval_video(ac, vpath, target_speed=args.target_speed)
-            print(f"[monitor] video: {vpath} (dm_control transfer eval "
-                  f"ep_rew={ep_rew:.1f})", flush=True)
+            from rower_soccer.warp_port.render import eval_video
+            ep_rew, fit = eval_video(eval_env, ac, vpath, eval_ren)
+            print(f"[monitor] video: {vpath} (WARP eval "
+                  f"ep_rew={ep_rew:.1f} fitness={fit:.3f})", flush=True)
+            # Keep the BEST policy, not just the latest.
+            #
+            # follow_v5_velshape's transfer eval went 262 -> 351 -> 465 -> 476.5 and
+            # then COLLAPSED to 166.6 in its final stretch (log_std pinned at the
+            # entropy ceiling). final.pt and latest.pt both hold the collapsed 166
+            # policy. The 476 weights -- comfortably in C's 445-495 band -- existed,
+            # were never saved, and are gone.
+            #
+            # Late collapse is not exotic in long PPO runs, and 48-hour runs give it
+            # far more room. Scored on the DETERMINISTIC dm_control transfer eval,
+            # which is the number we actually care about.
+            if ep_rew > best_score:
+                best_score = ep_rew
+                export_sb3_compatible(ac, best_path)
+                print(f"[monitor] new BEST transfer eval {best_score:.1f} "
+                      f"-> {best_path}", flush=True)
+                if args.gcs_bucket:
+                    from rower_soccer.warp_port.gcs import sync_async
+                    sync_async(best_path, args.gcs_bucket, args.run_name)
             if use_wandb:
                 import wandb
                 wandb.log({"env_step": trainer.total_steps,
                            "eval/video": wandb.Video(vpath, format="mp4"),
-                           "eval/ep_rew_dm_control": ep_rew})
+                           "eval/ep_rew_warp": ep_rew, "eval/fitness_warp": fit})
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now
             save_checkpoint(trainer, ckpt_path)

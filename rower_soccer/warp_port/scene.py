@@ -151,8 +151,19 @@ def creature_size(creature_xml_path):
     return mass, float((hi - lo)[2])
 
 
-def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None):
-    """Returns (mujoco.MjModel, SceneMeta). `ball=None` -> the follow scene."""
+def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
+                         target_marker=False):
+    """Returns (mujoco.MjModel, SceneMeta). `ball=None` -> the follow scene.
+
+    target_marker=True appends a non-colliding red sphere on a free joint, for the
+    RENDER-ONLY model (see render.py). The drills' target is a torch computation, not
+    a physics entity, so it is invisible unless something draws it. It is appended
+    LAST precisely so the creature's and ball's qpos addresses are unchanged -- the
+    render model and the physics model must agree on those or the picture lies.
+
+    Never put this in the physics model: it would add 7 qpos / 6 dof to every Warp
+    world for something that is only ever looked at.
+    """
     spec = mujoco.MjSpec.from_string(_BASE_XML)
     sub = mujoco.MjSpec.from_file(creature_xml_path)
     frame = spec.worldbody.add_frame()
@@ -170,6 +181,18 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None):
         g.priority = ball.priority
         g.solref = list(ball.solref)
         g.rgba = list(ball.rgba)
+
+    if target_marker:
+        # Appended LAST so creature/ball qpos addresses stay put. contype=conaffinity=0
+        # so it collides with nothing -- it is a marker, not an obstacle.
+        t = spec.worldbody.add_body(name="target", pos=[0.0, 0.0, 0.5])
+        t.add_freejoint(name="target_free")
+        tg = t.add_geom(name="target_geom", type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                        size=[0.25, 0.0, 0.0])
+        tg.contype = 0
+        tg.conaffinity = 0
+        tg.mass = 1e-3
+        tg.rgba = [1.0, 0.2, 0.2, 1.0]
 
     model = spec.compile()
 

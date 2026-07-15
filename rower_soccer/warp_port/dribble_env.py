@@ -50,7 +50,8 @@ class WarpDribbleEnv:
                  target_dist_range=(2.0, 5.0), ball_spawn_range=(1.5, 3.0),
                  w_player_to_ball=0.1, w_ball_to_target=0.3,
                  reward_mode="paper", progress_scale=2.0, approach_scale=0.5,
-                 ball: BallSpec = None, nconmax=64, njmax=512):
+                 ball: BallSpec = None, nconmax=64, njmax=512,
+                 energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0)):
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
@@ -86,6 +87,12 @@ class WarpDribbleEnv:
         self.gen = torch.Generator(device=device).manual_seed(seed)
         self.prev_bt = torch.zeros(num_worlds, device=device)
         self.prev_pb = torch.zeros(num_worlds, device=device)
+        # Regularizers (default OFF) + reward clip + divergence counter. See
+        # follow_env for the rationale; identical mechanism here.
+        self.energy_coef = energy_coef
+        self.smooth_coef = smooth_coef
+        self.rew_clip = rew_clip
+        self.n_diverged = 0
 
         self.model, self.meta = build_creature_ball_scene(
             creature_xml, ball=ball or BallSpec())
@@ -125,6 +132,7 @@ class WarpDribbleEnv:
 
         self.obs_dim = 39
         self.act_dim = m.nu
+        self.prev_ctrl = torch.zeros(self.n, m.nu, device=device)
         # Sorted-key order: ball_ego first, then creature/*, then target_*.
         self.proprio_indices = np.arange(6, 35)
         self.task_indices = np.concatenate([np.arange(0, 6), np.arange(35, 39)])
@@ -183,6 +191,7 @@ class WarpDribbleEnv:
         self.target_vel = torch.stack([spd * torch.cos(vang), spd * torch.sin(vang)], -1)
 
         self.t = 0
+        self.prev_ctrl = torch.zeros(self.n, self.act_dim, device=self.device)
         self._forward()
         pos, _ = self._root_frames()
         self.prev_bt = torch.linalg.norm(self._ball_xy() - self.target_xy, dim=-1)
@@ -193,10 +202,35 @@ class WarpDribbleEnv:
         mjw.forward(self.wm, self.wd)
         wp.synchronize_device()
 
+    def _sanitize(self):
+        """Reset diverged worlds (creature AND ball) to rest, BEFORE obs/reward.
+        See follow_env._sanitize for the full rationale -- this is the upstream fix
+        for the dribble NaN deaths. The ball is the usual culprit here, so it is
+        reset to a rest position outside the worm footprint."""
+        bad = ((~torch.isfinite(self.qvel).all(-1))
+               | (~torch.isfinite(self.qpos).all(-1))
+               | (self.qvel.abs().amax(-1) > 500.0))
+        if not bool(bad.any()):
+            return
+        self.n_diverged += int(bad.sum().item())
+        idx = bad.nonzero(as_tuple=True)[0]
+        qr = self.meta.qpos_root
+        self.qvel[idx] = 0.0
+        self.qpos[idx] = 0.0
+        self.qpos[idx, qr + 2] = self.meta.spawn_z
+        self.qpos[idx, qr + 3] = 1.0
+        # ball at rest, 1 m out along +x so it is not spawned inside the worm
+        self.qpos[idx, self.bq + 0] = 1.0
+        self.qpos[idx, self.bq + 2] = self.ball_radius
+        self.qpos[idx, self.bq + 3] = 1.0
+        self._forward()
+
     def step(self, actions):
         """actions: [n, nu] in [-1, 1]. Returns obs, reward, done(all-worlds)."""
-        self.ctrl.copy_(actions.clamp(-1.0, 1.0))
+        a = actions.clamp(-1.0, 1.0)
+        self.ctrl.copy_(a)
         self._physics_step()
+        self._sanitize()
         self.target_xy = self.target_xy + self.target_vel * CONTROL_DT
         over = self.target_xy.abs() > self.bounds
         self.target_vel = torch.where(over, -self.target_vel, self.target_vel)
@@ -204,7 +238,14 @@ class WarpDribbleEnv:
 
         self.t += 1
         done = self.t >= self.episode_steps
-        return self._obs(), self._reward(), done
+        rew = self._reward()
+        if self.energy_coef > 0:
+            rew = rew - self.energy_coef * (a ** 2).mean(-1)
+        if self.smooth_coef > 0:
+            rew = rew - self.smooth_coef * ((a - self.prev_ctrl) ** 2).mean(-1)
+        self.prev_ctrl = a
+        rew = rew.clamp(self.rew_clip[0], self.rew_clip[1])
+        return self._obs(), rew, done
 
     # ------------------------------------------------------------------
     def _root_frames(self):
@@ -295,6 +336,25 @@ class WarpDribbleEnv:
         touch = torch.cat([self.sensordata[:, s:s + d] for s, d in self.sl_touch], -1) / 10000.0
         sv, sg, sa = (self.sensordata[:, s:s + d] for s, d in
                       (self.sl_vel, self.sl_gyro, self.sl_accel))
+
+        # Accelerometer scaled and clipped. It is the ONLY unbounded thing in the
+        # observation: contact impacts spike it to ~5,700 m/s^2 while every other input
+        # sits near 1 (bodies_pos 1.1, world_zaxis 1.0, joints_pos 2.1). That is not a
+        # divergence, it is real physics -- and it is ruinous twice over:
+        #
+        #   1. It dominates the first layer, so the network is effectively conditioned
+        #      on impact spikes.
+        #   2. It killed dribble_paper_v7 at 149M steps. A ~6,000 input drives a huge
+        #      action mean, which makes logp extreme, which makes the PPO ratio
+        #      exp(logp - logp_old) overflow to inf, which makes the gradient NaN --
+        #      and clip_grad_norm_ then scales EVERY gradient by NaN, because it clips
+        #      rather than sanitises. The obs were finite the whole way down.
+        #
+        # touch already had exactly this treatment (/10000); accel never did. /100 puts
+        # a hard impact at ~57, and the clamp bounds the tail. Any future body must
+        # apply the same scaling at deployment -- it is part of the obs contract.
+        sa = (sa / 100.0).clamp(-50.0, 50.0)
+
 
         ball_ego = torch.cat([self._to_ego3(self._ball_xyz()),
                               self._vec_to_ego3(self._ball_vel_xyz())], -1)

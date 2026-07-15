@@ -33,13 +33,30 @@ class ActorCritic(nn.Module):
         self.value_net = nn.Linear(self.mlp_extractor.latent_dim_vf, 1)
         self.log_std = nn.Parameter(torch.ones(act_dim) * log_std_init)
 
+    @staticmethod
+    def _clean(obs):
+        """Sanitize observations at the network boundary. This is THE guarantee that
+        the policy never emits a NaN mean and crashes Normal(): a network cannot
+        produce a non-finite output from a finite, bounded input.
+
+        Every upstream guard (env._sanitize on qvel/qpos, ppo.collect on obs2) has a
+        seam -- a contact impulse spikes the accelerometer to inf/NaN in a single
+        substep while integrated velocity is still moderate, so it slips past a
+        velocity check, and clamp() does not repair a NaN (clamp(NaN)=NaN). Those
+        guards still matter (they stop garbage propagating in the sim), but this is
+        the one that makes the crash impossible. Normal obs live in ~[-50, 50]
+        (accelerometer is already scaled /100 and clamped), so +/-100 never touches
+        real data and only bounds divergence garbage.
+        """
+        return torch.nan_to_num(obs, nan=0.0, posinf=100.0, neginf=-100.0).clamp(-100.0, 100.0)
+
     def dist(self, obs):
-        lat = self.mlp_extractor.forward_actor(obs)
+        lat = self.mlp_extractor.forward_actor(self._clean(obs))
         mean = self.action_net(lat)
         return torch.distributions.Normal(mean, self.log_std.exp())
 
     def value(self, obs):
-        return self.value_net(self.mlp_extractor.forward_critic(obs)).squeeze(-1)
+        return self.value_net(self.mlp_extractor.forward_critic(self._clean(obs))).squeeze(-1)
 
     @torch.no_grad()
     def act(self, obs):
@@ -48,7 +65,7 @@ class ActorCritic(nn.Module):
         return a, d.log_prob(a).sum(-1), self.value(obs)
 
     def z(self, obs):
-        return self.mlp_extractor.z(obs)
+        return self.mlp_extractor.z(self._clean(obs))
 
 
 class PPOTrainer:

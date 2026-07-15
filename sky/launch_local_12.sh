@@ -7,9 +7,12 @@ set -u
 cd /workspace/utmist-vc2-phase2
 mkdir -p logs
 BUCKET=vc2-2026-checkpoints
-COMMON="--worlds 2048 --max-hours 10 --ent-floor -1.2 --ent-ceil 0.0 \
-  --ent-anneal-steps 400000000 --first-video-secs 90 --video-secs 1200 \
-  --ckpt-secs 1800 --gcs-bucket $BUCKET"
+# --steps is a huge backstop so --max-hours is the binding stop. (Without this,
+# follow used its 20M default and exited in 20 min -- the runs "finished", they
+# did not fail.)
+COMMON="--worlds 2048 --steps 20000000000 --max-hours 10 --ent-floor -1.2 \
+  --ent-ceil 0.0 --ent-anneal-steps 400000000 --first-video-secs 90 \
+  --video-secs 1200 --ckpt-secs 1800 --gcs-bucket $BUCKET"
 
 launch () {  # task run_name extra_args
   local task=$1 name=$2; shift 2

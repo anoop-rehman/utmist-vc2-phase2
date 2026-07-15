@@ -50,6 +50,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--steps", type=int, default=500_000_000)
     p.add_argument("--worlds", type=int, default=2048)
+    p.add_argument("--seed", type=int, default=0,
+                   help="env + torch init seed; vary for replica runs")
     p.add_argument("--rollout", type=int, default=64)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--ent-coef", type=float, default=0.005)
@@ -128,6 +130,7 @@ def main():
     p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--no-wandb", action="store_true")
     args = p.parse_args()
+    torch.manual_seed(args.seed)
 
     run_dir = os.path.join("runs_v2", args.run_name)
     if os.path.isdir(run_dir) and os.listdir(run_dir) and not args.resume:
@@ -164,7 +167,7 @@ def main():
                                             load_checkpoint, load_pretrained,
                                             save_checkpoint)
 
-    env = WarpDribbleEnv(num_worlds=args.worlds,
+    env = WarpDribbleEnv(num_worlds=args.worlds, seed=args.seed,
                          target_speed_range=tuple(args.target_speed),
                          reward_coef=args.reward_coef,
                          episode_seconds=args.episode_secs,

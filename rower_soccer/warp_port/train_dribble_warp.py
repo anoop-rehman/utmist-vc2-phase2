@@ -276,10 +276,13 @@ def main():
                     sync_async(best_path, args.gcs_bucket, args.run_name)
             if use_wandb:
                 import wandb
+                # _warp, not _dm_control: this eval runs in the Warp env now (see
+                # render.py). The value was always the Warp number; only the label
+                # was stale, left over from when the eval was dm_control.
                 wandb.log({"env_step": trainer.total_steps,
                            "eval/video": wandb.Video(vpath, format="mp4"),
-                           "eval/ep_rew_dm_control": ep_rew,
-                           "eval/fitness_dm_control": fit})
+                           "eval/ep_rew_warp": ep_rew,
+                           "eval/fitness_warp": fit})
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now
             save_checkpoint(trainer, ckpt_path)

@@ -25,13 +25,39 @@ OBS_SANITY_LIMIT = 1.0e3
 
 class ActorCritic(nn.Module):
     def __init__(self, obs_dim, act_dim, proprio_indices, task_indices,
-                 z_dim=16, log_std_init=0.0):
+                 z_dim=16, log_std_init=0.0, state_dependent_std=False,
+                 log_std_min=-4.0, log_std_max=0.0):
         super().__init__()
         self.mlp_extractor = LatentExtractor(
             proprio_indices=proprio_indices, task_indices=task_indices, z_dim=z_dim)
         self.action_net = nn.Linear(self.mlp_extractor.latent_dim_pi, act_dim)
         self.value_net = nn.Linear(self.mlp_extractor.latent_dim_vf, 1)
-        self.log_std = nn.Parameter(torch.ones(act_dim) * log_std_init)
+        # State-dependent std (gSDE-flavored): the exploration noise is a learned
+        # function of the actor latent, so the policy can go QUIET near the ball for
+        # fine control and stay noisy in open field. The global-parameter form below
+        # cannot do that -- one std for every state -- which is why dribble's precise
+        # nudges were drowned by std=0.30. Clamp range [log_std_min, log_std_max] is
+        # wide and LOW at the bottom (exp(-4)=0.018) precisely to permit fine control;
+        # the trainer's ent_floor is NOT applied to it (that floor is what forbade
+        # low std in the first place).
+        self.state_dependent_std = state_dependent_std
+        self.log_std_min, self.log_std_max = log_std_min, log_std_max
+        if state_dependent_std:
+            self.log_std_net = nn.Linear(self.mlp_extractor.latent_dim_pi, act_dim)
+            # Start state-INDEPENDENT (zero weights) at a MODERATE std, then let the
+            # policy learn to modulate -- a gentle start, not a jolt. Bias -1.0 => std
+            # 0.37, near where follow_base trained (0.30); a fresh head at the default
+            # log_std_init=0 would be std 1.0, which would swamp the warm-started
+            # locomotion with noise before the head learns to quiet down.
+            nn.init.zeros_(self.log_std_net.weight)
+            nn.init.constant_(self.log_std_net.bias, -1.0)
+        else:
+            self.log_std = nn.Parameter(torch.ones(act_dim) * log_std_init)
+
+    def _log_std(self, lat):
+        if self.state_dependent_std:
+            return self.log_std_net(lat).clamp(self.log_std_min, self.log_std_max)
+        return self.log_std
 
     @staticmethod
     def _clean(obs):
@@ -53,7 +79,7 @@ class ActorCritic(nn.Module):
     def dist(self, obs):
         lat = self.mlp_extractor.forward_actor(self._clean(obs))
         mean = self.action_net(lat)
-        return torch.distributions.Normal(mean, self.log_std.exp())
+        return torch.distributions.Normal(mean, self._log_std(lat).exp())
 
     def value(self, obs):
         return self.value_net(self.mlp_extractor.forward_critic(self._clean(obs))).squeeze(-1)
@@ -216,11 +242,17 @@ class PPOTrainer:
                     self.opt.zero_grad(set_to_none=True)
                     continue
                 self.opt.step()
-                if self.ent_floor is not None or self.ent_ceil is not None:
+                # Only the global-parameter std is clamped here. State-dependent std
+                # has no global param -- its bounds live in ActorCritic._log_std
+                # (log_std_min/max), deliberately wide so fine control is allowed.
+                if (not self.ac.state_dependent_std
+                        and (self.ent_floor is not None or self.ent_ceil is not None)):
                     with torch.no_grad():
                         self.ac.log_std.clamp_(min=self.ent_floor, max=self.ent_ceil)
+                # d.stddev works for both the global param and the state-dependent
+                # head -- it is the actual std of this minibatch's distribution.
                 stats = {"pg": float(pg), "vf": float(vloss), "ent": float(ent),
-                         "std": float(self.ac.log_std.exp().mean())}
+                         "std": float(d.stddev.mean())}
         return stats
 
     def train_iter(self):
@@ -258,12 +290,16 @@ def load_checkpoint(trainer: "PPOTrainer", path):
 
 def export_sb3_compatible(ac: ActorCritic, path):
     """Save weights loadable into LatentActorCriticPolicy (CPU eval path)."""
-    torch.save({
+    out = {
         "mlp_extractor": ac.mlp_extractor.state_dict(),
         "action_net": ac.action_net.state_dict(),
         "value_net": ac.value_net.state_dict(),
-        "log_std": ac.log_std.detach().cpu(),
-    }, path)
+    }
+    if ac.state_dependent_std:
+        out["log_std_net"] = ac.log_std_net.state_dict()
+    else:
+        out["log_std"] = ac.log_std.detach().cpu()
+    torch.save(out, path)
 
 
 def _flatten_checkpoint(sd):
@@ -274,7 +310,10 @@ def _flatten_checkpoint(sd):
     flat = {f"mlp_extractor.{k}": v for k, v in sd["mlp_extractor"].items()}
     flat.update({f"action_net.{k}": v for k, v in sd["action_net"].items()})
     flat.update({f"value_net.{k}": v for k, v in sd["value_net"].items()})
-    flat["log_std"] = sd["log_std"]
+    if "log_std_net" in sd:
+        flat.update({f"log_std_net.{k}": v for k, v in sd["log_std_net"].items()})
+    if "log_std" in sd:
+        flat["log_std"] = sd["log_std"]
     return flat
 
 

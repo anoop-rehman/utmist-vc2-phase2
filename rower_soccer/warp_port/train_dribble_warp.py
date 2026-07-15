@@ -88,6 +88,13 @@ def main():
     # Anneal the entropy bonus to 0 over this many env-steps (0 = constant). Fixes
     # the late-training entropy runaway that collapsed follow_v5.
     p.add_argument("--ent-anneal-steps", type=int, default=0)
+    # Fine control: make the exploration std a learned function of state (gSDE-flavored)
+    # so the policy can go quiet near the ball. Its bounds are wide/low by design, so
+    # --ent-floor does NOT apply to it.
+    p.add_argument("--state-dependent-std", action="store_true")
+    # Reward-parking: anneal the velocity-shaping terms to 0 over N steps, so late
+    # training optimizes pure fitness (ball AT target) instead of ball velocity.
+    p.add_argument("--shaping-anneal-steps", type=int, default=0)
     p.add_argument("--reward-mode", default="paper", choices=["paper", "progress"])
     p.add_argument("--progress-scale", type=float, default=2.0)
     p.add_argument("--approach-scale", type=float, default=0.5,
@@ -182,7 +189,8 @@ def main():
                          energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
     ac = ActorCritic(env.obs_dim, env.act_dim,
                      proprio_indices=env.proprio_indices.tolist(),
-                     task_indices=env.task_indices.tolist(), z_dim=args.z_dim)
+                     task_indices=env.task_indices.tolist(), z_dim=args.z_dim,
+                     state_dependent_std=args.state_dependent_std)
     trainer = PPOTrainer(env, ac, lr=args.lr, rollout_len=args.rollout,
                          ent_coef=args.ent_coef, ent_floor=args.ent_floor,
                          ent_ceil=args.ent_ceil,
@@ -215,6 +223,8 @@ def main():
     it = 0
     deadline = t0 + args.max_hours * 3600.0
     while trainer.total_steps < args.steps and time.perf_counter() < deadline:
+        if args.shaping_anneal_steps > 0:
+            env.shaping_scale = max(0.0, 1.0 - trainer.total_steps / args.shaping_anneal_steps)
         stats = trainer.train_iter()
         it += 1
         now = time.perf_counter()

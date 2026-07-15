@@ -93,6 +93,9 @@ class WarpDribbleEnv:
         self.smooth_coef = smooth_coef
         self.rew_clip = rew_clip
         self.n_diverged = 0
+        # Multiplier on the velocity-shaping terms; the trainer anneals it 1->0 when
+        # --shaping-anneal-steps is set, so late training optimizes pure fitness.
+        self.shaping_scale = 1.0
 
         self.model, self.meta = build_creature_ball_scene(
             creature_xml, ball=ball or BallSpec())
@@ -313,14 +316,23 @@ class WarpDribbleEnv:
                     + self.progress_scale * progress
                     + torch.exp(-self.reward_coef * dist_bt))
 
-        # paper (Table S3): fitness + two velocity shaping terms
+        # paper (Table S3): fitness + two velocity shaping terms.
+        #
+        # self.shaping_scale (annealed 1->0 by the trainer, if --shaping-anneal-steps
+        # is set) fades the velocity terms out over training. They are a bootstrap:
+        # early they teach the worm to approach the ball and shove it targetward, but
+        # w_b2t*v_b2t rewards ball VELOCITY toward the target (up to ~1.5/step),
+        # which DWARFS fitness (max 1.0/step) and pays the worm to whack the ball
+        # rather than park it. Fading them to 0 leaves pure fitness late in training,
+        # which rewards the ball ENDING near the target -- realigning reward with goal.
         fitness = torch.exp(-self.reward_coef * dist_bt)
         n_pb = dist_pb.clamp(min=1e-6)
         v_p2b = (root_vel * (d_pb / n_pb.unsqueeze(-1))).sum(-1)
         n_bt = dist_bt.clamp(min=1e-6)
         v_b2t = (ball_vel * (d_bt / n_bt.unsqueeze(-1))).sum(-1)
-        return (fitness + self.w_p2b * v_p2b.clamp(min=0.0)
-                + self.w_b2t * v_b2t.clamp(min=0.0))
+        shaping = (self.w_p2b * v_p2b.clamp(min=0.0)
+                   + self.w_b2t * v_b2t.clamp(min=0.0))
+        return fitness + self.shaping_scale * shaping
 
     def fitness(self):
         """Unshaped Table-S3 fitness, for gating (mode-agnostic)."""

@@ -367,7 +367,7 @@ class WarpDribbleEnv:
         world_zaxis = rot.reshape(n, 9)[:, 6:9]
 
         return torch.cat([
-            ball_ego,                          # ball_ego  (sorts first)   (4)
+            ball_ego,                          # ball_ego  (sorts first)   (6)
             bodies_ego,                        # creature/bodies_pos       (9)
             pos[:, 2:3],                       # creature/body_height      (1)
             self.qpos[:, self.jq],             # creature/joints_pos       (2)

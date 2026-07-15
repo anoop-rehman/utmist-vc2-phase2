@@ -1,0 +1,100 @@
+_wandb:
+    value:
+        cli_version: 0.28.0
+        e:
+            waw77icn111s648sq4kr40h6vtirlj6g:
+                executable: /workspace/utmist-vc2-phase2/.venv/bin/python
+                git:
+                    commit: 83997714142b54a8b6308557f5cfd05a10a99b08
+                    remote: https://github.com/anoop-rehman/utmist-vc2-phase2
+                host: 042d34b04c6c
+                os: Linux-6.8.0-60-generic-x86_64-with-glibc2.35
+                program: <stdin>
+                python: CPython 3.11.10
+                root: /workspace/utmist-vc2-phase2
+                startedAt: "2026-07-15T15:13:31.346499Z"
+                writerId: waw77icn111s648sq4kr40h6vtirlj6g
+        m: []
+        python_version: 3.11.10
+        t:
+            "3":
+                - 2
+                - 5
+                - 14
+                - 62
+            "4": 3.11.10
+            "5": 0.28.0
+            "12": 0.28.0
+            "13": linux-x86_64
+backend:
+    value: mujoco_warp
+bounds:
+    value: 10
+ckpt_secs:
+    value: 1800
+creature_xml:
+    value: creature_configs/three_seg_worm.xml
+energy_coef:
+    value: 0
+ent_anneal_steps:
+    value: 400000000
+ent_ceil:
+    value: 0
+ent_coef:
+    value: 0.005
+ent_floor:
+    value: -1.2
+episode_secs:
+    value: 15
+first_video_secs:
+    value: 90
+gcs_bucket:
+    value: vc2-2026-checkpoints
+git_sha:
+    value: 3d47515
+init_from:
+    value: null
+lr:
+    value: 0.0003
+max_hours:
+    value: 10
+mid_ckpt_frac:
+    value: 0.5
+no_wandb:
+    value: false
+progress_scale:
+    value: 2
+resume:
+    value: false
+reward_coef:
+    value: 0.5
+reward_mode:
+    value: paper
+rollout:
+    value: 64
+run_name:
+    value: follow_sm10
+seed:
+    value: 0
+smooth_coef:
+    value: 0.1
+spawn_dist:
+    value:
+        - 1.76
+        - 5.28
+steps:
+    value: 20000000000
+target_speed:
+    value:
+        - 0.03
+        - 0.21
+vel_shaping:
+    value: 0.15
+video_secs:
+    value: 1200
+wandb_project:
+    value: creature-soccer
+worlds:
+    value: 2048
+z_dim:
+    value: 16

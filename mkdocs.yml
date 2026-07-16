@@ -1,0 +1,100 @@
+site_name: Creature Soccer
+site_description: >-
+  GA-evolved creatures learn to play 2v2 soccer in dm_control's MuJoCo soccer
+  environment, via a latent-bottleneck multitask-curriculum RL pipeline.
+site_author: UTMIST Virtual Creatures
+repo_url: https://github.com/anoop-rehman/utmist-vc2-phase2
+repo_name: anoop-rehman/utmist-vc2-phase2
+edit_uri: edit/main/docs/
+copyright: UTMIST Virtual Creatures — Creature Soccer
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+  - include-markdown
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - getting-started/installation.md
+      - getting-started/quickstart.md
+      - getting-started/pod-setup.md
+  - Architecture:
+      - architecture/overview.md
+      - architecture/observation-contract.md
+      - architecture/warp-backend.md
+  - Pipeline:
+      - pipeline.md
+  - Training:
+      - training/drills.md
+      - training/curriculum.md
+      - training/sweeps.md
+  - Interactive play:
+      - play-server.md
+  - Contracts:
+      - contracts.md
+  - Reference:
+      - reference/repo-layout.md
+      - reference/glossary.md
+  - Design docs (canonical):
+      - design/pipeline-v2.md
+      - design/stage2-multitask.md
+      - design/overview.md
+      - design/ws1-low-level.md
+      - design/play-interactive.md
+      - design/soccer-bridge.md

@@ -94,6 +94,42 @@ class ActorCritic(nn.Module):
         return self.mlp_extractor.z(self._clean(obs))
 
 
+class SimpleActorCritic(nn.Module):
+    """Plain-MLP baseline: obs -> action, with NO latent bottleneck and NO shared
+    decoder. Same public interface as ActorCritic (dist/value/act/_clean), so it
+    drops straight into PPOTrainer.
+
+    This is the control experiment for the central architectural question we never
+    tested: is the policy->z->decoder structure itself what handicaps dribble? If
+    this plain policy learns a task ActorCritic cannot, the bottleneck/decoder is the
+    culprit; if it also cannot, the task/body is, not our design. Capacity is matched
+    to ActorCritic's actor+critic (two 256-wide ELU trunks) for a fair comparison.
+    """
+    def __init__(self, obs_dim, act_dim, hidden=256, log_std_init=0.0, **_ignored):
+        super().__init__()
+        self.state_dependent_std = False
+        def trunk():
+            return nn.Sequential(nn.Linear(obs_dim, hidden), nn.ELU(),
+                                 nn.Linear(hidden, hidden), nn.ELU())
+        self.pi, self.vf = trunk(), trunk()
+        self.action_net = nn.Linear(hidden, act_dim)
+        self.value_net = nn.Linear(hidden, 1)
+        self.log_std = nn.Parameter(torch.ones(act_dim) * log_std_init)
+
+    def dist(self, obs):
+        lat = self.pi(ActorCritic._clean(obs))
+        return torch.distributions.Normal(self.action_net(lat), self.log_std.exp())
+
+    def value(self, obs):
+        return self.value_net(self.vf(ActorCritic._clean(obs))).squeeze(-1)
+
+    @torch.no_grad()
+    def act(self, obs):
+        d = self.dist(obs)
+        a = d.sample()
+        return a, d.log_prob(a).sum(-1), self.value(obs)
+
+
 class PPOTrainer:
     def __init__(self, env, ac: ActorCritic, lr=3e-4, rollout_len=64,
                  minibatches=8, epochs=4, gamma=0.99, gae_lambda=0.95,
@@ -290,6 +326,13 @@ def load_checkpoint(trainer: "PPOTrainer", path):
 
 def export_sb3_compatible(ac: ActorCritic, path):
     """Save weights loadable into LatentActorCriticPolicy (CPU eval path)."""
+    # The plain baseline (SimpleActorCritic) has no mlp_extractor, so the structured
+    # SB3 export does not apply -- save its flat state_dict instead. It is never
+    # warm-started FROM or loaded into an SB3 policy; this just needs to not crash and
+    # to be resumable.
+    if not hasattr(ac, "mlp_extractor"):
+        torch.save({"plain_state_dict": ac.state_dict()}, path)
+        return
     out = {
         "mlp_extractor": ac.mlp_extractor.state_dict(),
         "action_net": ac.action_net.state_dict(),

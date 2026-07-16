@@ -42,7 +42,8 @@ def make_eval(args):
         w_ball_to_target=args.w_ball_to_target,
         reward_mode=args.reward_mode, progress_scale=args.progress_scale,
         approach_scale=args.approach_scale, episode_seconds=args.episode_secs,
-        energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
+        energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
+        fixed_start=getattr(args, "fixed_start", False))
     return env, WarpRenderer(args.creature_xml, has_ball=True)
 
 
@@ -95,6 +96,10 @@ def main():
     # Reward-parking: anneal the velocity-shaping terms to 0 over N steps, so late
     # training optimizes pure fitness (ball AT target) instead of ball velocity.
     p.add_argument("--shaping-anneal-steps", type=int, default=0)
+    # Curriculum stage 1: fix worm yaw + ball direction (only the target varies).
+    p.add_argument("--fixed-start", action="store_true")
+    # Plain-MLP baseline: no latent/decoder. The architecture control experiment.
+    p.add_argument("--plain", action="store_true")
     p.add_argument("--reward-mode", default="paper", choices=["paper", "progress"])
     p.add_argument("--progress-scale", type=float, default=2.0)
     p.add_argument("--approach-scale", type=float, default=0.5,
@@ -169,7 +174,7 @@ def main():
         wandb.define_metric("*", step_metric="env_step")
 
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
-    from rower_soccer.warp_port.ppo import (ActorCritic, PPOTrainer,
+    from rower_soccer.warp_port.ppo import (ActorCritic, SimpleActorCritic, PPOTrainer,
                                             export_sb3_compatible,
                                             load_checkpoint, load_pretrained,
                                             save_checkpoint)
@@ -186,11 +191,15 @@ def main():
                          bounds=args.bounds,
                          target_dist_range=tuple(args.target_dist),
                          ball_spawn_range=tuple(args.ball_spawn),
-                         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
-    ac = ActorCritic(env.obs_dim, env.act_dim,
-                     proprio_indices=env.proprio_indices.tolist(),
-                     task_indices=env.task_indices.tolist(), z_dim=args.z_dim,
-                     state_dependent_std=args.state_dependent_std)
+                         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
+                         fixed_start=args.fixed_start)
+    if args.plain:
+        ac = SimpleActorCritic(env.obs_dim, env.act_dim)
+    else:
+        ac = ActorCritic(env.obs_dim, env.act_dim,
+                         proprio_indices=env.proprio_indices.tolist(),
+                         task_indices=env.task_indices.tolist(), z_dim=args.z_dim,
+                         state_dependent_std=args.state_dependent_std)
     trainer = PPOTrainer(env, ac, lr=args.lr, rollout_len=args.rollout,
                          ent_coef=args.ent_coef, ent_floor=args.ent_floor,
                          ent_ceil=args.ent_ceil,

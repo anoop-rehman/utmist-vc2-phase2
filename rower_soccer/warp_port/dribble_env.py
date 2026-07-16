@@ -51,7 +51,8 @@ class WarpDribbleEnv:
                  w_player_to_ball=0.1, w_ball_to_target=0.3,
                  reward_mode="paper", progress_scale=2.0, approach_scale=0.5,
                  ball: BallSpec = None, nconmax=64, njmax=512,
-                 energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0)):
+                 energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0),
+                 fixed_start=False):
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
@@ -96,6 +97,7 @@ class WarpDribbleEnv:
         # Multiplier on the velocity-shaping terms; the trainer anneals it 1->0 when
         # --shaping-anneal-steps is set, so late training optimizes pure fitness.
         self.shaping_scale = 1.0
+        self.fixed_start = fixed_start  # curriculum stage 1; see reset()
 
         self.model, self.meta = build_creature_ball_scene(
             creature_xml, ball=ball or BallSpec())
@@ -165,13 +167,19 @@ class WarpDribbleEnv:
         self.qvel.zero_()
         self.qpos.zero_()
         qr = m.qpos_root
-        yaw = self._rand(n) * (2 * np.pi)
+        # Curriculum stage 1 (--fixed-start): the worm's yaw and the ball's direction
+        # are NOT randomized -- worm faces +x, ball sits straight ahead. Only the
+        # TARGET direction varies (and, with --target-speed 0, it is stationary). This
+        # isolates the one hard skill, precise ball control, from locomotion and
+        # target-tracking, so the worm can finally experience the parking reward it
+        # has never once earned. Later stages re-enable this randomization.
+        yaw = torch.zeros(n, device=dev) if self.fixed_start else self._rand(n) * (2 * np.pi)
         self.qpos[:, qr + 2] = m.spawn_z
         self.qpos[:, qr + 3] = torch.cos(yaw / 2)
         self.qpos[:, qr + 6] = torch.sin(yaw / 2)
 
-        # ball: random direction, just outside the body footprint
-        bang = self._rand(n) * (2 * np.pi)
+        # ball: random direction (or straight ahead under --fixed-start)
+        bang = torch.zeros(n, device=dev) if self.fixed_start else self._rand(n) * (2 * np.pi)
         b0, b1 = self.ball_spawn_range
         bdist = b0 + (b1 - b0) * self._rand(n)
         ball_xy = torch.stack([bdist * torch.cos(bang), bdist * torch.sin(bang)], -1)

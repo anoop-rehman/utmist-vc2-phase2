@@ -1,0 +1,32 @@
+name: Docs
+
+# Build the MkDocs site and publish it to the gh-pages branch (GitHub Pages
+# serves that branch's root). Runs on every push to main that touches the docs,
+# and can be triggered by hand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - rower_soccer/docs/**
+      - CONTRACTS.md
+      - POD_SETUP.md
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write   # gh-deploy pushes the built site to the gh-pages branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs gh-deploy --force --no-history

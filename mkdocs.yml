@@ -3,6 +3,7 @@ site_description: >-
   GA-evolved creatures learn to play 2v2 soccer in dm_control's MuJoCo soccer
   environment, via a latent-bottleneck multitask-curriculum RL pipeline.
 site_author: UTMIST Virtual Creatures
+site_url: https://anoop-rehman.github.io/utmist-vc2-phase2/
 repo_url: https://github.com/anoop-rehman/utmist-vc2-phase2
 repo_name: anoop-rehman/utmist-vc2-phase2
 edit_uri: edit/main/docs/

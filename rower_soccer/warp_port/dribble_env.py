@@ -167,19 +167,24 @@ class WarpDribbleEnv:
         self.qvel.zero_()
         self.qpos.zero_()
         qr = m.qpos_root
-        # Curriculum stage 1 (--fixed-start): the worm's yaw and the ball's direction
-        # are NOT randomized -- worm faces +x, ball sits straight ahead. Only the
-        # TARGET direction varies (and, with --target-speed 0, it is stationary). This
-        # isolates the one hard skill, precise ball control, from locomotion and
-        # target-tracking, so the worm can finally experience the parking reward it
-        # has never once earned. Later stages re-enable this randomization.
-        yaw = torch.zeros(n, device=dev) if self.fixed_start else self._rand(n) * (2 * np.pi)
+        # Curriculum stage 1 (--fixed-start): worm, ball, and target are COLINEAR.
+        # A single random direction theta orients everything -- the worm faces theta,
+        # the ball sits just ahead of it along theta, and the target lies beyond the
+        # ball on the same line, at the NORMAL (far) target distance. So the worm
+        # simply has to walk forward and it accidentally pushes the ball toward the
+        # target, which bootstraps learning. The one hard skill left is CONTROL:
+        # push the ball the right distance and stop it there. Locomotion, reaching,
+        # and direction are all trivialized; only parking remains. (theta is a pure
+        # world rotation and is invisible to the egocentric obs, so it adds robustness
+        # at no cost.) Later stages decouple these angles to add difficulty back.
+        theta = self._rand(n) * (2 * np.pi)
+        yaw = theta if self.fixed_start else self._rand(n) * (2 * np.pi)
         self.qpos[:, qr + 2] = m.spawn_z
         self.qpos[:, qr + 3] = torch.cos(yaw / 2)
         self.qpos[:, qr + 6] = torch.sin(yaw / 2)
 
-        # ball: random direction (or straight ahead under --fixed-start)
-        bang = torch.zeros(n, device=dev) if self.fixed_start else self._rand(n) * (2 * np.pi)
+        # ball: along theta ahead of the worm (or a random direction otherwise)
+        bang = theta if self.fixed_start else self._rand(n) * (2 * np.pi)
         b0, b1 = self.ball_spawn_range
         bdist = b0 + (b1 - b0) * self._rand(n)
         ball_xy = torch.stack([bdist * torch.cos(bang), bdist * torch.sin(bang)], -1)
@@ -188,9 +193,9 @@ class WarpDribbleEnv:
         self.qpos[:, self.bq + 2] = self.ball_radius
         self.qpos[:, self.bq + 3] = 1.0  # unit quat
 
-        # target: anchored to the BALL, so ||ball - target|| stays in a range
-        # where exp(-c*d) still has a usable gradient (see __init__).
-        ang = self._rand(n) * (2 * np.pi)
+        # target: on the SAME line beyond the ball under --fixed-start, else a random
+        # direction from the ball. Distance is the normal target_dist_range either way.
+        ang = theta if self.fixed_start else self._rand(n) * (2 * np.pi)
         d0, d1 = self.target_dist_range
         dist = d0 + (d1 - d0) * self._rand(n)
         self.target_xy = ball_xy + torch.stack(

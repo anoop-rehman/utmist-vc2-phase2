@@ -10,7 +10,7 @@ mkdir -p logs
 BUCKET=vc2-2026-checkpoints
 INIT=runs_v2/_init_follow_base.pt
 # Stage 1: fixed worm yaw + ball ahead at 0.8 m; target stationary, 0.5-1.5 m away.
-STAGE1="--fixed-start --ball-spawn 0.8 0.8 --target-speed 0 0 --target-dist 0.5 1.5"
+STAGE1="--fixed-start --ball-spawn 0.8 0.8 --target-speed 0 0 --target-dist 2.0 5.0"
 COMMON="--worlds 2048 --steps 20000000000 --max-hours 10 --ent-floor -1.2 \
   --ent-ceil 0.0 --ent-anneal-steps 400000000 --first-video-secs 90 \
   --video-secs 1200 --ckpt-secs 1800 --gcs-bucket $BUCKET $STAGE1"

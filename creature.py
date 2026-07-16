@@ -261,5 +261,19 @@ class CreatureObservables(legacy_base.WalkerObservables):
 
   @property
   def proprioception(self):
-    return ([self.joints_pos, self.bodies_pos, self.absolute_root_mat, self.touch_sensors, self.joints_vel, self.absolute_root_pos] +
+    # world_zaxis + body_height, NOT absolute_root_mat + absolute_root_pos.
+    #
+    # Proprio is the shared low-level controller's entire input contract, so it
+    # may only contain things that (a) exist in the 2v2 game and (b) are
+    # invariant to where on the pitch the creature is. Absolute root pos/mat are
+    # neither: they hand the decoder the creature's global xy and global yaw, so
+    # it can learn gaits that only work at one spot facing one way, and dm_soccer
+    # does not supply them at all -- it gives world_zaxis (gravity in body frame)
+    # and body_height, which is exactly what a motor controller actually needs
+    # (which way is up, how high off the ground) and nothing more.
+    #
+    # This takes proprio 37 -> 29. Keep warp_port/{follow,dribble}_env.py in
+    # lockstep: the Warp obs must stay byte-identical to this, or the CPU eval
+    # silently grades a different observation than the one trained on.
+    return ([self.joints_pos, self.bodies_pos, self.world_zaxis, self.touch_sensors, self.joints_vel, self.body_height] +
             self._collect_from_attachments('proprioception'))

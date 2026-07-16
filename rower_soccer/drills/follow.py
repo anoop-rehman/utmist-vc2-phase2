@@ -15,7 +15,17 @@ dm_control composer task on a flat floor.
 import numpy as np
 from dm_control import composer, mjcf
 from dm_control.composer.observation import observable
-from dm_control.locomotion.arenas import floors
+from dm_control.locomotion.soccer.pitch import Pitch
+
+# dm_soccer's own 2v2 pitch: ground 96 x 72 m, walls at x=+/-48 / y=+/-36, goals
+# at x=+/-42.67 with posts at y=+/-11.88. The drills train on the SAME arena the
+# 2v2 game uses so there is no arena shift at transfer, and so `shoot` has a real
+# goal to aim at. At the drills' +/-10 m bounds the worm never reaches a wall or a
+# goal, and the pitch ground's contact params are byte-identical to the old
+# floors.Floor (friction [1, 0.005, 1e-4], solref [0.02, 1], condim 3) -- verified
+# -- so follow/dribble physics are unchanged by this swap. It is looks now and
+# goals later. Keep in step with warp_port/scene.py's _BASE_XML.
+PITCH_SIZE = (48.0, 36.0)   # HALF-extents, as dm_control defines them
 
 # Applies the project arena.xml monkey-patch (physics opts) at import time,
 # keeping drill physics identical to the soccer env.
@@ -52,13 +62,18 @@ class FollowTask(composer.Task):
     def __init__(self,
                  creature_kind="worm",
                  episode_seconds=15.0,
-                 arena_size=(30.0, 30.0),
-                 target_speed_range=(0.25, 2.0),
+                 arena_size=PITCH_SIZE,
+                 bounds=10.0,
+                 target_speed_range=(0.03, 0.21),
+                 spawn_dist_range=(1.76, 5.28),
                  direction_change_prob=0.0,   # per control step; 0 = constant velocity (v1)
                  lookahead_seconds=(1.0,),
                  reward_coef=0.5,
-                 target_height=1.0):
-        self._arena = floors.Floor(size=arena_size)
+                 target_height=0.5):
+        # These MUST track WarpFollowEnv's defaults: this task is the CPU
+        # transfer/parity eval for the Warp-trained policy, so a mismatch in
+        # target speed or spawn distance would show up as a phantom sim2sim gap.
+        self._arena = Pitch(size=arena_size)
         self._walker = make_creature(creature_kind, "home")
         self._arena.add_free_entity(self._walker)
         self._target = MovingTarget()
@@ -70,7 +85,11 @@ class FollowTask(composer.Task):
         self._lookahead = lookahead_seconds
         self._reward_coef = reward_coef
         self._target_height = target_height
-        self._bounds = np.array(arena_size) * 0.9
+        self._spawn_dist_range = spawn_dist_range
+        # Explicit, not arena_size * 0.9: the floor is just ground to stand on
+        # and can stay large, while the target's roaming box has to match the
+        # Warp env's `bounds`.
+        self._bounds = np.array([bounds, bounds], dtype=np.float64)
         self._target_xy = np.zeros(2)
         self._target_vel = np.zeros(2)
 
@@ -114,6 +133,31 @@ class FollowTask(composer.Task):
         d = world_xy - pos
         return np.array([np.dot(d, fwd), np.dot(d, left)], dtype=np.float32)
 
+    def _vec_to_ego(self, physics, world_vec):
+        """Rotate a world-frame vector (velocity, not a position) into the root
+        frame: direction only, no translation."""
+        root = physics.bind(self._walker.root_body)
+        xmat = np.array(root.xmat).reshape(3, 3)
+        fwd, left = xmat[:2, 0], xmat[:2, 1]
+        return np.array([np.dot(world_vec, fwd), np.dot(world_vec, left)],
+                        dtype=np.float32)
+
+    # 3-D variants. The ball obs uses these, not the 2-D ones, because the ball
+    # observation SURVIVES distillation into the drill prior (PIPELINE_V2 stage 3)
+    # and the prior is evaluated on the 2v2 game's observations -- where the ball
+    # is ball_ego_position (3) + ball_ego_linear_velocity (3). A 2-D drill obs
+    # could not be fed from the game's 3-D one, so the prior would be unusable.
+    def _to_ego3(self, physics, world_xyz):
+        root = physics.bind(self._walker.root_body)
+        xmat = np.array(root.xmat).reshape(3, 3)
+        return (xmat.T @ (np.asarray(world_xyz, dtype=np.float64)
+                          - np.array(root.xpos))).astype(np.float32)
+
+    def _vec_to_ego3(self, physics, world_vec):
+        root = physics.bind(self._walker.root_body)
+        xmat = np.array(root.xmat).reshape(3, 3)
+        return (xmat.T @ np.asarray(world_vec, dtype=np.float64)).astype(np.float32)
+
     # --- composer API ------------------------------------------------------
     @property
     def root_entity(self):
@@ -131,7 +175,7 @@ class FollowTask(composer.Task):
         self._target_vel = speed * np.array([np.cos(angle), np.sin(angle)])
         # target starts within a few meters of the walker
         start_angle = random_state.uniform(0, 2 * np.pi)
-        start_dist = random_state.uniform(2.0, 6.0)
+        start_dist = random_state.uniform(*self._spawn_dist_range)
         # np.array(...) casts are load-bearing: physics.bind views are
         # SynchronizingArrayWrapper, and numpy propagates the subclass through
         # arithmetic — item-assignment on a stale wrapper crashes workers.
@@ -151,12 +195,17 @@ class FollowTask(composer.Task):
             angle = random_state.uniform(0, 2 * np.pi)
             self._target_vel = np.linalg.norm(self._target_vel) * np.array(
                 [np.cos(angle), np.sin(angle)])
-        self._target_xy = self._target_xy + self._target_vel * dt
-        # bounce at bounds
-        for i in range(2):
-            if abs(self._target_xy[i]) > self._bounds[i]:
-                self._target_xy[i] = np.sign(self._target_xy[i]) * self._bounds[i]
-                self._target_vel[i] *= -1
+        # np.asarray (subok=False) strips any array SUBCLASS that leaked in from a
+        # physics.bind() view -- those are SynchronizingArrayWrappers, numpy
+        # propagates the subclass through arithmetic, and writing into one routes
+        # back into dm_control's physics binding and raises. The bounce below is
+        # written without item-assignment for the same reason, and it now matches
+        # WarpFollowEnv.step()'s where/clamp form exactly rather than paraphrasing
+        # it in a loop.
+        pos = np.asarray(self._target_xy, dtype=np.float64) + self._target_vel * dt
+        over = np.abs(pos) > self._bounds
+        self._target_vel = np.where(over, -self._target_vel, self._target_vel)
+        self._target_xy = np.clip(pos, -self._bounds, self._bounds)
         self._target.set_pose_xy(physics, self._target_xy, self._target_height)
 
     def get_reward(self, physics):

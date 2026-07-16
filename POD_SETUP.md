@@ -76,6 +76,34 @@ uv pip install --python .venv/bin/python dm_control mujoco gymnasium \
     "torch==2.6.0+cu124" --index-url https://download.pytorch.org/whl/cu124
 ```
 
+> **Install torch LAST, and check what you actually got.** If you split this into
+> two commands (torch from the PyTorch index, then the rest from PyPI), the second
+> command **silently replaces your cu124 torch** — `stable-baselines3` depends on
+> `torch`, uv resolves it from PyPI, and PyPI's default wheel is a *newer CUDA*
+> build. You then get:
+>
+> ```
+> RuntimeError: The NVIDIA driver on your system is too old (found version 12040)
+> ```
+>
+> which names the driver, not the real culprit. The pod's driver is CUDA 12.4;
+> the clobbering wheel was `torch 2.12.1+cu130`. Always verify the build, not just
+> that torch imports:
+>
+> ```bash
+> .venv/bin/python -c "import torch; print(torch.__version__, torch.version.cuda)"
+> # want: 2.6.0+cu124 12.4     NOT: 2.12.1+cu130 13.0
+> ```
+>
+> Fix is simply to reinstall torch from the PyTorch index afterwards.
+
+Also needed on a fresh pod, and neither survives a rebuild:
+
+```bash
+.venv/bin/wandb login          # interactive; training defaults to --wandb-project creature-soccer
+gh auth login -h github.com -p https -w && gh auth setup-git   # for pushes
+```
+
 A frozen, known-good pin set is in `runpod_requirements.txt` if you need exact
 versions (this session ran torch 2.6.0, mujoco 3.1.3, warp 1.14.0, wandb 0.28.0,
 Python 3.11.10).
@@ -136,6 +164,32 @@ MUJOCO_GL=egl .venv/bin/python -m rower_soccer.warp_port.train_follow_warp \
     --gcs-bucket vc2-2026-checkpoints \
     --resume            # add only when continuing an existing run
 ```
+
+**To survive an SSH disconnect** (i.e. any overnight run), detach it with
+`setsid nohup ... &` so it is reparented to init and a hangup cannot kill it:
+
+```bash
+mkdir -p logs
+setsid nohup env MUJOCO_GL=egl .venv/bin/python -m rower_soccer.warp_port.train_follow_warp \
+    --run-name <unique-name> --steps 800000000 --worlds 2048 \
+    --ent-floor -1.2 --ent-ceil 0.0 \
+    --first-video-secs 60 --video-secs 900 --ckpt-secs 1800 \
+    --gcs-bucket vc2-2026-checkpoints > logs/<unique-name>.log 2>&1 < /dev/null &
+```
+
+Confirm it actually detached — `PPID` must be **1**:
+
+```bash
+ps -eo pid,ppid,cmd | grep train_.*_warp | grep -v grep
+```
+
+`--first-video-secs 60` puts the first transfer-eval video ~1 minute in (rather
+than one full `--video-secs` interval), so a run with a dead reward or a broken
+obs layout is visible almost immediately instead of the next morning. Watch that
+first video before walking away.
+
+**Two runs fit on one A4000** (follow + dribble at 2048 worlds each): ~1.5 GB of
+16 GB, ~60k and ~45k steps/s respectively when sharing the GPU.
 
 Checkpoint conventions this repo follows (see the checkpointing commit for the
 reasoning) — worth knowing before you touch the files in a bucket:

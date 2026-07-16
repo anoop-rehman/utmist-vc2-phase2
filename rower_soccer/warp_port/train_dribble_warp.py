@@ -25,6 +25,7 @@ import subprocess
 import time
 
 import imageio
+import numpy as np
 import torch
 
 
@@ -101,6 +102,15 @@ def main():
     p.add_argument("--fixed-start", action="store_true")
     # Stage 2+: target may sit up to +/- this many RADIANS off the colinear line.
     p.add_argument("--target-cone", type=float, default=0.0)
+    # Annealed curriculum (the stage-2 fix): grow the cone from --cone-start to
+    # --cone-max linearly over --cone-anneal-steps env-steps, instead of jumping
+    # straight to a wide cone. A wide fixed cone (e.g. pi/2) leaves the colinear
+    # prior at the flat spawn floor with no gradient to steering; a slow anneal
+    # keeps the reward signal alive the whole way. 0 = off (use --target-cone as
+    # a constant). --cone-max defaults to pi (full 360 deg steering).
+    p.add_argument("--cone-anneal-steps", type=int, default=0)
+    p.add_argument("--cone-start", type=float, default=0.0)
+    p.add_argument("--cone-max", type=float, default=np.pi)
     # Plain-MLP baseline: no latent/decoder. The architecture control experiment.
     p.add_argument("--plain", action="store_true")
     p.add_argument("--reward-mode", default="paper", choices=["paper", "progress"])
@@ -238,6 +248,15 @@ def main():
     while trainer.total_steps < args.steps and time.perf_counter() < deadline:
         if args.shaping_anneal_steps > 0:
             env.shaping_scale = max(0.0, 1.0 - trainer.total_steps / args.shaping_anneal_steps)
+        if args.cone_anneal_steps > 0:
+            # Grow the steering cone with training. Worlds pick up the new width on
+            # their next reset, so the curriculum widens smoothly (staggered across
+            # worlds by episode phase). eval_env tracks it too, so the eval video and
+            # eval/fitness_warp report difficulty at the CURRENT cone, not a fixed one.
+            frac = min(1.0, trainer.total_steps / args.cone_anneal_steps)
+            cone = args.cone_start + frac * (args.cone_max - args.cone_start)
+            env.target_cone = cone
+            eval_env.target_cone = cone
         stats = trainer.train_iter()
         it += 1
         now = time.perf_counter()
@@ -253,6 +272,7 @@ def main():
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
                   f"fitness={fit:.3f} std={stats['std']:.3f} "
+                  f"cone={np.rad2deg(env.target_cone):.0f}deg "
                   f"diverged={trainer.n_diverged:,}", flush=True)
             if use_wandb:
                 import wandb
@@ -263,6 +283,7 @@ def main():
                            # one number the velocity shaping terms cannot inflate.
                            "train/fitness": fit,
                            "train/entropy": stats["ent"], "train/std": stats["std"],
+                           "train/cone_deg": float(np.rad2deg(env.target_cone)),
                            "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"]})
         if args.video_secs > 0 and now - last_video >= args.video_secs:
             last_video = now

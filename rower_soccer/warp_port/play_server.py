@@ -41,7 +41,7 @@ CAM_HEIGHT = 25.0
 PX = 640
 CONTROL_DT = 0.025      # 40 Hz -> real-time playback
 
-state = {"skill": "none", "target": np.zeros(2, dtype=np.float64)}
+state = {"skill": "none", "target": np.zeros(2, dtype=np.float64), "reset": False}
 state_lock = threading.Lock()
 latest = {"jpeg": None}
 frame_lock = threading.Lock()
@@ -81,6 +81,16 @@ def sim_thread(follow_path, dribble_path, creature_xml, ready):
     while True:
         t0 = time.perf_counter()
         with state_lock:
+            do_reset = state["reset"]
+            state["reset"] = False
+        if do_reset:
+            # Re-scatter worm/ball/target (env.reset re-randomizes). Sync the shared
+            # target to the fresh one, or the loop below would snap it back.
+            env.reset()
+            with state_lock:
+                state["target"] = env.target_xy[0].detach().cpu().numpy().copy()
+
+        with state_lock:
             skill = state["skill"]
             tgt = torch.tensor(state["target"], dtype=torch.float32, device="cuda")
         env.target_xy[0] = tgt
@@ -112,7 +122,8 @@ button{font-size:16px;padding:8px 16px;margin:4px;border:0;border-radius:6px;cur
 <h3>worm interactive play &mdash; Warp physics</h3>
 <div><button id="follow" onclick="setSkill('follow')">Q &middot; Follow</button>
 <button id="dribble" onclick="setSkill('dribble')">W &middot; Dribble</button>
-<button id="stop" onclick="setSkill('none')">Space &middot; Stop</button></div>
+<button id="stop" onclick="setSkill('none')">Space &middot; Stop</button>
+<button id="reset" style="background:#c0392b;color:#fff" onclick="doReset()">R &middot; Reset</button></div>
 <div><img id="view" src="/stream" width="640" height="640" onclick="click_(event)"></div>
 <p id="hint">Pick a skill, then click the arena to set a target. Red sphere = target.</p>
 <script>
@@ -121,8 +132,10 @@ function setSkill(s){fetch('/skill',{method:'POST',headers:{'Content-Type':'appl
 function click_(e){const r=e.target.getBoundingClientRect();
  fetch('/click',{method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({px:e.clientX-r.left,py:e.clientY-r.top,w:r.width,h:r.height})});}
+function doReset(){fetch('/reset',{method:'POST'});}
 document.addEventListener('keydown',e=>{if(e.key=='q'||e.key=='Q')setSkill('follow');
- else if(e.key=='w'||e.key=='W')setSkill('dribble');else if(e.key==' '){e.preventDefault();setSkill('none');}});
+ else if(e.key=='w'||e.key=='W')setSkill('dribble');else if(e.key=='r'||e.key=='R')doReset();
+ else if(e.key==' '){e.preventDefault();setSkill('none');}});
 setSkill('none');
 </script></body></html>"""
 
@@ -160,6 +173,12 @@ def make_app():
         with state_lock:
             state["target"] = np.array([x, y], dtype=np.float64)
         return jsonify(x=x, y=y)
+
+    @app.route("/reset", methods=["POST"])
+    def reset():
+        with state_lock:
+            state["reset"] = True
+        return jsonify(ok=True)
 
     return app
 

@@ -30,9 +30,11 @@ class WarpRenderer:
     """Draws world `w` of a Warp env. Reused across evals; builds its model once."""
 
     def __init__(self, creature_xml, has_ball, width=640, height=480,
-                 distance=6.0, elevation=-20.0, azimuth=110.0):
+                 distance=6.0, elevation=-20.0, azimuth=110.0,
+                 topdown=False, view_half=12.0, cam_height=25.0):
         self.model, self.meta = build_creature_scene(
-            creature_xml, ball=BallSpec() if has_ball else None, target_marker=True)
+            creature_xml, ball=BallSpec() if has_ball else None, target_marker=True,
+            topdown_cam=topdown, view_half=view_half, cam_height=cam_height)
         self.data = mujoco.MjData(self.model)
         self.renderer = mujoco.Renderer(self.model, height=height, width=width)
         self.has_ball = has_ball
@@ -42,6 +44,12 @@ class WarpRenderer:
         # Everything before it is the physics model's qpos, verbatim.
         self.n_phys_qpos = self.tgt_qpos
 
+        # topdown: render from the fixed 'topdown' camera (id), so the view never
+        # moves and clicks map to fixed world coords. Otherwise a tracking free cam.
+        self.topdown = topdown
+        if topdown:
+            self.topdown_cam_id = int(mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_CAMERA, "topdown"))
         self.cam = mujoco.MjvCamera()
         self.cam.distance = distance
         self.cam.elevation = elevation
@@ -59,10 +67,14 @@ class WarpRenderer:
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
-        # Track the creature rather than staring at the origin: at +/-10 m bounds a
-        # fixed camera loses it entirely.
-        self.cam.lookat[:] = self.data.xpos[self.meta.root_body]
-        self.renderer.update_scene(self.data, camera=self.cam)
+        if self.topdown:
+            # Fixed top-down camera: the view never moves, so screen->world is stable.
+            self.renderer.update_scene(self.data, camera=self.topdown_cam_id)
+        else:
+            # Track the creature rather than staring at the origin: at +/-10 m bounds
+            # a fixed camera loses it entirely.
+            self.cam.lookat[:] = self.data.xpos[self.meta.root_body]
+            self.renderer.update_scene(self.data, camera=self.cam)
         return self.renderer.render()
 
 

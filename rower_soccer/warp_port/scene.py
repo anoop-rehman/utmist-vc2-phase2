@@ -85,6 +85,7 @@ GOAL_HEIGHT = 5.3333
 _BASE_XML = f"""
 <mujoco model="warp_drill">
   <option cone="elliptic" timestep="0.0025"/>
+  <visual><global offwidth="1024" offheight="1024"/></visual>
   <worldbody>{_PITCH_XML}  </worldbody>
 </mujoco>
 """
@@ -152,7 +153,8 @@ def creature_size(creature_xml_path):
 
 
 def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
-                         target_marker=False):
+                         target_marker=False, topdown_cam=False,
+                         cam_height=25.0, view_half=12.0):
     """Returns (mujoco.MjModel, SceneMeta). `ball=None` -> the follow scene.
 
     target_marker=True appends a non-colliding red sphere on a free joint, for the
@@ -193,6 +195,17 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
         tg.conaffinity = 0
         tg.mass = 1e-3
         tg.rgba = [1.0, 0.2, 0.2, 1.0]
+
+    if topdown_cam:
+        # Fixed straight-down camera for the interactive play server, so a mouse
+        # click in the rendered frame maps to a world (x, y) by a simple affine
+        # (see warp_port/play_server.py). fovy is chosen so the frame spans exactly
+        # +/-view_half metres at the floor. Named 'topdown'; render-only.
+        import math as _math
+        fovy = 2.0 * _math.degrees(_math.atan(view_half / cam_height))
+        spec.worldbody.add_camera(
+            name="topdown", pos=[0.0, 0.0, cam_height],
+            xyaxes=[1, 0, 0, 0, 1, 0], fovy=fovy)
 
     model = spec.compile()
 

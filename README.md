@@ -4,6 +4,11 @@ GA-evolved creatures (from the UTMIST Virtual Creatures Unity project) learn to
 play 2v2 soccer in [dm_control](https://github.com/google-deepmind/dm_control)'s
 MuJoCo soccer environment.
 
+📖 **Documentation:** a full MkDocs site lives in [`docs/`](docs/) (build with
+`mkdocs serve`; configured for [Read the Docs](.readthedocs.yaml)). It covers
+installation, the architecture and observation contract, the Warp backend, the
+training/curriculum recipe, and the interactive play server.
+
 The method follows DeepMind's humanoid football pipeline
 ([Liu et al., Science Robotics 2022](https://www.science.org/doi/10.1126/scirobotics.abo0235))
 with three strategic cuts that make it tractable on small compute:

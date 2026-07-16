@@ -185,3 +185,6 @@ cython_debug/
 # gs://vc2-2026-checkpoints/<run_name>/ by the trainers' --gcs-bucket sync.
 runs_v2/
 videos/
+
+# MkDocs build output
+/site/

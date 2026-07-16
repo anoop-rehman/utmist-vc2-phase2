@@ -52,7 +52,7 @@ class WarpDribbleEnv:
                  reward_mode="paper", progress_scale=2.0, approach_scale=0.5,
                  ball: BallSpec = None, nconmax=64, njmax=512,
                  energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0),
-                 fixed_start=False):
+                 fixed_start=False, target_cone=0.0):
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
@@ -98,6 +98,11 @@ class WarpDribbleEnv:
         # --shaping-anneal-steps is set, so late training optimizes pure fitness.
         self.shaping_scale = 1.0
         self.fixed_start = fixed_start  # curriculum stage 1; see reset()
+        # Curriculum stage 2+: how far (radians) the target may sit OFF the colinear
+        # worm-ball line. 0 = stage-1 colinear (push straight); pi/2 = anywhere in the
+        # forward hemisphere (steer the ball left/right); pi = any direction. Only
+        # applies under fixed_start.
+        self.target_cone = target_cone
 
         self.model, self.meta = build_creature_ball_scene(
             creature_xml, ball=ball or BallSpec())
@@ -193,9 +198,14 @@ class WarpDribbleEnv:
         self.qpos[:, self.bq + 2] = self.ball_radius
         self.qpos[:, self.bq + 3] = 1.0  # unit quat
 
-        # target: on the SAME line beyond the ball under --fixed-start, else a random
-        # direction from the ball. Distance is the normal target_dist_range either way.
-        ang = theta if self.fixed_start else self._rand(n) * (2 * np.pi)
+        # target: under --fixed-start it lies within +/- target_cone of the colinear
+        # line (theta); cone=0 is stage-1 colinear, larger cones add 2D steering.
+        # Without --fixed-start the direction is fully random.
+        if self.fixed_start:
+            offset = (self._rand(n) * 2.0 - 1.0) * self.target_cone
+            ang = theta + offset
+        else:
+            ang = self._rand(n) * (2 * np.pi)
         d0, d1 = self.target_dist_range
         dist = d0 + (d1 - d0) * self._rand(n)
         self.target_xy = ball_xy + torch.stack(

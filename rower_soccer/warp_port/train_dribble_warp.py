@@ -43,7 +43,8 @@ def make_eval(args):
         reward_mode=args.reward_mode, progress_scale=args.progress_scale,
         approach_scale=args.approach_scale, episode_seconds=args.episode_secs,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
-        fixed_start=getattr(args, "fixed_start", False))
+        fixed_start=getattr(args, "fixed_start", False),
+        target_cone=getattr(args, "target_cone", 0.0))
     return env, WarpRenderer(args.creature_xml, has_ball=True)
 
 
@@ -98,6 +99,8 @@ def main():
     p.add_argument("--shaping-anneal-steps", type=int, default=0)
     # Curriculum stage 1: fix worm yaw + ball direction (only the target varies).
     p.add_argument("--fixed-start", action="store_true")
+    # Stage 2+: target may sit up to +/- this many RADIANS off the colinear line.
+    p.add_argument("--target-cone", type=float, default=0.0)
     # Plain-MLP baseline: no latent/decoder. The architecture control experiment.
     p.add_argument("--plain", action="store_true")
     p.add_argument("--reward-mode", default="paper", choices=["paper", "progress"])
@@ -192,7 +195,8 @@ def main():
                          target_dist_range=tuple(args.target_dist),
                          ball_spawn_range=tuple(args.ball_spawn),
                          energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
-                         fixed_start=args.fixed_start)
+                         fixed_start=args.fixed_start,
+                         target_cone=args.target_cone)
     if args.plain:
         ac = SimpleActorCritic(env.obs_dim, env.act_dim)
     else:

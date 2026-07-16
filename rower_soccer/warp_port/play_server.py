@@ -21,7 +21,6 @@ when the target keeps the ball roughly ahead of the worm.
 """
 import argparse
 import io
-import threading
 import time
 
 import numpy as np
@@ -37,11 +36,12 @@ VIEW_HALF = 12.0        # metres from centre to frame edge (matches the topdown 
 CAM_HEIGHT = 25.0
 PX = 640                # square frame
 
-# --- shared state, written by HTTP handlers, read by the sim thread -----------
+# --- shared state. The server is SINGLE-THREADED (Flask threaded=False): every
+# request runs in the one main thread, which is mandatory here -- mujoco's EGL
+# context and Warp's CUDA context share the GPU and a second live thread anywhere in
+# the process makes eglMakeCurrent fail with EGL_BAD_ACCESS. So there is no
+# background sim loop: /frame steps the sim and renders inline. -------------------
 state = {"skill": "none", "target": np.zeros(2, dtype=np.float64)}
-state_lock = threading.Lock()
-latest_jpeg = {"bytes": None}
-frame_lock = threading.Lock()
 
 
 def pixel_to_world(px, py, w, h):
@@ -51,42 +51,26 @@ def pixel_to_world(px, py, w, h):
     return float(x), float(y)
 
 
-def sim_loop(env, ren, follow_ac, dribble_ac, dt):
-    """Step physics at ~real time; apply the active policy; publish a JPEG frame."""
-    env.reset()
-    with state_lock:
-        state["target"] = env.target_xy[0].detach().cpu().numpy().copy()
-    zero = torch.zeros(1, env.act_dim, device="cuda")
-    while True:
-        t0 = time.perf_counter()
-        with state_lock:
-            skill = state["skill"]
-            tgt = torch.tensor(state["target"], dtype=torch.float32, device="cuda")
+def step_and_render(env, ren, follow_ac, dribble_ac):
+    """Advance one control step under the active skill, return a JPEG frame."""
+    tgt = torch.tensor(state["target"], dtype=torch.float32, device="cuda")
+    env.target_xy[0] = tgt
+    env.target_vel[0] = 0.0                     # user-commanded target is static
 
-        # Hold the target static (user-commanded); the env would otherwise drift it.
-        env.target_xy[0] = tgt
-        env.target_vel[0] = 0.0
+    obs = env._obs()                            # 39-dim dribble obs
+    with torch.no_grad():
+        if state["skill"] == "dribble":
+            a = dribble_ac.dist(obs.float()).mean.clamp(-1, 1)
+        elif state["skill"] == "follow":
+            # follow obs = dribble obs minus the leading 6 ball dims (33-dim)
+            a = follow_ac.dist(obs[:, 6:].float()).mean.clamp(-1, 1)
+        else:
+            a = torch.zeros(1, env.act_dim, device="cuda")
+    env.step(a)
 
-        obs = env._obs()                       # 39-dim dribble obs
-        with torch.no_grad():
-            if skill == "dribble":
-                a = dribble_ac.dist(obs.float()).mean.clamp(-1, 1)
-            elif skill == "follow":
-                # follow obs = dribble obs minus the leading 6 ball dims (33-dim)
-                a = follow_ac.dist(obs[:, 6:].float()).mean.clamp(-1, 1)
-            else:
-                a = zero
-        env.step(a)
-
-        frame = ren.frame(env, w=0)
-        b = io.BytesIO(); Image.fromarray(frame).save(b, format="JPEG", quality=80)
-        with frame_lock:
-            latest_jpeg["bytes"] = b.getvalue()
-
-        # pace to real time (control dt)
-        rem = dt - (time.perf_counter() - t0)
-        if rem > 0:
-            time.sleep(rem)
+    frame = ren.frame(env, w=0)
+    b = io.BytesIO(); Image.fromarray(frame).save(b, format="JPEG", quality=80)
+    return b.getvalue()
 
 
 PAGE = """<!doctype html><html><head><title>worm play</title>
@@ -100,54 +84,50 @@ button{font-size:16px;padding:8px 16px;margin:4px;border:0;border-radius:6px;cur
 <div><button id="follow" onclick="setSkill('follow')">Q &middot; Follow</button>
 <button id="dribble" onclick="setSkill('dribble')">W &middot; Dribble</button>
 <button id="stop" onclick="setSkill('none')">Space &middot; Stop</button></div>
-<div><img id="view" src="/stream" width="640" height="640"
-  onclick="click_(event)"></div>
+<div><img id="view" width="640" height="640" onclick="click_(event)"></div>
 <p id="hint">Pick a skill, then click the arena to set a target. Red sphere = target.</p>
 <script>
-let skill='none';
-function setSkill(s){skill=s;fetch('/skill',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill:s})});
+const view=document.getElementById('view');
+function setSkill(s){fetch('/skill',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill:s})});
  for(const id of ['follow','dribble','stop']){document.getElementById(id).classList.toggle('on',(id=='stop'?s=='none':id==s));}}
 function click_(e){const r=e.target.getBoundingClientRect();
  fetch('/click',{method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({px:e.clientX-r.left,py:e.clientY-r.top,w:r.width,h:r.height})});}
 document.addEventListener('keydown',e=>{if(e.key=='q'||e.key=='Q')setSkill('follow');
  else if(e.key=='w'||e.key=='W')setSkill('dribble');else if(e.key==' ')setSkill('none');});
-setSkill('none');
+// Poll /frame: each request advances the sim one step and returns a JPEG. Chaining
+// on load keeps it as fast as the render allows without piling up requests.
+function tick(){fetch('/frame').then(r=>r.blob()).then(b=>{
+  view.src=URL.createObjectURL(b);});}
+view.onload=()=>{URL.revokeObjectURL(view.src);requestAnimationFrame(tick);};
+setSkill('none'); tick();
 </script></body></html>"""
 
 
-def make_app():
+def make_app(env, ren, follow_ac, dribble_ac):
     app = Flask(__name__)
 
     @app.route("/")
     def index():
         return PAGE
 
-    @app.route("/stream")
-    def stream():
-        def gen():
-            boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-            while True:
-                with frame_lock:
-                    b = latest_jpeg["bytes"]
-                if b is not None:
-                    yield boundary + b + b"\r\n"
-                time.sleep(1 / 30)
-        return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    @app.route("/frame")
+    def frame():
+        jpeg = step_and_render(env, ren, follow_ac, dribble_ac)
+        return Response(jpeg, mimetype="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
 
     @app.route("/skill", methods=["POST"])
     def skill():
         s = request.get_json()["skill"]
-        with state_lock:
-            state["skill"] = s if s in ("follow", "dribble", "none") else "none"
+        state["skill"] = s if s in ("follow", "dribble", "none") else "none"
         return jsonify(ok=True)
 
     @app.route("/click", methods=["POST"])
     def click():
         d = request.get_json()
         x, y = pixel_to_world(d["px"], d["py"], d["w"], d["h"])
-        with state_lock:
-            state["target"] = np.array([x, y], dtype=np.float64)
+        state["target"] = np.array([x, y], dtype=np.float64)
         return jsonify(x=x, y=y)
 
     return app
@@ -179,13 +159,16 @@ def main():
     load_pretrained(follow_ac, args.follow, device="cuda")
     follow_ac.eval()
 
-    dt = 0.025  # control timestep, ~40 Hz real time
-    threading.Thread(target=sim_loop,
-                     args=(env, ren, follow_ac, dribble_ac, dt), daemon=True).start()
+    env.reset()
+    state["target"] = env.target_xy[0].detach().cpu().numpy().copy()
 
+    # threaded=False: every request runs in this one main thread, so the EGL render
+    # context is never touched from a second thread (see the note above). The browser
+    # drives the sim by polling /frame.
     print(f"[play] serving on http://0.0.0.0:{args.port}  "
           f"(forward this port and open http://localhost:{args.port})", flush=True)
-    make_app().run(host="0.0.0.0", port=args.port, threaded=True)
+    make_app(env, ren, follow_ac, dribble_ac).run(
+        host="0.0.0.0", port=args.port, threaded=False, use_reloader=False)
 
 
 if __name__ == "__main__":

@@ -98,6 +98,13 @@ class WarpWormFetchEnv:
         self.model, self.meta = build_creature_scene(
             creature_xml, ball=fetch_ball(), base_xml=base)
         m = self.meta
+        # Soften ALL contacts to the ball's 0.010 timeconst. The upright spawn
+        # rests the worm on capsule EDGES, and edge contacts at the follow/
+        # dribble 0.005 stiffness NaN a few percent of worlds within steps --
+        # the same failure the ball had at 0.005. This env shares no
+        # checkpoints with follow/dribble (fetch runs are from scratch), so
+        # contact-parity with them buys nothing.
+        self.model.geom_solref[:, 0] = 0.010
 
         with open(up_axis_json) as f:
             lbl = json.load(f)
@@ -186,7 +193,10 @@ class WarpWormFetchEnv:
         z = 0.0
         for _ in range(10_000):
             mujoco.mj_resetData(m, data)
-            data.qpos[self.meta.ball_qpos:self.meta.ball_qpos + 3] = 50, 50, 1
+            # Park the ball high in the air during the search: a sideways
+            # offset lands INSIDE the pitch wall on the soccer pitch, and a
+            # ball in permanent wall contact means ncon never reaches 0.
+            data.qpos[self.meta.ball_qpos:self.meta.ball_qpos + 3] = 0, 0, 50
             data.qpos[qr + 0:qr + 3] = 0.0, 0.0, z
             data.qpos[qr + 3:qr + 7] = q
             mujoco.mj_forward(m, data)

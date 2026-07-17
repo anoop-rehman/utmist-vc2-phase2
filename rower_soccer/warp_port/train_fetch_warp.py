@@ -63,6 +63,12 @@ def main():
     p.add_argument("--floor-size", type=float, default=None)
     p.add_argument("--ball-drop-z", type=float, default=2.0)
     p.add_argument("--ball-kick-std", type=float, default=5.0)
+    # Contact buffer sizes PER WORLD. mjw's convex narrowphase allocates an
+    # EPA buffer proportional to worlds x nconmax; at 2048 worlds the 256
+    # default spikes >1.1 GB in one grab and OOMs a shared 16 GB card. The
+    # quadruped realistically makes a few dozen contacts per world.
+    p.add_argument("--nconmax", type=int, default=256)
+    p.add_argument("--njmax", type=int, default=1024)
     p.add_argument("--max-hours", type=float, default=10.0)
     p.add_argument("--video-secs", type=float, default=1200.0)
     p.add_argument("--first-video-secs", type=float, default=120.0)
@@ -97,7 +103,8 @@ def main():
         wandb.define_metric("*", step_metric="env_step")
 
     env_kw = dict(floor_size=args.floor_size, ball_drop_z=args.ball_drop_z,
-                  ball_kick_std=args.ball_kick_std)
+                  ball_kick_std=args.ball_kick_std,
+                  nconmax=args.nconmax, njmax=args.njmax)
     env = WarpFetchEnv(num_worlds=args.worlds, seed=args.seed, **env_kw)
     if args.plain:
         ac = SimpleActorCritic(env.obs_dim, env.act_dim)

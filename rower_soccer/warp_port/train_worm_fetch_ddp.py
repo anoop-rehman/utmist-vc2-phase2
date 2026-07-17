@@ -22,7 +22,9 @@ import os
 # DDP_SHARE_GPU=1 lets N ranks share one physical GPU (correctness testing on a
 # single-GPU box -- NCCL supports it; throughput obviously doesn't scale).
 _LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
-os.environ.setdefault("MUJOCO_GL", "egl")
+# NOTE: deliberately no MUJOCO_GL default here. DDP training never renders,
+# and forcing "egl" makes mujoco's import require system libEGL, which bare
+# cloud images lack (it crashed the first 2xA100 bench).
 if os.environ.get("DDP_SHARE_GPU") != "1":
     os.environ["CUDA_VISIBLE_DEVICES"] = str(_LOCAL_RANK)
 

@@ -94,6 +94,7 @@ class WarpWormFetchEnv:
             self.arena_radius = floor_half * np.sqrt(2.0)
         else:
             raise ValueError(scene)
+        self.scene = scene
 
         self.model, self.meta = build_creature_scene(
             creature_xml, ball=fetch_ball(), base_xml=base)
@@ -119,6 +120,28 @@ class WarpWormFetchEnv:
             lbl.get("quat_wxyz", [1.0, 0.0, 0.0, 0.0]),
             dtype=torch.float32, device=device)
         self.spawn_z_up = self._noncontact_height(lbl.get("quat_wxyz"))
+
+        # The worm's root (seg0) sits at one END of the body, so a root placed
+        # at spawn_radius can bury the OTHER end inside a wall -- the contact
+        # solver then fires it into the sky (measured: root z 8.7 m, zero
+        # action). The worm's spawn region shrinks by its body reach so the
+        # whole body always clears the walls; the ball (r=0.15) keeps the full
+        # region. Pitch has no walls near the spawn region, so no shrink.
+        data0 = mujoco.MjData(self.model)
+        mujoco.mj_forward(self.model, data0)
+        root_xy = data0.xpos[self.meta.root_body][:2]
+        body_set = set(int(b) for b in self.meta.body_ids)
+        # geom_rbound = each geom's bounding-sphere radius, so this is a hard
+        # upper bound on how far ANY part of the worm sticks out from the root
+        # (body xpos alone sits at joint pivots and undercounts the last tip).
+        reach = max(float(np.linalg.norm(data0.geom_xpos[g][:2] - root_xy))
+                    + float(self.model.geom_rbound[g])
+                    for g in range(self.model.ngeom)
+                    if int(self.model.geom_bodyid[g]) in body_set)
+        if scene == "arena":
+            self.worm_spawn_radius = max(0.5, floor_half - reach - 0.2)
+        else:
+            self.worm_spawn_radius = self.spawn_radius
 
         # Fetch reward geometry: reach bound = "at the ball" for the worm's
         # footprint (root within half a body length + ball radius); fetch
@@ -219,8 +242,8 @@ class WarpWormFetchEnv:
         qr = m.qpos_root
         yaw = self._rand(n) * (2 * np.pi)
         qw, qx, qy, qz = self._spawn_quats(yaw)
-        self.qpos[:, qr + 0] = (self._rand(n) * 2 - 1) * self.spawn_radius
-        self.qpos[:, qr + 1] = (self._rand(n) * 2 - 1) * self.spawn_radius
+        self.qpos[:, qr + 0] = (self._rand(n) * 2 - 1) * self.worm_spawn_radius
+        self.qpos[:, qr + 1] = (self._rand(n) * 2 - 1) * self.worm_spawn_radius
         self.qpos[:, qr + 2] = self.spawn_z_up
         self.qpos[:, qr + 3] = qw
         self.qpos[:, qr + 4] = qx

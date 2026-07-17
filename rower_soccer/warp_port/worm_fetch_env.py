@@ -103,6 +103,15 @@ class WarpWormFetchEnv:
             lbl = json.load(f)
         self.up_local = torch.tensor(lbl["up_local"], dtype=torch.float32,
                                      device=device)
+        # Spawn RIGHT-SIDE-UP, like quadruped fetch spawns its walker upright:
+        # the labeled quat IS the upright orientation (random yaw composes on
+        # top in reset). Without this the worm spawns in its model-default
+        # pose -- 90 deg off the label -- where upright plateaus at ~0.48 and a
+        # 2-DOF worm cannot roll itself over to fix it.
+        self.spawn_quat = torch.tensor(
+            lbl.get("quat_wxyz", [1.0, 0.0, 0.0, 0.0]),
+            dtype=torch.float32, device=device)
+        self.spawn_z_up = self._noncontact_height(lbl.get("quat_wxyz"))
 
         # Fetch reward geometry: reach bound = "at the ball" for the worm's
         # footprint (root within half a body length + ball radius); fetch
@@ -168,17 +177,45 @@ class WarpWormFetchEnv:
     def _randn(self, *shape):
         return torch.randn(*shape, generator=self.gen, device=self.device)
 
+    def _noncontact_height(self, quat_wxyz):
+        """CPU, once at init: lowest z where the LABELED orientation touches
+        nothing (dm_control's _find_non_contacting_height)."""
+        m = self.model
+        data = mujoco.MjData(m)
+        qr, q = self.meta.qpos_root, quat_wxyz or [1.0, 0.0, 0.0, 0.0]
+        z = 0.0
+        for _ in range(10_000):
+            mujoco.mj_resetData(m, data)
+            data.qpos[self.meta.ball_qpos:self.meta.ball_qpos + 3] = 50, 50, 1
+            data.qpos[qr + 0:qr + 3] = 0.0, 0.0, z
+            data.qpos[qr + 3:qr + 7] = q
+            mujoco.mj_forward(m, data)
+            if data.ncon == 0:
+                return z
+            z += 0.01
+        raise RuntimeError("no non-contacting height for the labeled pose")
+
+    def _spawn_quats(self, yaw):
+        """Random world-yaw composed onto the labeled upright quat."""
+        cy, sy = torch.cos(yaw / 2), torch.sin(yaw / 2)
+        lw, lx, ly, lz = self.spawn_quat
+        return (cy * lw - sy * lz, cy * lx - sy * ly,
+                cy * ly + sy * lx, cy * lz + sy * lw)
+
     def reset(self):
         n, m = self.n, self.meta
         self.qpos.zero_()
         self.qvel.zero_()
         qr = m.qpos_root
         yaw = self._rand(n) * (2 * np.pi)
+        qw, qx, qy, qz = self._spawn_quats(yaw)
         self.qpos[:, qr + 0] = (self._rand(n) * 2 - 1) * self.spawn_radius
         self.qpos[:, qr + 1] = (self._rand(n) * 2 - 1) * self.spawn_radius
-        self.qpos[:, qr + 2] = m.spawn_z
-        self.qpos[:, qr + 3] = torch.cos(yaw / 2)
-        self.qpos[:, qr + 6] = torch.sin(yaw / 2)
+        self.qpos[:, qr + 2] = self.spawn_z_up
+        self.qpos[:, qr + 3] = qw
+        self.qpos[:, qr + 4] = qx
+        self.qpos[:, qr + 5] = qy
+        self.qpos[:, qr + 6] = qz
 
         self.qpos[:, self.bq + 0] = (self._rand(n) * 2 - 1) * self.spawn_radius
         self.qpos[:, self.bq + 1] = (self._rand(n) * 2 - 1) * self.spawn_radius
@@ -203,8 +240,8 @@ class WarpWormFetchEnv:
         qr = self.meta.qpos_root
         self.qvel[idx] = 0.0
         self.qpos[idx] = 0.0
-        self.qpos[idx, qr + 2] = self.meta.spawn_z
-        self.qpos[idx, qr + 3] = 1.0
+        self.qpos[idx, qr + 2] = self.spawn_z_up
+        self.qpos[idx, qr + 3:qr + 7] = self.spawn_quat
         self.qpos[idx, self.bq + 0] = 1.5
         self.qpos[idx, self.bq + 1] = 1.5
         self.qpos[idx, self.bq + 2] = 0.15

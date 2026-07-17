@@ -1,0 +1,13 @@
+.git
+.venv
+runs_v2
+wandb
+logs
+site
+videos
+trained_creatures
+runs
+tensorboard_logs
+__pycache__
+*.pyc
+.env

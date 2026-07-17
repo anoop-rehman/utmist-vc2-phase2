@@ -21,6 +21,13 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--rollout", type=int, default=64)
     p.add_argument("--lr", type=float, default=3e-4)
+    # Scaling recipe (Preventing Learning Stagnation in PPO, 2026): when you add
+    # parallel envs, hold the MINIBATCH SIZE and lr fixed and add MORE
+    # minibatches -- not the default fixed count, which grows the minibatch with
+    # worlds and degrades. Base worlds=1024, rollout=64, minibatches=8 =>
+    # mb_size 8192; to keep that, set --minibatches worlds/128.
+    p.add_argument("--minibatches", type=int, default=8)
+    p.add_argument("--epochs", type=int, default=4)
     p.add_argument("--ent-coef", type=float, default=0.005)
     p.add_argument("--ent-floor", type=float, default=-1.2)
     p.add_argument("--ent-ceil", type=float, default=0.0)
@@ -85,6 +92,7 @@ def main():
                          proprio_indices=env.proprio_indices.tolist(),
                          task_indices=env.task_indices.tolist(), z_dim=args.z_dim)
     trainer = PPOTrainer(env, ac, lr=args.lr, rollout_len=args.rollout,
+                         minibatches=args.minibatches, epochs=args.epochs,
                          ent_coef=args.ent_coef, ent_floor=args.ent_floor,
                          ent_ceil=args.ent_ceil,
                          ent_anneal_steps=args.ent_anneal_steps)

@@ -135,7 +135,12 @@ class PPOTrainer:
                  minibatches=8, epochs=4, gamma=0.99, gae_lambda=0.95,
                  clip=0.2, ent_coef=0.005, vf_coef=0.5, max_grad_norm=0.5,
                  z_smooth_coef=0.0, ent_floor=None, ent_ceil=None, device="cuda",
-                 ent_anneal_steps=0):
+                 ent_anneal_steps=0, distributed=False):
+        # distributed: data-parallel PPO (DD-PPO). Each rank runs its own env +
+        # a policy replica; gradients are all-reduced (averaged) before every
+        # optimizer step, so replicas stay bit-identical and the effective batch
+        # is world_size x the per-rank batch. See train_worm_fetch_ddp.py.
+        self.distributed = distributed
         self.env, self.ac = env, ac.to(device)
         self.opt = torch.optim.Adam(ac.parameters(), lr=lr)
         self.T, self.N = rollout_len, env.n
@@ -268,6 +273,21 @@ class PPOTrainer:
                     loss = loss + self.z_smooth_coef * (z ** 2).mean()
                 self.opt.zero_grad()
                 loss.backward()
+                # DD-PPO: average this minibatch's gradients across all ranks
+                # BEFORE the finite-check + step. Averaging first means a NaN on
+                # ANY rank poisons the reduced grad on ALL ranks, so every rank
+                # takes the same skip decision below and the replicas never
+                # diverge. Comm is one all-reduce of a ~1-2M-param net per
+                # minibatch -- a few MB, cheap relative to the rollout.
+                if self.distributed:
+                    import torch.distributed as dist
+                    ws = dist.get_world_size()
+                    for p in self.ac.parameters():
+                        if p.grad is not None:
+                            # SUM then divide: works on both nccl and gloo
+                            # (ReduceOp.AVG is nccl-only).
+                            dist.all_reduce(p.grad, op=dist.ReduceOp.SUM)
+                            p.grad.div_(ws)
                 # clip_grad_norm_ CLIPS, it does not SANITISE: given one NaN gradient
                 # the total norm is NaN and every gradient is scaled by NaN, which
                 # poisons the weights permanently. It returns the pre-clip norm, so

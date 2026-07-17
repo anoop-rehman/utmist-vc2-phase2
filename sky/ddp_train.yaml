@@ -1,0 +1,50 @@
+# DD-PPO combined bench + training on one multi-GPU node.
+# Runs the scaling bench first (drift sanity gate), then full training.
+# Training rank 0 logs to wandb project creature-soccer.
+name: ddp-train
+
+resources:
+  accelerators: {RTX3090: 8}
+  use_spot: false
+  # cloud pinned per-launch: --infra vast
+
+workdir: .
+
+envs:
+  NPROC: "8"
+  WORLDS_PER_GPU: "16384"
+  BENCH_ITERS: "10"
+  RUN_NAME: "ddp8_worm_fetch"
+  MAX_HOURS: "2.5"
+  WANDB_API_KEY: ""
+
+setup: |
+  set -e
+  python3 -m venv .venv
+  .venv/bin/pip install -q uv
+  # stable-baselines3: ppo.py reuses the SB3-compatible LatentExtractor module
+  # (models/latent_policy.py), so SB3 must exist even though training is pure
+  # torch. Installed BEFORE the torch pin so its dep resolution can't clobber
+  # the cu124 wheel (the POD_SETUP.md trap).
+  .venv/bin/uv pip install --python .venv/bin/python numpy mujoco warp-lang mujoco-warp wandb \
+      stable-baselines3 gymnasium
+  .venv/bin/uv pip install --python .venv/bin/python "torch==2.6.0+cu124" \
+      --index-url https://download.pytorch.org/whl/cu124
+  .venv/bin/python -c "import torch;assert torch.cuda.is_available();print('gpus:',torch.cuda.device_count())"
+
+run: |
+  set -eo pipefail
+  nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
+  # ---- Phase 1: scaling bench (drift sanity gate) ----
+  .venv/bin/torchrun --standalone --nproc_per_node=$NPROC \
+      -m rower_soccer.warp_port.train_worm_fetch_ddp \
+      --worlds $WORLDS_PER_GPU --bench-iters $BENCH_ITERS --no-wandb 2>&1 | tee bench_out.txt
+  DRIFT=$(grep -o 'replica_drift=[0-9.eE+-]*' bench_out.txt | tail -1 | cut -d= -f2)
+  echo "[combined] bench drift=$DRIFT"
+  .venv/bin/python -c "import sys; d=float('$DRIFT'); sys.exit(0 if d == 0.0 else 1)" \
+      || { echo "[combined] REPLICA DRIFT NONZERO ($DRIFT) - aborting before training"; exit 1; }
+  # ---- Phase 2: full training (rank 0 -> wandb creature-soccer) ----
+  .venv/bin/torchrun --standalone --nproc_per_node=$NPROC \
+      -m rower_soccer.warp_port.train_worm_fetch_ddp \
+      --worlds $WORLDS_PER_GPU --run-name $RUN_NAME --max-hours $MAX_HOURS --scene arena
+  echo "[ddp-train] complete"

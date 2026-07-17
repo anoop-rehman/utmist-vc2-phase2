@@ -1,13 +1,12 @@
-"""Label which way is UP for a creature -- a one-click browser tool.
+"""Label which way is UP for a creature -- interactive 6-DOF posing tool.
 
 The fetch reward multiplies by an uprightness factor (dm_control:
-torso_upright = torso z-axis . world z). The quadruped has an obvious "up";
-our GA-evolved worm does not -- its belly is whatever the GA said it was. This
-tool renders the worm rolled about its long axis in 30-degree increments; you
-click the one that is right-side-up, and the chosen orientation's local up
-vector is saved to creature_configs/<name>_up_axis.json. The worm-fetch env
-then scores upright = (1 + R@up_local . z)/2, exactly the dm_control formula
-with "torso z-axis" replaced by the labeled axis.
+torso_upright = torso z-axis . world z). The GA-evolved worm has no canonical
+belly, so a human sets it: pose the worm with the position/rotation sliders
+until it is RIGHT SIDE UP resting how it should, then Save. The pose's local
+up vector (R^T z) lands in creature_configs/<name>_up_axis.json and the
+worm-fetch env scores upright = (1 + R@up_local . z)/2 -- dm_control's exact
+formula with "torso z-axis" replaced by the labeled axis.
 
     MUJOCO_GL=egl .venv/bin/python -m rower_soccer.warp_port.label_up --port 8096
 """
@@ -19,18 +18,23 @@ import os
 
 import mujoco
 import numpy as np
-from flask import Flask, request
+from flask import Flask, request, jsonify
 
 from rower_soccer.warp_port.scene import build_creature_scene
 
-N_ROLLS = 12
-FLOAT_Z = 0.8   # render the worm floating so no roll intersects the floor
 
-
-def roll_quat(axis, t):
-    q = np.zeros(4)
-    q[0] = np.cos(t / 2)
-    q[1:] = np.sin(t / 2) * axis
+def rpy_to_quat(roll, pitch, yaw):
+    """World-frame z(yaw) * y(pitch) * x(roll), radians -> wxyz quaternion."""
+    def axis_quat(ax, t):
+        q = np.zeros(4)
+        q[0] = np.cos(t / 2)
+        q[1 + ax] = np.sin(t / 2)
+        return q
+    q = axis_quat(2, yaw)
+    for ax, t in ((1, pitch), (0, roll)):
+        out = np.zeros(4)
+        mujoco.mju_mulQuat(out, q, axis_quat(ax, t))
+        q = out
     return q
 
 
@@ -40,102 +44,116 @@ def quat_to_mat(q):
     return m.reshape(3, 3)
 
 
-def render_rolls(creature_xml):
-    """Returns (list of (roll_deg, png_bytes), long_axis, model_name)."""
-    model, meta = build_creature_scene(creature_xml, ball=None)
-    data = mujoco.MjData(model)
-    ren = mujoco.Renderer(model, height=240, width=320)
-
-    # Long axis = rest-pose direction from first to last creature body.
-    mujoco.mj_forward(model, data)
-    body_xpos = data.xpos[meta.body_ids]
-    axis = body_xpos[-1] - body_xpos[0]
-    axis[2] = 0.0
-    axis /= np.linalg.norm(axis)
-
-    qr = meta.qpos_root
-    shots = []
-    for k in range(N_ROLLS):
-        t = 2 * np.pi * k / N_ROLLS
-        data.qpos[:] = 0.0
-        data.qpos[qr + 0:qr + 3] = 0.0, 0.0, FLOAT_Z
-        data.qpos[qr + 3:qr + 7] = roll_quat(axis, t)
-        data.qvel[:] = 0.0
-        mujoco.mj_forward(model, data)
-
-        views = []
-        for az, el in ((90.0, -10.0), (5.0, -10.0)):   # side view + down-the-axis
-            cam = mujoco.MjvCamera()
-            cam.lookat[:] = data.xpos[meta.root_body]
-            cam.distance = 3.0
-            cam.azimuth = az
-            cam.elevation = el
-            ren.update_scene(data, camera=cam)
-            views.append(ren.render())
-        frame = np.hstack(views)
-        from PIL import Image
-        b = io.BytesIO()
-        Image.fromarray(frame).save(b, format="PNG")
-        shots.append((int(round(np.rad2deg(t))), b.getvalue()))
-    return shots, axis
-
-
-PAGE = """<!doctype html><html><head><title>label up</title>
-<style>body{background:#111;color:#eee;font-family:sans-serif;text-align:center}
-img{border:3px solid #333;margin:4px;cursor:pointer}img:hover{border-color:#5cb85c}
-#msg{font-size:18px;color:#5cb85c;min-height:24px}</style></head><body>
-<h3>Click the image where the worm is RIGHT SIDE UP</h3>
-<p>each tile: side view (left) + looking down the body axis (right)</p>
-<div id="msg"></div>
-<div>{{TILES}}</div>
+PAGE = """<!doctype html><html><head><title>label up (6dof)</title>
+<style>body{background:#111;color:#eee;font-family:sans-serif;margin:0;padding:14px;display:flex;gap:18px}
+#left{flex:0 0 660px}#right{flex:1;max-width:430px}
+img{border:2px solid #333;width:640px;height:480px}
+label{display:block;margin:10px 0 2px;color:#aaa;font-size:13px}
+input[type=range]{width:100%}
+.val{color:#5cb85c;font-family:monospace}
+button{font-size:16px;padding:10px 22px;margin-top:14px;border:0;border-radius:6px;cursor:pointer;background:#5cb85c;color:#fff}
+#msg{color:#5cb85c;min-height:22px;font-size:14px;margin-top:8px;font-family:monospace}
+h4{margin:14px 0 2px;color:#ddd}</style></head><body>
+<div id="left"><img id="view" src=""><div id="msg"></div></div>
+<div id="right">
+<h3>Pose the worm RIGHT SIDE UP, then save</h3>
+<h4>worm position</h4>
+<label>x <span class="val" id="vx">0</span></label><input type="range" id="x" min="-2" max="2" step="0.02" value="0">
+<label>y <span class="val" id="vy">0</span></label><input type="range" id="y" min="-2" max="2" step="0.02" value="0">
+<label>z <span class="val" id="vz">0.5</span></label><input type="range" id="z" min="0" max="2" step="0.01" value="0.5">
+<h4>worm rotation (deg)</h4>
+<label>roll <span class="val" id="vroll">0</span></label><input type="range" id="roll" min="-180" max="180" step="1" value="0">
+<label>pitch <span class="val" id="vpitch">0</span></label><input type="range" id="pitch" min="-180" max="180" step="1" value="0">
+<label>yaw <span class="val" id="vyaw">0</span></label><input type="range" id="yaw" min="-180" max="180" step="1" value="0">
+<h4>camera</h4>
+<label>azimuth <span class="val" id="vcaz">90</span></label><input type="range" id="caz" min="0" max="360" step="2" value="90">
+<label>elevation <span class="val" id="vcel">-15</span></label><input type="range" id="cel" min="-89" max="10" step="1" value="-15">
+<label>distance <span class="val" id="vcd">3</span></label><input type="range" id="cd" min="1" max="8" step="0.1" value="3">
+<button onclick="save()">Save: this is right side up</button>
+</div>
 <script>
-function pick(deg){fetch('/label',{method:'POST',headers:{'Content-Type':'application/json'},
- body:JSON.stringify({roll_deg:deg})}).then(r=>r.json()).then(d=>{
- document.getElementById('msg').textContent='saved: roll '+deg+'deg -> up_local '+JSON.stringify(d.up_local);});}
+const ids=['x','y','z','roll','pitch','yaw','caz','cel','cd'];
+let pending=false, dirty=false;
+function vals(){const o={};for(const i of ids)o[i]=parseFloat(document.getElementById(i).value);return o;}
+function labels(){for(const i of ids)document.getElementById('v'+i).textContent=document.getElementById(i).value;}
+function render(){
+ if(pending){dirty=true;return;}
+ pending=true;
+ fetch('/render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(vals())})
+ .then(r=>r.json()).then(d=>{document.getElementById('view').src='data:image/jpeg;base64,'+d.img;
+  pending=false;if(dirty){dirty=false;render();}});
+}
+function save(){
+ fetch('/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(vals())})
+ .then(r=>r.json()).then(d=>{document.getElementById('msg').textContent='saved! up_local='+JSON.stringify(d.up_local);});
+}
+for(const i of ids)document.getElementById(i).addEventListener('input',()=>{labels();render();});
+labels();render();
 </script></body></html>"""
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--creature-xml", default="creature_configs/three_seg_worm.xml")
-    p.add_argument("--out", default=None,
-                   help="default: creature_configs/<stem>_up_axis.json")
+    p.add_argument("--out", default=None)
     p.add_argument("--port", type=int, default=8096)
     args = p.parse_args()
     out = args.out or os.path.join(
         "creature_configs",
         os.path.splitext(os.path.basename(args.creature_xml))[0] + "_up_axis.json")
 
-    shots, axis = render_rolls(args.creature_xml)
-    tiles = "".join(
-        f'<img src="data:image/png;base64,{base64.b64encode(png).decode()}" '
-        f'onclick="pick({deg})" title="roll {deg}deg">'
-        for deg, png in shots)
+    model, meta = build_creature_scene(args.creature_xml, ball=None)
+    data = mujoco.MjData(model)
+    ren = mujoco.Renderer(model, height=480, width=640)
+    qr = meta.qpos_root
+
+    def pose(v):
+        data.qpos[:] = 0.0
+        data.qvel[:] = 0.0
+        data.qpos[qr:qr + 3] = v["x"], v["y"], v["z"]
+        data.qpos[qr + 3:qr + 7] = rpy_to_quat(*np.deg2rad([v["roll"], v["pitch"], v["yaw"]]))
+        mujoco.mj_forward(model, data)
+
+    def shot(v):
+        pose(v)
+        cam = mujoco.MjvCamera()
+        cam.lookat[:] = data.xpos[meta.root_body]
+        cam.azimuth, cam.elevation, cam.distance = v["caz"], v["cel"], v["cd"]
+        ren.update_scene(data, camera=cam)
+        from PIL import Image
+        b = io.BytesIO()
+        Image.fromarray(ren.render()).save(b, format="JPEG", quality=85)
+        return base64.b64encode(b.getvalue()).decode()
 
     app = Flask(__name__)
 
     @app.route("/")
     def index():
-        return PAGE.replace("{{TILES}}", tiles)
+        return PAGE
+
+    @app.route("/render", methods=["POST"])
+    def render():
+        return jsonify(img=shot(request.get_json()))
 
     @app.route("/label", methods=["POST"])
     def label():
-        deg = float(request.get_json()["roll_deg"])
-        t = np.deg2rad(deg)
-        # If R(roll about axis) is right-side-up, the body axis that points at
-        # world +z is R^T z.
-        up_local = quat_to_mat(roll_quat(axis, t)).T @ np.array([0.0, 0.0, 1.0])
+        v = request.get_json()
+        q = rpy_to_quat(*np.deg2rad([v["roll"], v["pitch"], v["yaw"]]))
+        R = quat_to_mat(q)
+        up_local = R.T @ np.array([0.0, 0.0, 1.0])
         payload = {"creature_xml": args.creature_xml,
-                   "roll_deg": deg,
-                   "long_axis": [round(float(v), 6) for v in axis],
-                   "up_local": [round(float(v), 6) for v in up_local]}
+                   "pose": {k: float(v[k]) for k in
+                            ("x", "y", "z", "roll", "pitch", "yaw")},
+                   "quat_wxyz": [round(float(x), 6) for x in q],
+                   "up_local": [round(float(x), 6) for x in up_local]}
         with open(out, "w") as f:
             json.dump(payload, f, indent=2)
         print(f"[label] saved {out}: {payload}", flush=True)
-        return json.dumps({"ok": True, "up_local": payload["up_local"]})
+        return jsonify(ok=True, up_local=payload["up_local"])
 
     print(f"[label] serving on http://0.0.0.0:{args.port} -> writes {out}",
           flush=True)
+    # threaded=False: every request renders on the one EGL context.
     app.run(host="0.0.0.0", port=args.port, threaded=False, use_reloader=False)
 
 

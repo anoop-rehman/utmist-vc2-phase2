@@ -32,10 +32,26 @@ SUBSTEPS = 4          # model timestep .005
 EPISODE_SECONDS = 20  # suite _DEFAULT_TIME_LIMIT
 
 
-def build_fetch_model():
-    """The suite's own XML, with walls + ball + target kept."""
+def build_fetch_model(floor_size=None):
+    """The suite's own XML, with walls + ball + target kept.
+
+    floor_size shrinks the arena (suite default 15 = a 30x30 floor). The
+    suite's make_model only resizes the floor GEOM; the walls sit at
+    hard-coded +/-15.7, so for a scaled arena we move them in too.
+    """
     from dm_control.suite import quadruped, common
-    xml = quadruped.make_model(walls_and_ball=True)
+    from lxml import etree
+    xml = quadruped.make_model(floor_size=floor_size, walls_and_ball=True)
+    if floor_size is not None:
+        mjcf = etree.XML(xml, etree.XMLParser(remove_blank_text=True))
+        w = floor_size + 0.7
+        for name, pos, size in (("wall_px", f"-{w} 0 .7", f"1 {floor_size} .5"),
+                                ("wall_py", f"0 -{w} .7", f"{floor_size} 1 .5"),
+                                ("wall_nx", f"{w} 0 .7", f"1 {floor_size} .5"),
+                                ("wall_ny", f"0 {w} .7", f"{floor_size} 1 .5")):
+            g = mjcf.find(f".//geom[@name='{name}']")
+            g.attrib["pos"], g.attrib["size"] = pos, size
+        xml = etree.tostring(mjcf)
     return mujoco.MjModel.from_xml_string(xml, common.ASSETS)
 
 
@@ -58,14 +74,17 @@ def _spawn_height(model):
 
 class WarpFetchEnv:
     def __init__(self, num_worlds=1024, device="cuda", seed=0, use_graph=True,
-                 nconmax=256, njmax=1024):
+                 nconmax=256, njmax=1024, floor_size=None,
+                 ball_drop_z=2.0, ball_kick_std=5.0):
         self.n = num_worlds
         self.device = device
         self.episode_steps = int(round(EPISODE_SECONDS / CONTROL_DT))
         self.gen = torch.Generator(device=device).manual_seed(seed)
         self.n_diverged = 0
+        self.ball_drop_z = ball_drop_z
+        self.ball_kick_std = ball_kick_std
 
-        self.model = m = build_fetch_model()
+        self.model = m = build_fetch_model(floor_size=floor_size)
         self.spawn_z = _spawn_height(m)
 
         # --- indices, straight off the MjModel ---------------------------
@@ -178,14 +197,15 @@ class WarpFetchEnv:
         self.qpos[:, self.rq + 5] = 0.0
         self.qpos[:, self.rq + 6] = torch.sin(az / 2)
 
-        # Ball: random xy, dropped from z=2 with random horizontal velocity.
+        # Ball: random xy, dropped from ball_drop_z (suite: 2 m) with random
+        # horizontal velocity (suite: 5*randn) -- both scale with the arena.
         self.qpos[:, self.bq + 0] = (self._rand(n) * 2 - 1) * self.spawn_radius
         self.qpos[:, self.bq + 1] = (self._rand(n) * 2 - 1) * self.spawn_radius
-        self.qpos[:, self.bq + 2] = 2.0
+        self.qpos[:, self.bq + 2] = self.ball_drop_z
         self.qpos[:, self.bq + 3] = 1.0
         self.qpos[:, self.bq + 4:self.bq + 7] = 0.0
-        self.qvel[:, self.bv + 0] = 5.0 * self._randn(n)
-        self.qvel[:, self.bv + 1] = 5.0 * self._randn(n)
+        self.qvel[:, self.bv + 0] = self.ball_kick_std * self._randn(n)
+        self.qvel[:, self.bv + 1] = self.ball_kick_std * self._randn(n)
 
         self.t = 0
         self.prev_ctrl = torch.zeros(n, self.act_dim, device=self.device)

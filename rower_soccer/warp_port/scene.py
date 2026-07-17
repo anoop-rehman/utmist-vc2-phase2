@@ -154,7 +154,7 @@ def creature_size(creature_xml_path):
 
 def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
                          target_marker=False, topdown_cam=False,
-                         cam_height=25.0, view_half=12.0):
+                         cam_height=25.0, view_half=12.0, base_xml=None):
     """Returns (mujoco.MjModel, SceneMeta). `ball=None` -> the follow scene.
 
     target_marker=True appends a non-colliding red sphere on a free joint, for the
@@ -166,7 +166,9 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
     Never put this in the physics model: it would add 7 qpos / 6 dof to every Warp
     world for something that is only ever looked at.
     """
-    spec = mujoco.MjSpec.from_string(_BASE_XML)
+    # base_xml overrides the soccer pitch -- e.g. the fetch arena (small walled
+    # square) reuses all the creature/ball attachment + meta machinery below.
+    spec = mujoco.MjSpec.from_string(base_xml or _BASE_XML)
     sub = mujoco.MjSpec.from_file(creature_xml_path)
     frame = spec.worldbody.add_frame()
     attached_root = frame.attach_body(sub.worldbody.bodies[0], prefix, "")

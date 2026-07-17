@@ -1,0 +1,22 @@
+{
+  "creature_xml": "creature_configs/three_seg_worm.xml",
+  "pose": {
+    "x": 0.0,
+    "y": -0.1,
+    "z": 0.28,
+    "roll": 92.0,
+    "pitch": 0.0,
+    "yaw": 0.0
+  },
+  "quat_wxyz": [
+    0.694658,
+    0.71934,
+    0.0,
+    0.0
+  ],
+  "up_local": [
+    0.0,
+    0.999391,
+    -0.034899
+  ]
+}

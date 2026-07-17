@@ -31,9 +31,11 @@ class WarpRenderer:
 
     def __init__(self, creature_xml, has_ball, width=640, height=480,
                  distance=6.0, elevation=-20.0, azimuth=110.0,
-                 topdown=False, view_half=12.0, cam_height=25.0):
+                 topdown=False, view_half=12.0, cam_height=25.0,
+                 base_xml=None, ball=None):
         self.model, self.meta = build_creature_scene(
-            creature_xml, ball=BallSpec() if has_ball else None, target_marker=True,
+            creature_xml, ball=(ball or BallSpec()) if has_ball else None,
+            target_marker=True, base_xml=base_xml,
             topdown_cam=topdown, view_half=view_half, cam_height=cam_height)
         self.data = mujoco.MjData(self.model)
         self.renderer = mujoco.Renderer(self.model, height=height, width=width)

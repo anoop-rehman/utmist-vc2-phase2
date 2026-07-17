@@ -89,6 +89,9 @@ See [the observation contract](architecture/observation-contract.md).
 - [x] Dribble **curriculum** (colinear stage 1 → 2D parking stage 2), warm-started
   from the follow policy
 - [x] **Interactive play server** — drive the worm in a browser on Warp physics
+- [x] **Fetch benchmark** — dm_control quadruped-fetch reproduced faithfully in
+  Warp (reward parity 4e-8), then adapted to the worm and rower with a
+  browser-labeled up-axis/rest-pose ([details](fetch.md))
 - [ ] Kick + shoot drills, full multitask curriculum, expert→prior distillation
 - [ ] Browser play UI for humans, z-space BC, self-play fine-tune
 - [ ] Heterogeneous 2v2 showcase video

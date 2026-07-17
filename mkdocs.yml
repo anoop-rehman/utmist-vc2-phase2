@@ -84,6 +84,8 @@ nav:
       - training/drills.md
       - training/curriculum.md
       - training/sweeps.md
+  - Fetch benchmark:
+      - fetch.md
   - Interactive play:
       - play-server.md
   - Contracts:

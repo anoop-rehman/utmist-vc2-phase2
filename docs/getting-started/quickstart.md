@@ -60,7 +60,14 @@ MUJOCO_GL=egl .venv/bin/python -m rower_soccer.train_drill \
 Training logs to wandb (project `creature-soccer`) with eval videos on a
 wallclock cadence.
 
-## 4. Drive the worm yourself (interactive play)
+## 4. Train the fetch benchmark
+
+The dm_control quadruped-fetch reproduction (and its worm/rower adaptations)
+has its own page with copy-paste commands:
+[Fetch benchmark](../fetch.md) — including quickstarts for `fetch_ant_small`
+and `fetch_worm_arena5`.
+
+## 5. Drive the worm yourself (interactive play)
 
 ```bash
 bash scripts/run_play.sh 8085

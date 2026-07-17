@@ -111,6 +111,14 @@ class WarpWormFetchEnv:
             lbl = json.load(f)
         self.up_local = torch.tensor(lbl["up_local"], dtype=torch.float32,
                                      device=device)
+        # Labeled REST POSE: the labeler saves every hinge angle (radians);
+        # the creature spawns in exactly that pose. Unlabeled joints stay 0.
+        self._label_joints = {}
+        for name, rad in (lbl.get("joints") or {}).items():
+            try:
+                self._label_joints[int(self.model.joint(name).qposadr[0])] = float(rad)
+            except KeyError:
+                pass
         # Spawn RIGHT-SIDE-UP, like quadruped fetch spawns its walker upright:
         # the labeled quat IS the upright orientation (random yaw composes on
         # top in reset). Without this the worm spawns in its model-default
@@ -128,6 +136,8 @@ class WarpWormFetchEnv:
         # whole body always clears the walls; the ball (r=0.15) keeps the full
         # region. Pitch has no walls near the spawn region, so no shrink.
         data0 = mujoco.MjData(self.model)
+        for adr, rad in self._label_joints.items():
+            data0.qpos[adr] = rad
         mujoco.mj_forward(self.model, data0)
         root_xy = data0.xpos[self.meta.root_body][:2]
         body_set = set(int(b) for b in self.meta.body_ids)
@@ -166,18 +176,23 @@ class WarpWormFetchEnv:
         self.jv = torch.as_tensor(m.joint_qvel, device=device)
         self.body_ids = torch.as_tensor(m.body_ids, device=device)
         ss = m.sensor_slices
-        self.sl_touch = [ss[f"seg{i}_touch"] for i in range(3)]
+        touch_keys = sorted(k for k in ss if k.endswith("_touch"))
+        self.sl_touch = [ss[k] for k in touch_keys]
         self.sl_vel, self.sl_gyro, self.sl_accel = (ss["torso_vel"],
                                                     ss["torso_gyro"],
                                                     ss["torso_accel"])
         self.bq, self.bv = m.ball_qpos, m.ball_qvel
         self.rv = m.qvel_root
 
-        self.obs_dim = 41
+        # proprio size follows the creature: bodies_ego + height + joints
+        # pos/vel + accel/gyro/vel + touch + world_zaxis. Worm: 29. Rower: 65.
+        n_proprio = (3 * len(m.body_ids) + 1 + 2 * len(m.joint_qpos)
+                     + 9 + len(touch_keys) + 3)
+        self.obs_dim = n_proprio + 12
         self.act_dim = m.nu
         self.t = 0
-        self.proprio_indices = np.arange(0, 29)
-        self.task_indices = np.arange(29, 41)
+        self.proprio_indices = np.arange(0, n_proprio)
+        self.task_indices = np.arange(n_proprio, self.obs_dim)
         # fetch target is FIXED at the arena/pitch centre, like dm_control's.
         self.target_xy = torch.zeros(self.n, 2, device=device)
 
@@ -222,6 +237,8 @@ class WarpWormFetchEnv:
             data.qpos[self.meta.ball_qpos:self.meta.ball_qpos + 3] = 0, 0, 50
             data.qpos[qr + 0:qr + 3] = 0.0, 0.0, z
             data.qpos[qr + 3:qr + 7] = q
+            for adr, rad in self._label_joints.items():
+                data.qpos[adr] = rad
             mujoco.mj_forward(m, data)
             if data.ncon == 0:
                 return z
@@ -245,6 +262,8 @@ class WarpWormFetchEnv:
         self.qpos[:, qr + 0] = (self._rand(n) * 2 - 1) * self.worm_spawn_radius
         self.qpos[:, qr + 1] = (self._rand(n) * 2 - 1) * self.worm_spawn_radius
         self.qpos[:, qr + 2] = self.spawn_z_up
+        for adr, rad in self._label_joints.items():
+            self.qpos[:, adr] = rad
         self.qpos[:, qr + 3] = qw
         self.qpos[:, qr + 4] = qx
         self.qpos[:, qr + 5] = qy
@@ -275,6 +294,8 @@ class WarpWormFetchEnv:
         self.qpos[idx] = 0.0
         self.qpos[idx, qr + 2] = self.spawn_z_up
         self.qpos[idx, qr + 3:qr + 7] = self.spawn_quat
+        for adr, rad in self._label_joints.items():
+            self.qpos[idx, adr] = rad
         self.qpos[idx, self.bq + 0] = 1.5
         self.qpos[idx, self.bq + 1] = 1.5
         self.qpos[idx, self.bq + 2] = 0.15

@@ -1,0 +1,2820 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="GA-evolved creatures learn to play 2v2 soccer in dm_control's MuJoCo soccer environment, via a latent-bottleneck multitask-curriculum RL pipeline.">
+      
+      
+        <meta name="author" content="UTMIST Virtual Creatures">
+      
+      
+        <link rel="canonical" href="https://anoop-rehman.github.io/utmist-vc2-phase2/design/stage2-multitask/">
+      
+      
+        <link rel="prev" href="../pipeline-v2/">
+      
+      
+        <link rel="next" href="../overview/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Stage 1-2 Multitask - Creature Soccer</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="green" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#stage-1-2-engineering-plan-multitask-joint-training-freeze" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Creature Soccer" class="md-header__button md-logo" aria-label="Creature Soccer" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Creature Soccer
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Stage 1-2 Multitask
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="green" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="green" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/anoop-rehman/utmist-vc2-phase2" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    anoop-rehman/utmist-vc2-phase2
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Creature Soccer" class="md-nav__button md-logo" aria-label="Creature Soccer" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Creature Soccer
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/anoop-rehman/utmist-vc2-phase2" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    anoop-rehman/utmist-vc2-phase2
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/pod-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pod setup runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/observation-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The observation contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/warp-backend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Warp backend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../training/drills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training drills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../training/curriculum/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dribble curriculum
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../training/sweeps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sweeps (SkyPilot)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fetch benchmark
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Fetch benchmark
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../fetch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fetch (quadruped, worm, rower)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive play
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interactive play
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../play-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive play server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contracts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contracts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interface contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/repo-layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repo layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs (canonical)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs (canonical)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage 1-2 Multitask
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage 1-2 Multitask
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#00-the-observation-contract-read-this-before-touching-any-obs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.0 The observation contract — read this before touching any obs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.0 The observation contract — read this before touching any obs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-not-to-zero-pad-the-drills-to-the-games-119-dim-obs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why NOT to zero-pad the drills to the game's 119-dim obs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#01-backend-calibration-warp-is-not-mujoco-and-must-be-tuned-to-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1 Backend calibration — Warp is not MuJoCo, and must be tuned to match
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#02-the-arena-dm_soccers-pitch-in-both-sims" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2 The arena — dm_soccer's pitch, in both sims
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#03-record-of-corrections-claims-that-did-not-survive-scrutiny" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.3 Record of corrections — claims that did NOT survive scrutiny
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0-why-multitask-and-not-the-frozen-follow-shortcut" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Why multitask, and not the frozen-follow shortcut
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#05-scale-the-mass-ratio-and-why-the-worm-is-being-lightened" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.5 Scale — the mass ratio, and why the worm is being lightened
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.5 Scale — the mass ratio, and why the worm is being lightened">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-we-tried-and-what-it-cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What we tried, and what it cost
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-fix-being-applied-lighten-the-worm-keep-its-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The fix being applied: lighten the worm, keep its size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-other-lever-shrink-the-worm-length-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The other lever: shrink the worm (--length-scale)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-mapping-onto-the-paper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mapping onto the paper
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-corrections-to-pipeline_v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Corrections to PIPELINE_V2
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-env-layer-the-big-piece" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Env layer — the big piece
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Env layer — the big piece">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What exists
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recommended-design-one-scene-world-partitioned-by-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended design: one scene, world-partitioned by task
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fallback
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-model-layer-minimal-surgery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Model layer — minimal surgery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-trainer-layer-multitask-ppo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Trainer layer — multitask PPO
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-curriculum-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Curriculum control
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-freeze-and-retrain-the-phase-pipeline_v2-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Freeze and retrain — the phase PIPELINE_V2 is missing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Freeze and retrain — the phase PIPELINE_V2 is missing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#checkpoint-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checkpoint format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-sequencing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Sequencing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-recorded-now-acted-on-later-the-stochasticity-flip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Recorded now, acted on later: the stochasticity flip
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ws1-low-level/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WS1 Low-Level Control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../play-interactive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Play (CPU)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../soccer-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Drill→Soccer Obs Bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#00-the-observation-contract-read-this-before-touching-any-obs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.0 The observation contract — read this before touching any obs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.0 The observation contract — read this before touching any obs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-not-to-zero-pad-the-drills-to-the-games-119-dim-obs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why NOT to zero-pad the drills to the game's 119-dim obs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#01-backend-calibration-warp-is-not-mujoco-and-must-be-tuned-to-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1 Backend calibration — Warp is not MuJoCo, and must be tuned to match
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#02-the-arena-dm_soccers-pitch-in-both-sims" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2 The arena — dm_soccer's pitch, in both sims
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#03-record-of-corrections-claims-that-did-not-survive-scrutiny" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.3 Record of corrections — claims that did NOT survive scrutiny
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0-why-multitask-and-not-the-frozen-follow-shortcut" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Why multitask, and not the frozen-follow shortcut
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#05-scale-the-mass-ratio-and-why-the-worm-is-being-lightened" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.5 Scale — the mass ratio, and why the worm is being lightened
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.5 Scale — the mass ratio, and why the worm is being lightened">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-we-tried-and-what-it-cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What we tried, and what it cost
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-fix-being-applied-lighten-the-worm-keep-its-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The fix being applied: lighten the worm, keep its size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-other-lever-shrink-the-worm-length-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The other lever: shrink the worm (--length-scale)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-mapping-onto-the-paper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mapping onto the paper
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-corrections-to-pipeline_v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Corrections to PIPELINE_V2
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-env-layer-the-big-piece" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Env layer — the big piece
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Env layer — the big piece">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What exists
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recommended-design-one-scene-world-partitioned-by-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended design: one scene, world-partitioned by task
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fallback
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-model-layer-minimal-surgery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Model layer — minimal surgery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-trainer-layer-multitask-ppo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Trainer layer — multitask PPO
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-curriculum-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Curriculum control
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-freeze-and-retrain-the-phase-pipeline_v2-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Freeze and retrain — the phase PIPELINE_V2 is missing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Freeze and retrain — the phase PIPELINE_V2 is missing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#checkpoint-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checkpoint format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-sequencing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Sequencing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-recorded-now-acted-on-later-the-stochasticity-flip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Recorded now, acted on later: the stochasticity flip
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/anoop-rehman/utmist-vc2-phase2/edit/main/docs/design/stage2-multitask.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<div class="admonition note">
+<p class="admonition-title">Canonical source</p>
+<p>This page renders <code>rower_soccer/docs/STAGE2_MULTITASK.md</code> verbatim — the authoritative design doc that lives
+next to the code. Edit that file, not this page.</p>
+</div>
+<h1 id="stage-1-2-engineering-plan-multitask-joint-training-freeze">Stage 1-2 Engineering Plan — Multitask Joint Training + Freeze<a class="headerlink" href="#stage-1-2-engineering-plan-multitask-joint-training-freeze" title="Permanent link">&para;</a></h1>
+<p>Concrete engineering plan under PIPELINE_V2.md (the north-star). Covers the
+joint multitask phase (PIPELINE_V2 stages 1-2) and the <strong>freeze-and-retrain</strong>
+phase, which PIPELINE_V2 omits but which everything from its stage 3 onward
+silently assumes.</p>
+<p>Reference: Liu et al. 2022, "From Motor Control to Team Play in Simulated
+Humanoid Football" (Science Robotics; papers in <code>project_management/</code>).</p>
+<hr />
+<h2 id="00-the-observation-contract-read-this-before-touching-any-obs">0.0 The observation contract — read this before touching any obs<a class="headerlink" href="#00-the-observation-contract-read-this-before-touching-any-obs" title="Permanent link">&para;</a></h2>
+<p>The single most load-bearing invariant in the project, and the one that was
+silently broken until 2026-07-14. Two inputs, opposite rules:</p>
+<p><strong>Proprio → the shared decoder. This is a HARD contract.</strong> The decoder is the one
+network reused across every drill, every expert, and the 2v2 game. Its input must
+therefore be <em>identical everywhere</em>, which means it may contain only things that</p>
+<ol>
+<li><strong>exist in the 2v2 game</strong>, and</li>
+<li>are <strong>invariant to where on the pitch the creature is and which way it faces.</strong></li>
+</ol>
+<p>Proprio used to carry <code>absolute_root_mat</code> (9) + <code>absolute_root_pos</code> (3) — the
+creature's global yaw and global xy. Both rules violated. It let the decoder learn
+gaits that only work at one spot facing one way, and dm_soccer does not supply
+those quantities at all: it gives <code>world_zaxis</code> (gravity in the body frame) and
+<code>body_height</code>. So the "reusable low-level controller" — the load-bearing premise of
+this entire pipeline — was built on 12 inputs that would not exist at deployment.</p>
+<p>Fixed: <code>world_zaxis</code> + <code>body_height</code> replace them. Proprio <strong>37 → 29</strong>. That is
+what a motor controller actually needs (which way is up, how high off the ground)
+and nothing more.</p>
+<p><strong>Task obs → the per-task expert. Free to differ.</strong> Four experts, four separate
+input layers, no shared weights — nothing forces a common shape. Follow sees a
+target; dribble sees ball + target; shoot will see ball + goal.</p>
+<p><strong>But: anything that survives DISTILLATION must be a function of game obs, in the
+game's own form.</strong> This is the constraint people miss. The drill experts are
+scaffolding — they get distilled into reduced-observation <em>drill priors</em> (stage 3),
+and the football policy's KL is computed by evaluating those priors <strong>on game
+observations</strong>. So every obs that survives into a prior has to be feedable from the
+game.</p>
+<p>Worked example, and a real bug we caught this way: <code>ball_ego</code> was 2-D (ego xy
+position + ego xy velocity). The game gives <code>ball_ego_position</code> <strong>(3)</strong> +
+<code>ball_ego_linear_velocity</code> <strong>(3)</strong>. The ball obs is the core of both the dribble and
+shoot priors, so it survives distillation — and a 2-D obs cannot be fed from a 3-D
+one. Every drill would have trained against a dead-end interface, discovered only at
+stage 3. Now 3-D, matching the game. Same reasoning says shoot's goal obs must use
+the game's <code>opponent_goal_mid</code> (3) and goal-corner representation.</p>
+<p>The drill-only obs (<code>target_ego</code>, <code>target_ego_future</code>) are fine: distillation is
+precisely what <em>removes</em> them. The follow prior drops the target and becomes
+"locomote"; the dribble prior drops it and becomes "move the ball". That is the
+bridge from drills to football, and it is why the freeze phase produces priors
+rather than shipping the experts.</p>
+<h3 id="why-not-to-zero-pad-the-drills-to-the-games-119-dim-obs">Why NOT to zero-pad the drills to the game's 119-dim obs<a class="headerlink" href="#why-not-to-zero-pad-the-drills-to-the-games-119-dim-obs" title="Permanent link">&para;</a></h3>
+<p>A tempting "fix": give every drill the full game obs space, zeroing the irrelevant
+fields (teammates, opponents, score), so everything matches. <strong>This is worse than
+useless.</strong></p>
+<p>The gradient w.r.t. a weight is <code>δ · x</code>. If <code>x</code> is always 0, the gradient is always
+<strong>exactly</strong> 0 — so those weights never move from their random initialisation. Then
+at game time the teammate obs goes nonzero, gets multiplied by never-trained random
+weights, and injects noise straight into the expert. You would ship a network with
+90 dimensions of latent garbage, primed to fire the moment it matters.</p>
+<p><strong>An input that is always zero is not ignored. It is untrained.</strong> Obs spaces are
+<em>supposed</em> to differ per task; distillation reconciles them.</p>
+<hr />
+<h2 id="01-backend-calibration-warp-is-not-mujoco-and-must-be-tuned-to-match">0.1 Backend calibration — Warp is not MuJoCo, and must be tuned to match<a class="headerlink" href="#01-backend-calibration-warp-is-not-mujoco-and-must-be-tuned-to-match" title="Permanent link">&para;</a></h2>
+<p><code>mujoco_warp</code> resolves contacts <strong>~6.7x softer</strong> than MuJoCo CPU on <em>byte-identical</em>
+parameters — same <code>solref</code>/<code>solimp</code>/<code>condim</code>/friction, same 0.0025 timestep, same 10
+substeps, same Newton solver, same 100 iterations. Every <code>opt</code> field and every geom
+field was compared; nothing was misconfigured.</p>
+<div class="highlight"><pre><span></span><code>mean floor penetration     Warp -2.28 cm      CPU -0.34 cm
+</code></pre></div>
+<p>It is <strong>not</strong> under-convergence: raising <code>iterations</code> 100 → 500 and <code>ls_iterations</code>
+50 → 200 moves penetration by &lt;5%. At convergence, penetration is set by constraint
+<strong>compliance</strong>, not iteration count — so <code>solref</code> is the only lever.</p>
+<p>This matters more than it sounds, because <strong>the worm propels itself entirely by
+pushing against the ground.</strong> Sinking 2 cm into the floor is free traction, and the
+policy learns to farm it: stiffening contacts to CPU's level costs the old follow_v2
+<strong>175 reward</strong> in Warp (413 → 238). That soft-contact exploit — not noslip — was the
+bulk of the sim2sim gap, and it is visibly why old eval videos looked like the worm
+was glitching <em>through</em> the floor rather than slithering <em>on</em> it.</p>
+<p><strong>Fix:</strong> <code>WARP_SOLREF_TIMECONST = 0.005</code> in <code>warp_port/scene.py</code>, applied post-compile
+to every geom. Lands Warp at -0.317 cm against CPU's -0.342 cm. Warp's <code>solref</code> now
+<strong>deliberately differs</strong> from the CPU drill's 0.02 — the two backends need different
+nominal values to produce the same physics. Do not "fix" this back. 0.005 is
+2 x timestep, MuJoCo's documented stability floor; verified stable over 600 steps x
+256 worlds of random torque, zero NaNs, <code>max|qvel|</code> unchanged.</p>
+<p><strong>Generalise the lesson:</strong> treat Warp as a <em>different simulator that must be
+calibrated against MuJoCo</em>, not as a fast MuJoCo. Any new contact-bearing entity
+(the ball, the goal posts, the rower's future limbs) should have its penetration
+checked against CPU before a long run is launched on it.</p>
+<hr />
+<h2 id="02-the-arena-dm_soccers-pitch-in-both-sims">0.2 The arena — dm_soccer's pitch, in both sims<a class="headerlink" href="#02-the-arena-dm_soccers-pitch-in-both-sims" title="Permanent link">&para;</a></h2>
+<p>Both drills train on the <strong>same arena the 2v2 game uses</strong>: dm_soccer's <code>Pitch</code>,
+half-extents (48, 36) → 96 x 72 m ground, four bounding walls, two goals (posts at
+y = ±11.88, crossbar at z = 5.33). <code>drills/follow.py</code> uses the real <code>Pitch</code>;
+<code>warp_port/scene.py</code>'s <code>_BASE_XML</code> carries the same geometry, transcribed from the
+compiled dm_control model rather than hand-typed, so the two scenes are literally
+the same world.</p>
+<p>At the drills' ±10 m bounds the worm reaches no wall and no goal, and the pitch
+ground's contact params are byte-identical to the old <code>floors.Floor</code>. So
+follow/dribble physics are <strong>unchanged</strong> by the swap. What it buys: no arena shift
+at transfer, and <code>shoot</code> has a real goal to aim at. Cost, measured: the extra 24
+geoms under <code>mujoco_warp</code>'s n-by-n broadphase take 2048-world throughput from 268k
+to 252k env-steps/s (~6%).</p>
+<hr />
+<h2 id="03-record-of-corrections-claims-that-did-not-survive-scrutiny">0.3 Record of corrections — claims that did NOT survive scrutiny<a class="headerlink" href="#03-record-of-corrections-claims-that-did-not-survive-scrutiny" title="Permanent link">&para;</a></h2>
+<p>Kept because re-deriving them costs more than reading them.</p>
+<p><strong><code>53971b6</code>'s "+44.5 reward from noslip=0" does not replicate.</strong> On 64 episodes it
+is <strong>+18.2 ± 14.0</strong> — not significant. <code>noslip=0</code> is still <em>correct</em> (Warp does not
+implement the noslip solver, so the CPU eval must not either), but it was a minor
+contributor, not the fix. The real one was contact stiffness (0.1 above).</p>
+<p><strong>Trajectory-level sim2sim parity is unattainable on this creature, and that is not
+a bug.</strong> The worm spawns as an unstable vertical stack and topples chaotically, so
+float32 Warp and float64 MuJoCo diverge exponentially from identical initial states
+regardless of any physics flag: replaying an <em>identical action sequence</em> from an
+<em>identical state</em>, the two are 0.4 m apart within 0.6 s and 6 m apart at 15 s — with
+<code>noslip=0</code> no better than <code>noslip=5</code>. <strong>Validate sim2sim distributionally (many
+episodes, aggregate statistics), never by matching trajectories.</strong> A trajectory-
+divergence test here measures the Lyapunov exponent, not the physics.</p>
+<p><strong>The "CPU under-reports Warp by 41 reward" figure was contaminated and is
+withdrawn.</strong> That harness forced <code>qpos_z = spawn_z</code> into both sims — but CPU's root
+body carries a +0.2613 m frame offset while Warp's does not, so it dropped the CPU
+worm from 0.26 m too high. The <strong>envs are fine</strong> (both natively spawn the root at
+0.2613 m); the test was not. The penetration and stiffening numbers in 0.1 are
+unaffected (native resets, no forcing). <strong>The true cross-sim reward gap is currently
+unmeasured</strong> and must be re-measured after the retrain, with native resets.</p>
+<p>Cheap guard against repeating this: when forcing state across the two sims, force
+<strong><code>xpos</code></strong>, not <code>qpos</code>, or assert the root heights match after the reset.</p>
+<hr />
+<h2 id="0-why-multitask-and-not-the-frozen-follow-shortcut">0. Why multitask, and not the frozen-follow shortcut<a class="headerlink" href="#0-why-multitask-and-not-the-frozen-follow-shortcut" title="Permanent link">&para;</a></h2>
+<p>The alternative we rejected: train <code>follow</code> alone, freeze its decoder, and
+train the other three experts against that frozen z-space. That is cheaper and
+would probably work <em>for the worm</em> — a 2-DoF body's action manifold is tiny
+enough that <code>follow</code> likely exercises most of it, so a follow-only latent
+plausibly spans the skill repertoire.</p>
+<p>It does not survive the move to the 8-DoF rower. More joints means more
+distinct motions that <code>kick</code> and <code>shoot</code> need but <code>follow</code> never visits, so a
+follow-only decoder would fail to span the repertoire and the later experts
+would be stuck trying to express skills the controller cannot produce.
+Multitask does not make that bet: every skill contributes gradients to the
+shared decoder, so the latent space is spanned by construction.</p>
+<p>We pay a bit of upfront complexity for something that scales across
+morphologies. <strong>Revisit trigger:</strong> at substantially higher DoF, on-policy
+multitask exploration itself starts to strain, and the mocap/Unity-motion
+warm-start (the "Option C" we deferred) becomes attractive again. The design
+below is deliberately agnostic to how the decoder was initialized, so that
+route stays open — see §8.</p>
+<hr />
+<h2 id="05-scale-the-mass-ratio-and-why-the-worm-is-being-lightened">0.5 Scale — the mass ratio, and why the worm is being lightened<a class="headerlink" href="#05-scale-the-mass-ratio-and-why-the-worm-is-being-lightened" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>OUTCOME (read first).</strong> Mass scaling alone was tried and <strong>was not enough</strong>.
+It leaves the creature's locomotion invariant (F = ma with force and mass both
+scaled by k) and it fixed the mass ratio, but it did <strong>not</strong> stop the ball being
+launched: in a damped collision the ball departs at roughly the contact speed of
+whatever hit it for as long as that segment outweighs it, and even at 12 kg total
+the tail segment is 8.5 kg against a 0.045 kg ball. Launching is set by the tail's
+<strong>tip speed</strong>, and only shrinking the body reduces that (tip speed ~ sqrt(s)).</p>
+<p>The worm was therefore <strong>shrunk</strong>, not merely lightened: <code>unity2mujoco
+--length-scale 0.1768 --gear-scale 0.03</code> → <strong>1.76 m / 22.01 kg</strong>, ball:worm
+1:489 (dm_soccer's ratio), footprint radius 4.65 m → 0.82 m. Measured: max ball
+speed 13-23 m/s → 7.0 m/s, max displacement 24-75 m → 7.5 m, ball comes to rest
+in 100% of worlds (2.2 s) vs rarely. The ball is now controllable.</p>
+<p>The rest of this section is kept for the reasoning and the measurements, but the
+conclusion it reaches ("lighten, keep the size") was superseded.</p>
+</blockquote>
+<h3 id="what-we-tried-and-what-it-cost">What we tried, and what it cost<a class="headerlink" href="#what-we-tried-and-what-it-cost" title="Permanent link">&para;</a></h3>
+<p>The ball is DeepMind's and is internally consistent: <code>SoccerBall</code> at 0.35 m /
+0.045 kg, sized against the goal (ball:goal-width 0.035, vs 0.030 in real
+football). The worm came out of Unity at <strong>9.95 m / 3981 kg</strong>. That is a
+ball:player mass ratio of <strong>1:88,485</strong>, against dm_soccer's own 1:489 and real
+football's 1:163 — the ball is ~180x lighter, relative to the body, than a
+football should be.</p>
+<p>We accepted that deliberately, to keep the 691M-step follow checkpoint valid so
+dribble could warm-start from it, and ran three dribble configs to find out
+empirically whether it mattered. <strong>It does.</strong> Measured with the warm-started
+policy on the dribble drill (512 worlds, one 15 s episode):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>worm gets within 2 m of the ball</td>
+<td><strong>10% of worlds</strong></td>
+</tr>
+<tr>
+<td>worlds where the ball moves at all</td>
+<td>12.9%</td>
+</tr>
+<tr>
+<td>ball displacement</td>
+<td>mean 0.85 m, <strong>max 74.9 m</strong> (drill bounds are ±27 m)</td>
+</tr>
+</tbody>
+</table>
+<p>So the ball is mostly untouched, and on the occasions it <em>is</em> touched it gets
+ejected clean out of the drill. The tell in the training logs was subtle and
+worth remembering: <strong>all three runs reported near-identical <code>fitness</code> at every
+step</strong> (0.113/0.115/0.117 → 0.166/0.166/0.165 → 0.107/0.107/0.107) despite three
+different reward functions. Fitness that does not depend on the policy means the
+policy is not touching the ball — what was actually being plotted was the target
+drifting away from a stationary ball, modulated by episode phase.</p>
+<h3 id="the-fix-being-applied-lighten-the-worm-keep-its-size">The fix being applied: lighten the worm, keep its size<a class="headerlink" href="#the-fix-being-applied-lighten-the-worm-keep-its-size" title="Permanent link">&para;</a></h3>
+<p>Scale <strong>mass and torque by the same factor k</strong>, leaving all lengths alone.</p>
+<p>This is not a compromise, it is the physically clean lever. With force and mass
+both scaled by k, F = ma gives identical accelerations; gravity is an
+acceleration and does not care about mass; ground friction scales too (μN ∝ m,
+and the force needed to accelerate ∝ m). <strong>The worm's own locomotion is exactly
+invariant</strong> — same gait, same speed, same everything. What changes is the
+momentum ratio against the ball, which does <em>not</em> scale, and that is precisely
+the quantity that is broken.</p>
+<p>So it fixes the ball interaction at zero cost to the creature, and the follow
+policy should transfer nearly intact. (One caveat: touch sensors read contact
+<em>force</em>, which scales with mass, so that slice of the proprio observation does
+change. Everything else — joint angles, velocities, gyro, accelerometer — is
+unchanged.)</p>
+<p><code>tools/unity2mujoco.py --mass-scale</code> implements it: density ∝ k, gear ∝ k,
+armature ∝ k, joint damping ∝ k, stiffness ∝ k. Pick k by measuring, not by
+arithmetic — the contacting <em>segment's</em> mass is what governs the collision, and
+the worm's 22 kg would be spread across three segments, so matching BoxHead's
+total mass is not automatically the right target.</p>
+<p>Measured on this worm (<code>warp_port/probe_speed.py</code>), and unchanged by mass
+scaling:</p>
+<table>
+<thead>
+<tr>
+<th>quantity</th>
+<th>value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>achievable speed</td>
+<td><strong>2.83 m/s</strong> (0.28 body-len/s; best gait 0.75 Hz, amp 1.0, 225° phase)</td>
+</tr>
+<tr>
+<td>random-policy speed</td>
+<td>0.20 m/s — the floor, not the ceiling</td>
+</tr>
+</tbody>
+</table>
+<p>Follow-drill constants (target speed (0.25, 2.0) m/s, spawn 2–6 m, bounds 27 m)
+are catchable against 2.83 m/s, so they stand. They live in
+<code>warp_port/follow_env.py</code> and <code>drills/follow.py</code> and <strong>must stay in step</strong> — the
+CPU drill is the transfer/parity eval, so a mismatch reads as a phantom sim2sim
+gap.</p>
+<h3 id="the-other-lever-shrink-the-worm-length-scale">The other lever: shrink the worm (<code>--length-scale</code>)<a class="headerlink" href="#the-other-lever-shrink-the-worm-length-scale" title="Permanent link">&para;</a></h3>
+<p>Kept available, not currently used. <code>--length-scale</code> does a Froude-similar
+rescale (mass ∝ s³, torque ∝ s⁴, armature ∝ s⁵, joint damping ∝ s^4.5,
+stiffness ∝ s⁴). At <code>--length-scale 0.1768 --gear-scale 0.03</code> the worm becomes
+1.76 m / 22.01 kg — BoxHead's mass exactly, and dm_soccer's 1:489 ratio to the
+digit. Ball physics checks out there (<code>probe_ball.py</code>): ball settles at rest,
+12.9% of random-action worlds displace it at 0.2–5.4 m/s, and a 5 m/s ball comes
+to rest in 2.2 s.</p>
+<p>Why we are not using it:</p>
+<ul>
+<li>It <strong>changes the creature</strong>, so every drill constant must be recalibrated with
+  <code>probe_speed.py</code>. At 1.76 m the worm's achievable speed drops to 1.64 m/s, so
+  the existing 2.0 m/s follow target cap becomes <em>uncatchable</em> and the drill
+  unlearnable no matter how good the policy is — with nothing in the training
+  loop to report it. Reward just stays low and reads as "needs more steps".</li>
+<li>It is <strong>not</strong> behaviourally similar. <code>solref</code> and the timestep are pinned to
+  dm_control's convention (which the ball shares — a creature with a different
+  contact timescale from the ball in the same scene would be incoherent) rather
+  than Froude-scaled, and worm locomotion <em>is</em> ground contact. Measured: the
+  small worm runs at 0.93 body-len/s vs the original's 0.28.</li>
+</ul>
+<p>Mass scaling has neither problem, which is why it is the one we reach for.</p>
+<h2 id="1-mapping-onto-the-paper">1. Mapping onto the paper<a class="headerlink" href="#1-mapping-onto-the-paper" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>This plan</th>
+<th>Paper</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Joint multitask phase (§4-5)</td>
+<td>Stage 1 substitute. They obtained a task-agnostic low-level controller by distilling mocap; we obtain one by co-training across the four drills. Different data source, same product.</td>
+</tr>
+<tr>
+<td>Freeze + retrain per task (§6)</td>
+<td>Stage 2, verbatim. Drill experts trained by RL in a frozen z-space.</td>
+</tr>
+<tr>
+<td>Distill experts → drill priors</td>
+<td>Stage 3 (their Eqs. 4-5). Out of scope here; see PIPELINE_V2 stage 3. It is <em>why</em> the freeze phase must produce discrete per-task experts.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-corrections-to-pipeline_v2">2. Corrections to PIPELINE_V2<a class="headerlink" href="#2-corrections-to-pipeline_v2" title="Permanent link">&para;</a></h2>
+<p>Three things in PIPELINE_V2 are stale or missing. This doc supersedes them.</p>
+<p><strong>(a) The freeze stage is missing, and it is load-bearing.</strong> PIPELINE_V2 goes
+joint-multitask (stages 1-2) → distill drill priors (stage 3) with the decoder
+never explicitly frozen. But stages 4-6 all assume a fixed decoder and a fixed
+z-space: human play records <code>(football_obs, z)</code>, BC trains <code>π(z|obs)</code> on those
+latents, and self-play acts in z-space "through the same frozen low-level
+controller" (PIPELINE_V2:46-48). If the decoder is merely "whatever joint
+training left it as" and keeps drifting through distillation, then the z-space
+humans record demos in is not the z-space the final agent deploys into — a
+silent train/deploy mismatch, and one that would present as mysteriously bad BC
+rather than as an error. Freezing is not a nicety; it is the precondition that
+makes everything downstream coherent. It belongs as its own gated stage between
+PIPELINE_V2 stages 2 and 3.</p>
+<p><strong>(b) PIPELINE_V2:91-92 massively understates the env work.</strong> It says adding a
+task in stage 2 is a "config change + resume from checkpoint." True of the
+<em>trainer</em>; false of the <em>env</em>. Only <code>follow</code> exists as a Warp env today, and
+follow has no ball — its targets are virtual, computed in torch
+(<code>follow_env.py:80-82</code>, <code>scene.py:4-6</code>: "Drill targets are kinematic
+abstractions... they never touch the physics"). <code>dribble</code>, <code>kick</code> and <code>shoot</code>
+all require a ball as a <strong>real physics entity the creature contacts</strong>. That
+means a ball body in the Warp scene, ball dynamics, contact, and per-task
+obs/reward. It is the single biggest chunk of real work in this plan, and
+"config flip" hides it entirely. See §3.</p>
+<p><strong>(c) CONTRACTS.md is internally superseded but not updated.</strong> PIPELINE_V2:3
+says it supersedes "CONTRACTS.md §1 command scheme" — i.e. the whole WASD
+<code>Command(a_cmd, r_cmd, kick)</code> interface is replaced by the z-space latent
+interface. But CONTRACTS.md §1-3 still presents WASD as a frozen contract, and
+§2's <code>LowLevelController.act(proprio_obs, command)</code> still takes a <code>Command</code>.
+The controller's input is now <strong><code>z</code></strong>, not <code>Command</code>. Reconcile before someone
+builds against the wrong interface. Concretely, CONTRACTS §2 should become:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">LowLevelController</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">creature_kind</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">act</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">proprio_obs</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;proprio + motor intention z -&gt; actuator vector in [-1, 1].&quot;&quot;&quot;</span>
+</code></pre></div>
+<p>with the anti-drift <code>git_sha</code> rule of §3 extended to a <code>controller_id</code>
+(see §7). CONTRACTS §4-7 (high-level obs, demo format, HL checkpoint, env
+factory) are unaffected.</p>
+<p><strong>Smaller notes.</strong> MPO-vs-PPO (PIPELINE_V2:112) stays open; this plan assumes
+PPO since that is what is built, behind the swappable-<code>Trainer</code> seam the doc
+already wants. The stochastic-z and LSTM-expert "variants" in PIPELINE_V2:82-86
+are deferred for worm bring-up (2 DoF does not need them) — but see §9, which
+is a real subtlety they interact with.</p>
+<hr />
+<h2 id="3-env-layer-the-big-piece">3. Env layer — the big piece<a class="headerlink" href="#3-env-layer-the-big-piece" title="Permanent link">&para;</a></h2>
+<h3 id="what-exists">What exists<a class="headerlink" href="#what-exists" title="Permanent link">&para;</a></h3>
+<p><em>(Updated 2026-07-14 — this section originally said "no ball". Milestone 1 is done.)</em></p>
+<p><code>WarpFollowEnv</code> (33-dim obs: proprio 29 + task 4) and <code>WarpDribbleEnv</code> (39-dim:
+ball 6 + proprio 29 + target 4), both on dm_soccer's pitch, both with a
+CPU dm_control twin verified at <strong>element-wise obs parity</strong> (max |warp − cpu| =
+1.6e-05, float32 rounding). One Warp model, <code>num_worlds</code> copies,
+world-synchronized episodes (global reset every <code>episode_steps</code>), physics
+captured in one CUDA graph. That graph capture is where the 93× comes from and
+we do not want to give it up.</p>
+<p><code>scene.py</code> already builds creature <strong>+ ball</strong> (<code>BallSpec</code> = dm_control's
+<code>SoccerBall</code> verbatim: r=0.35, m=0.045, <code>condim=6</code>, <code>priority=1</code> — both of those
+last two are load-bearing, see the comments there) and carries the full pitch.
+<code>SceneMeta</code> already has <code>ball_body</code> / <code>ball_qpos</code> / <code>ball_qvel</code>.</p>
+<p>So the multitask env work below is no longer "add a ball to the scene" — that is
+done and validated. What remains is the world-partitioning and the per-task
+reward dispatch.</p>
+<p>Still missing: <code>kick</code> and <code>shoot</code> envs, the multi-expert model, the multitask
+trainer, per-task advantage normalisation, and the freeze/retrain entrypoint.</p>
+<h3 id="recommended-design-one-scene-world-partitioned-by-task">Recommended design: one scene, world-partitioned by task<a class="headerlink" href="#recommended-design-one-scene-world-partitioned-by-task" title="Permanent link">&para;</a></h3>
+<p>Build a single Warp model of <strong>creature + ball</strong>, allocate <code>N</code> worlds, and
+statically partition them into contiguous per-task groups (<code>N/4</code> each at full
+curriculum; fewer groups while ramping). One physics batch, one graph capture.
+<code>follow</code> simply ignores the ball.</p>
+<ul>
+<li><strong><code>scene.py</code></strong> — add <code>build_creature_ball_scene()</code>: the existing creature XML
+  plus a free-joint ball body. Extend <code>SceneMeta</code> with <code>ball_body</code>,
+  <code>ball_qpos</code>, <code>ball_qvel</code>. Verify contact geometry actually works: the worm
+  must be able to <em>push</em> the ball (ball mass/radius/friction vs. worm scale is
+  a real tuning risk, not a formality — check it before anything else).</li>
+<li><strong><code>multitask_env.py</code></strong> — <code>WarpMultiTaskEnv</code>, generalizing <code>WarpFollowEnv</code>:</li>
+<li><code>task_of_world: LongTensor[N]</code>, static per world.</li>
+<li>
+<p><strong>Obs.</strong> Proprio stays exactly as-is (indices 0:37) — this is what the
+    decoder sees, and keeping it byte-identical to <code>follow</code> preserves both
+    checkpoint transfer and the CPU parity eval. The task block becomes a
+    per-task slice:</p>
+<table>
+<thead>
+<tr>
+<th>task</th>
+<th>task obs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>follow</td>
+<td><code>target_ego(2)</code>, <code>target_ego_future(2)</code></td>
+</tr>
+<tr>
+<td>dribble</td>
+<td><code>ball_ego(2)</code>, <code>ball_vel_ego(2)</code>, <code>target_ego(2)</code></td>
+</tr>
+<tr>
+<td>kick</td>
+<td><code>ball_ego(2)</code>, <code>ball_vel_ego(2)</code>, <code>target_ego(2)</code></td>
+</tr>
+<tr>
+<td>shoot</td>
+<td><code>ball_ego(2)</code>, <code>ball_vel_ego(2)</code>, <code>goal_ego(2)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Zero-pad to a common <code>max_task_dim</code> so obs is one rectangular
+<code>[N, 37 + max_task_dim]</code> tensor; each expert indexes only its own task's
+columns. The decoder never touches these, so the padding is harmless.
+  - <strong>Reward.</strong> <code>_reward()</code> dispatches per task-group, each writing into its
+own world-slice. <code>follow</code> reuses the existing modes verbatim. The other
+three follow the paper's Tables S2/S3 in shape — dribble = keep ball close
++ move ball toward target; kick = ball speed gain along facing within a
+window; shoot = ball velocity toward goal — with coefficients treated as
+tunable for our body/pitch scale, exactly as PIPELINE_V2:79-81 already says
+for follow. <strong>Use potential-based (<code>progress</code>-mode) shaping wherever the
+task admits it</strong>; the <code>follow</code> run already showed the naive <code>velshape</code>
+variant is hackable.
+  - Keep world-synchronized episodes (global reset) — graph-friendly, unchanged.</p>
+</li>
+</ul>
+<h3 id="fallback">Fallback<a class="headerlink" href="#fallback" title="Permanent link">&para;</a></h3>
+<p>If the partitioned scene fights graph capture: four separate
+<code>WarpMultiTaskEnv</code> instances (one task each, <code>N/4</code> worlds), stepped in a loop,
+sharing only the model class. More captures, more memory, trivially correct.
+Try partitioned first; fall back if it turns fiddly. <strong>Do not</strong> let this
+decision block §4-6 — the trainer interface is identical either way.</p>
+<hr />
+<h2 id="4-model-layer-minimal-surgery">4. Model layer — minimal surgery<a class="headerlink" href="#4-model-layer-minimal-surgery" title="Permanent link">&para;</a></h2>
+<p><code>LatentExtractor</code> already separates the expert side (<code>proprio_enc</code>, <code>task_enc</code>,
+<code>expert</code>, <code>z_proj</code>) from the <code>decoder</code> and the <code>critic</code>. Refactor along that
+existing seam:</p>
+<ul>
+<li><strong><code>SharedDecoder</code></strong> = <code>decoder</code> + <code>action_net</code> + <code>log_std</code>. Exactly the slice
+  <code>decoder_state_dict()</code> (<code>latent_policy.py:97</code>) already carves out. <strong>Must
+  expose <code>action_mean(proprio, z) -&gt; a</code></strong> as a first-class method — see §9.</li>
+<li><strong><code>TaskHead</code></strong> = <code>{proprio_enc, task_enc, expert, z_proj, critic, value_net}</code>,
+  one per task, each carrying its own task-obs index range. Note the critic is
+  per-task and takes <code>[proprio, task]</code> directly, bypassing the bottleneck — it
+  already is separate in the current code, and that is what makes §5's per-task
+  advantage normalization natural.</li>
+<li><strong><code>MultiTaskActorCritic</code></strong> = <code>nn.ModuleList[TaskHead]</code> + one <code>SharedDecoder</code>.
+  Forward takes <code>(obs, task_id)</code>, routes to the right head for <code>z</code> and value,
+  shared decoder for the action. For a partitioned batch: run each head on its
+  world-slice and scatter back — a Python loop over ≤4 tasks, negligible.</li>
+</ul>
+<hr />
+<h2 id="5-trainer-layer-multitask-ppo">5. Trainer layer — multitask PPO<a class="headerlink" href="#5-trainer-layer-multitask-ppo" title="Permanent link">&para;</a></h2>
+<p>New <code>warp_port/ppo_multitask.py</code> (or generalize <code>PPOTrainer</code>).</p>
+<p><strong>Equal weighting is a loss-level sum, not a reward-level one.</strong> We do <em>not</em>
+sum the four reward scalars — the four tasks live in different worlds with
+different rewards and different critics, and a single creature never follows
+<em>and</em> shoots in one episode. What we sum is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>total_loss = Σ_k β_k · L_k        (β_k = 1 by default)
+</code></pre></div>
+<p>where each <code>L_k</code> is the PPO clipped objective over task <code>k</code>'s minibatch. The
+shared decoder receives the combined gradient from all four; each expert
+updates only on its own task's data.</p>
+<p><strong>Per-task advantage normalization is the mechanic that makes "equal" real.</strong>
+What determines whether one task captures the shared decoder is not reward
+scale but <strong>advantage</strong> scale. A sparse <code>shoot</code> reward (zero most steps, one
+spike on goal) and a dense <code>follow</code> reward (~0.5 every step) can have similar
+per-step maxima yet wildly different advantage magnitudes — so normalizing the
+rewards to a common range does <em>not</em> equalize gradient pull. Compute GAE per
+task-group and <strong>normalize advantages within each task</strong> before pooling. (The
+current single-task code already normalizes globally, <code>ppo.py:116</code> — this is
+the same operation, done per group.)</p>
+<p>When a task turns out under- or over-served — it will, on some task — the knob
+to turn is its <strong><code>β_k</code>, not its reward coefficients.</strong> Rewards define the task;
+<code>β_k</code> defines its share of the gradient. Keep them separate.</p>
+<p><strong>Decoder LR schedule.</strong> Two Adam param groups: experts/critics at <code>lr</code>, the
+shared decoder at <code>lr · decoder_lr_mult</code>, with <code>decoder_lr_mult</code> decaying
+across the joint phase (e.g. 1.0 → 0.1). Let the experts move fast while the
+shared substrate settles slowly, so the decoder is nearly stable by the time we
+freeze it. This softens the moving-target cost and makes the freeze less of a
+discontinuity.</p>
+<p><strong>Buffer.</strong> Each transition is tagged with its task id — free, since it is the
+world's static task.</p>
+<p><strong>Keep</strong> the <code>ent_floor</code>/<code>ent_ceil</code> clamp on the shared <code>log_std</code>
+(<code>ppo.py:140-142</code>).</p>
+<hr />
+<h2 id="6-curriculum-control">6. Curriculum control<a class="headerlink" href="#6-curriculum-control" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Config carries <code>active_tasks</code>, starting <code>["follow"]</code>.</li>
+<li><strong>Advancing</strong> = add a task to the list, allocate its world-slice, instantiate
+  a <strong>fresh</strong> <code>TaskHead</code> for it, and resume: warm-start the decoder and the
+  existing heads from the prior checkpoint, new head starts from scratch. This
+  is exactly the case the run-dir/resume guard added in <code>2356c50</code> exists for —
+  each curriculum leg is a <code>--resume</code> writing its own <code>config_resume_N.json</code>.</li>
+<li><strong>Gate</strong> = per-task fitness threshold + video review (PIPELINE_V2's gate).</li>
+<li><strong>Log per-task eval independently, every interval.</strong> With a shared decoder,
+  the signature failure is one task silently regressing while another's
+  gradients reshape the decoder, and a pooled reward number hides it. This is
+  the same discipline as the per-task video evals, but now load-bearing rather
+  than nice-to-have.</li>
+</ul>
+<hr />
+<h2 id="7-freeze-and-retrain-the-phase-pipeline_v2-is-missing">7. Freeze and retrain — the phase PIPELINE_V2 is missing<a class="headerlink" href="#7-freeze-and-retrain-the-phase-pipeline_v2-is-missing" title="Permanent link">&para;</a></h2>
+<p>New entrypoint <code>train_frozen_expert.py</code>. Load the joint checkpoint, freeze the
+<code>SharedDecoder</code> (<code>requires_grad_(False)</code>), and re-run single-task PPO for each
+task, training <strong>only</strong> its <code>TaskHead</code> against the now-fixed z-space, to
+convergence.</p>
+<p>It does three distinct jobs:</p>
+<ol>
+<li><strong>Recovers what the joint phase costs.</strong> During multitask every expert was
+   chasing a moving decoder, so no expert ever fully converged against a stable
+   interface. Freeze it and each expert can be optimized cleanly. You typically
+   get back the performance the moving target ate.</li>
+<li><strong>Produces the deployable artifacts</strong> in the split form below.</li>
+<li><strong>It is the diagnostic.</strong> If freezing the decoder and retraining an expert
+   <em>cannot</em> recover good per-task performance, that is proof the joint phase
+   produced an over-compromised decoder — a mediocre "average gait" serving
+   none of the four well. That is the principal failure mode of shared-decoder
+   multitask (negative transfer), and this is exactly where it surfaces.
+   Escalation if it fires: more decoder capacity, rebalanced <code>β_k</code>, or (for
+   higher-DoF bodies) the Unity-motion warm-start.</li>
+</ol>
+<p>So it earns its keep in the happy path and is the alarm in the unhappy one.</p>
+<h3 id="checkpoint-format">Checkpoint format<a class="headerlink" href="#checkpoint-format" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>checkpoint.pt</code></strong> — monolith, for resume. Unchanged in role; now holds N
+  heads + shared decoder + optimizer.</li>
+<li><strong><code>controller.pt</code></strong> — the <code>SharedDecoder</code>. <strong>Immutable after freeze.</strong> Plus
+  <code>meta.json</code> with a <strong><code>controller_id</code></strong> = hash of its weights.</li>
+<li><strong><code>expert_&lt;task&gt;.pt</code></strong> — that task's <code>TaskHead</code>, stamped with the
+  <code>controller_id</code> it was trained against. The loader <strong>refuses on mismatch</strong>
+  (CONTRACTS §3 anti-drift rule, applied to the z-interface).</li>
+</ul>
+<p>Because the decoder is frozen <em>before</em> export, <code>controller_id</code> is stable by
+construction — the version-stamping problem solves itself.</p>
+<hr />
+<h2 id="8-sequencing">8. Sequencing<a class="headerlink" href="#8-sequencing" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Milestone</th>
+<th>Status</th>
+<th>Proves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Ball in the Warp scene + single-task <code>dribble</code> env. Sanity-train it alone.</td>
+<td><strong>env done; drill unproven</strong></td>
+<td>Ball contact and reward work, before any multitask complexity is layered on.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>MultiTaskActorCritic</code> + multitask trainer on <code>follow</code> + <code>dribble</code> only. Equal weight, per-task advantage norm.</td>
+<td>not started</td>
+<td>The shared-decoder mechanics. Watch <strong>both</strong> eval curves.</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Add <code>kick</code>, then <code>shoot</code> (curriculum, each gated).</td>
+<td>not started</td>
+<td>Full drill set.</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Freeze + per-task retrain; export split checkpoints.</td>
+<td>not started</td>
+<td>Deployable artifacts + the negative-transfer diagnostic.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><em>(separate work)</em> Distill → drill priors — PIPELINE_V2 stage 3.</td>
+<td>not started</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Milestone 1 status, precisely.</strong> The <em>env</em> is done: the ball is in the scene,
+physics is validated (<code>probe_ball.py</code>: settles, 12.9% of random-action worlds
+displace it at 0.2-5.4 m/s, a 5 m/s ball comes to rest in 2.2 s in 100% of worlds),
+and Warp/CPU obs parity holds. The <em>drill</em> is not yet proven — no dribble run has
+ever produced a policy that touches the ball.</p>
+<p><strong>The gate for milestone 1 is ball-contact rate, not reward.</strong> Every dribble
+attempt so far failed the same way and it is worth knowing the signature: all three
+runs reported <em>near-identical fitness at every step despite three different reward
+functions</em> (0.113/0.115/0.117 → 0.166/0.166/0.165). <strong>Fitness that does not depend
+on the policy means the policy is not touching the ball</strong> — what was being plotted
+was the target drifting away from a stationary ball. Three "different" curves lying
+on top of each other is a stronger signal than any one of them being flat.</p>
+<p>The completed <code>dribble_v2_progress</code> run (800M steps) was graded and is <strong>dead</strong>:
+0/12 episodes touched the ball, ep_rew 152.7 vs 152.6 for a do-nothing policy,
+fitness 0.268 vs 0.267. Statistically indistinguishable from doing nothing.
+Do not resume it.</p>
+<p>Milestone 1 first, deliberately: ball contact is the highest-uncertainty,
+lowest-dependency piece, and everything else is wasted if the worm cannot move
+the ball.</p>
+<p><strong>Rower (8 DoF) later.</strong> This pipeline — per-task expert + shared decoder +
+freeze-and-retrain — is completely agnostic to <em>how the decoder got
+initialized</em>. For the rower, keep the entire structure and, if pure on-policy
+multitask struggles at 8 DoF, warm-start the decoder from the Unity-evolved
+motion (mocap-style distillation) without changing anything downstream. The
+joint phase then becomes optional fine-tuning on top of a data-initialized
+controller rather than the sole source of it. Starting on-policy does not lock
+us out of the mocap route — it builds the harness that accepts either.</p>
+<hr />
+<h2 id="9-recorded-now-acted-on-later-the-stochasticity-flip">9. Recorded now, acted on later: the stochasticity flip<a class="headerlink" href="#9-recorded-now-acted-on-later-the-stochasticity-flip" title="Permanent link">&para;</a></h2>
+<p><strong>Do not act on this yet. Do honor it in the <code>SharedDecoder</code> interface.</strong></p>
+<p>During drills, <code>z</code> is deterministic and the stochasticity lives in the Gaussian
+action head — <code>Normal(action_net(lat), log_std.exp())</code>, <code>ppo.py:32</code>. PPO
+explores by jittering the <em>torques</em> around what the decoder suggests. This
+keeps PPO log-probs exact and is why <code>latent_policy.py:11-13</code> describes z as a
+deterministic bottleneck.</p>
+<p>Self-play (PIPELINE_V2 stage 6) must work the other way round. The football
+policy's decisions <em>are</em> intentions — dribble left, turn, shoot — so it outputs
+a distribution over <strong><code>z</code></strong> and samples it, and the frozen decoder maps each
+sampled <code>z</code> to torques <strong>deterministically</strong>, with no torque jitter on top.
+Exploration moves up a level: one random draw is one whole coordinated
+behaviour attempt, not joint spasm. That is the entire payoff of having a
+decoder, and it is only collected by putting the noise on <code>z</code>.</p>
+<p>The hazard is stacking both noises: sample <code>z</code> <em>and</em> let the decoder sample
+torques around its mean, and you get z-noise smeared with torque-noise, forcing
+a retrain or surgery on a frozen artifact you were counting on never touching
+again.</p>
+<p><strong>Therefore:</strong> <code>SharedDecoder</code> exposes a deterministic
+<code>action_mean(proprio, z) -&gt; a</code> from day one. Drills call
+<code>Normal(action_mean(...), log_std)</code> and sample torques; self-play calls
+<code>action_mean(...)</code> directly and lets the football policy's own <code>log_std</code> (on
+<code>z</code>) supply all the randomness. The same frozen weights then serve both regimes
+with <strong>zero retraining</strong>. This path already exists in spirit — it is what
+<code>cpu_eval_video</code> uses when it takes <code>d.mean</code> — the point is that it must stay a
+first-class, callable method on the decoder rather than something entangled
+inside a <code>.dist()</code> that always samples.</p>
+<p>Stages 1-2 do not care which way the noise flows. But they are where the
+<code>SharedDecoder</code> interface gets designed, and that is why this is written down
+now.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      UTMIST Virtual Creatures — Creature Soccer
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "navigation.indexes", "toc.follow", "content.code.copy", "content.action.edit", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

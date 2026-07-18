@@ -28,7 +28,7 @@ Two scenes, chosen with `--env` (same UI, same drill-trained models):
     `target_ego_future` synthesized from the clicked point). FOLLOW only — dribble
     on soccer needs a different `ball_ego` recompute (see docs/SOCCER_BRIDGE.md).
 
-Observation layout (worm follow -> 41, dribble -> 45; rower 77 / 81).
+Observation layout (worm follow -> 33, dribble -> 39; rower 69 / 75).
 
 Heavy deps (`stable_baselines3`, `torch`, `pygame`) are imported lazily so the
 env/task logic in this module stays importable without them.
@@ -157,7 +157,7 @@ def load_latent_policy(path, obs_dim, act_dim, proprio_indices, task_indices, de
         raise ValueError(
             f"checkpoint {path} is dimensioned obs={ck_obs}/act={ck_act}, but the live "
             f"scene needs obs={obs_dim}/act={act_dim}. Wrong --creature? "
-            f"(obs=41/act=2 -> worm, obs=77/act=8 -> rower)")
+            f"(obs=33/act=2 -> worm, obs=69/act=8 -> rower)")
 
     obs_space = gym.spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32)
     act_space = gym.spaces.Box(-1.0, 1.0, shape=(act_dim,), dtype=np.float32)

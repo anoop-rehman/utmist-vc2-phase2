@@ -34,7 +34,7 @@ def make_eval(args):
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
     from rower_soccer.warp_port.render import WarpRenderer
     env = WarpDribbleEnv(
-        num_worlds=1, use_graph=False, seed=7,
+        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
         target_speed_range=tuple(args.target_speed),
         ball_spawn_range=tuple(args.ball_spawn),
         target_dist_range=tuple(args.target_dist),
@@ -193,6 +193,7 @@ def main():
                                             save_checkpoint)
 
     env = WarpDribbleEnv(num_worlds=args.worlds, seed=args.seed,
+                         creature_xml=args.creature_xml,
                          target_speed_range=tuple(args.target_speed),
                          reward_coef=args.reward_coef,
                          episode_seconds=args.episode_secs,

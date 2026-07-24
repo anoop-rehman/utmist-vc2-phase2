@@ -125,8 +125,13 @@ class WarpDribbleEnv:
         self.sensordata = wp.to_torch(self.wd.sensordata)
 
         m = self.meta
-        self.jq = torch.as_tensor(m.joint_qpos, device=device)
-        self.jv = torch.as_tensor(m.joint_qvel, device=device)
+        # scene.py stores (start, n) slices per joint (n=4/3 for ball joints,
+        # 1/1 for hinge/slide); flatten to per-column indices. For this env's
+        # hinge-only creatures n is always 1, so this is a no-op vs before.
+        jq_idx = [i for start, n in m.joint_qpos for i in range(start, start + n)]
+        jv_idx = [i for start, n in m.joint_qvel for i in range(start, start + n)]
+        self.jq = torch.as_tensor(jq_idx, device=device, dtype=torch.long)
+        self.jv = torch.as_tensor(jv_idx, device=device, dtype=torch.long)
         self.body_ids = torch.as_tensor(m.body_ids, device=device)
         ss = m.sensor_slices
         self.sl_touch = [ss[f"seg{i}_touch"] for i in range(3)]

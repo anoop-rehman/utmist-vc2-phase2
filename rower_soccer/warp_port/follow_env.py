@@ -13,6 +13,13 @@ training and the dm_control env doubles as the transfer/parity eval:
 NOTE the ordering is dm_control's sorted-key order, and "bodies_pos" sorts
 BEFORE "body_height" ('i' < 'y'). Do not reorder to taste.
 
+joints_pos/joints_vel widths above are for the stock 2-hinge worm (1 qpos +
+1 dof per joint); they widen automatically for ball joints (4 qpos + 3 dof
+each -- see scene.py's joint_qpos/joint_qvel and __init__ below), so obs_dim
+is computed, not hardcoded. A ball-jointed creature therefore no longer
+matches DrillGymEnv's fixed layout dim-for-dim -- CPU/GPU weight transfer and
+the dm_control parity eval only hold for hinge-jointed bodies.
+
 Proprio carries world_zaxis + body_height, NOT absolute root pos/mat: it is the
 shared decoder's whole input contract, so it must hold only what exists in the
 2v2 game and is invariant to pitch position/heading. See creature.py's
@@ -120,8 +127,24 @@ class WarpFollowEnv:
         self.sensordata = wp.to_torch(self.wd.sensordata)
 
         m = self.meta
-        self.jq = torch.as_tensor(m.joint_qpos, device=device)
-        self.jv = torch.as_tensor(m.joint_qvel, device=device)
+        # Flatten (start, n) slices into per-column indices so a ball joint's
+        # full 4-number quaternion / 3-number angular velocity land in the
+        # observation, not just their first component. For an all-hinge
+        # creature this reduces to one index per joint, unchanged from before.
+        jq_idx = [i for start, n in m.joint_qpos for i in range(start, start + n)]
+        jv_idx = [i for start, n in m.joint_qvel for i in range(start, start + n)]
+        self.jq = torch.as_tensor(jq_idx, device=device, dtype=torch.long)
+        self.jv = torch.as_tensor(jv_idx, device=device, dtype=torch.long)
+        # Ball joints' qpos ("w" of their local quaternion, at slice start) --
+        # zeroing qpos leaves these at [0,0,0,0], an invalid non-unit quaternion
+        # (a hinge's qpos=0 is a valid rest angle, but a ball joint's is not).
+        # mujoco_warp's kinematics normalizes it (q / |q|), so a bare zero quat
+        # is 0/0 = NaN the instant forward() runs. reset() and _sanitize() must
+        # set these back to the identity quat (w=1, x=y=z=0), same as the root
+        # freejoint's quat already gets restored to.
+        self.ball_qw_idx = torch.as_tensor(
+            [start for start, n in m.joint_qpos if n == 4],
+            device=device, dtype=torch.long)
         self.body_ids = torch.as_tensor(m.body_ids, device=device)
         ss = m.sensor_slices
         self.sl_touch = [ss[f"seg{i}_touch"] for i in range(3)]
@@ -134,12 +157,19 @@ class WarpFollowEnv:
         self.target_vel = torch.zeros(self.n, 2, device=device)
         self.t = 0
 
-        self.obs_dim = 33
+        # 33 for the stock 2-hinge worm (bodies_pos 9, body_height 1, joints_pos
+        # 2, joints_vel 2, accel/gyro/vel 9, touch 3, world_zaxis 3, target 4).
+        # joints_pos/joints_vel widen automatically for ball joints (4 qpos +
+        # 3 qvel each instead of 1+1), so obs_dim is derived, not hardcoded.
+        n_joints_pos, n_joints_vel = len(self.jq), len(self.jv)
+        self.obs_dim = 9 + 1 + n_joints_pos + n_joints_vel + 9 + 3 + 3 + 4
         self.act_dim = m.nu
         self.prev_ctrl = torch.zeros(self.n, m.nu, device=device)
-        # obs slices for the policy (matches DrillGymEnv layout)
-        self.proprio_indices = np.arange(0, 29)
-        self.task_indices = np.arange(29, 33)
+        # obs slices for the policy (matches DrillGymEnv layout); the last 4
+        # dims are always target_ego + target_ego_future, regardless of
+        # joint dof widening.
+        self.proprio_indices = np.arange(0, self.obs_dim - 4)
+        self.task_indices = np.arange(self.obs_dim - 4, self.obs_dim)
 
         self._graph = None
         if use_graph:
@@ -170,6 +200,8 @@ class WarpFollowEnv:
         self.qpos[:, qr + 2] = m.spawn_z
         self.qpos[:, qr + 3] = torch.cos(yaw / 2)
         self.qpos[:, qr + 6] = torch.sin(yaw / 2)  # yaw about z
+        if self.ball_qw_idx.numel():
+            self.qpos[:, self.ball_qw_idx] = 1.0  # ball joints: identity quat
         # target init: 1-3 body lengths away, random direction & speed
         ang = torch.rand(self.n, generator=self.gen, device=self.device) * (2 * np.pi)
         d0, d1 = self.spawn_dist_range
@@ -219,6 +251,8 @@ class WarpFollowEnv:
         self.qpos[idx] = 0.0
         self.qpos[idx, qr + 2] = self.meta.spawn_z
         self.qpos[idx, qr + 3] = 1.0  # identity quat (w=1)
+        if self.ball_qw_idx.numel():
+            self.qpos[idx.unsqueeze(-1), self.ball_qw_idx.unsqueeze(0)] = 1.0
         self._forward()
 
     def step(self, actions):
@@ -338,8 +372,8 @@ class WarpFollowEnv:
         return torch.cat([
             bodies_ego,                        # creature/bodies_pos       (9)
             pos[:, 2:3],                       # creature/body_height      (1)
-            self.qpos[:, self.jq],             # creature/joints_pos       (2)
-            self.qvel[:, self.jv],             # creature/joints_vel       (2)
+            self.qpos[:, self.jq],             # creature/joints_pos       (n_joints_pos)
+            self.qvel[:, self.jv],             # creature/joints_vel       (n_joints_vel)
             sa, sg, sv,                        # accel, gyro, velocimeter  (9)
             touch,                             # creature/touch_sensors    (3)
             world_zaxis,                       # creature/world_zaxis      (3)

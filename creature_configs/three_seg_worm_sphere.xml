@@ -1,0 +1,98 @@
+<mujoco model="orn-gigasvermis-sphere">
+    <!-- Derived from three_seg_worm.xml. Same skeleton (bodies, sites,
+         sensors, contact excludes) but the box geoms are swapped for
+         ellipsoid geoms of the same half-extents ("size" means the same
+         thing for <geom type="box"> and <geom type="ellipsoid">: semi-axis
+         lengths along x/y/z), so the creature keeps its original
+         proportions while its collision/visual shape is rounded instead of
+         boxy. The mass/length scale notes from the original file still apply
+         unchanged; the actuator gear magnitude does NOT (see below).
+
+         The two hinge joints were also converted to ball joints (3 rotational
+         DOF each, same pivot point). A ball joint has no axis, and its
+         "range" is a single cone half-angle from the reference orientation
+         (only the second number is used, the first must be 0) rather than a
+         min/max pair, so range="-75 75" became range="0 75" to keep the same
+         75-degree deflection limit. The motor actuators still target these
+         joints, but for a ball joint the first 3 numbers of "gear" become a
+         3D torque axis (in the child frame) instead of a plain scalar, so
+         gear="X" became gear="0 X 0" to keep applying torque about the same
+         original hinge axis (0 1 0).
+
+         gear magnitude is 0.1x the hinge version's (66.3688 -> 6.63688,
+         100.519 -> 10.0519), NOT a straight port. A hinge mechanically
+         cannot move off its one axis, so the original gear was tuned against
+         that constraint; a ball joint has 2 extra rotational DOFs the policy
+         never actuates, and under normal PPO exploration (std=1 actions) the
+         un-actuated axes absorb enough of that torque to spin up explosively:
+         measured mean angular velocity 18->97 rad/s within 9 control
+         steps at full gear, blowing through the 75-degree limit (up to 180
+         degrees) and diverging (qvel/qpos non-finite) on 63.7% of world-steps
+         under random actions. Empirically swept 1.0/0.5/0.25/0.15/0.1/0.05x
+         gear scale (256 worlds x 200 steps, fully random actions each step):
+         divergence doesn't fall off linearly, it's a threshold near where the
+         joint stops reaching the axis-angle representation's singularity at
+         180 degrees: 0.5x still diverged 33.2% of world-steps, 0.25x was
+         4.2%, 0.15x looked clean in that first sweep (3/51,200) but a second,
+         larger check (512 worlds x 400 steps, different seed) still found
+         0.4243% at 0.15x, not the sweep's noise floor, an actually elevated
+         rate. The bar is the HINGE worm run through the identical protocol:
+         0 diverged worlds out of 204,800. Only 0.1x matched that exactly (0
+         diverged worlds, same 512x400 protocol, max angular velocity 64
+         rad/s), which is why it's set here instead of 0.15x. If a real
+         (2048-world, billion-step) run still shows any elevated divergence
+         rate vs. the hinge baseline, drop further toward 0.05x before
+         considering additional joint damping. -->
+    <compiler angle="degree" />
+    <default>
+        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="15.6332" />
+        <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="50" />
+        <joint limited="true" armature="0.000172747" damping="0.000410838" stiffness="0.000977078" solreflimit=".04 1"
+            solimplimit="0 .8 .03" />
+    </default>
+    <asset>
+        <material name="self" rgba=".8 .6 .4 1" />
+    </asset>
+
+    <worldbody>
+        <body name="seg0" pos="0 0 0.2613209">
+
+      <camera name="floating" pos="-2.11 0 1.05" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="70" />
+      <camera name="egocentric" pos="0.46 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
+          <geom name="seg0_geom" type="ellipsoid" pos="0 0 0" size="0.1280482 0.1204073 0.2613209" euler="0 0 0" />
+          <site name="seg0_site" type="box" pos="0 0 0" size="0.140853 0.132448 0.287453" zaxis="0 0 1" rgba="1 1 0 0.15" />
+
+          <body name="seg1" pos="0.1221998 0.03830071 0.5449345">
+            <joint name="seg0_to_1" range="0 75" type="ball" pos="-0.08436245 -0.02811942 -0.1768 "/>
+            <geom name="seg1_geom" type="ellipsoid" pos="0 0 0" size="0.1981978 0.2115602 0.2836136" euler="0.004153203 -0.000728891 -0.001950957" />
+            <site name="seg1_site" type="box" pos="0 0 0" size="0.2180175 0.2327162 0.3119749" zaxis="0 0 1" rgba="1 1 0 0.15" />
+
+            <body name="seg2" pos="0.1982088 0.1855726 0.530645">
+              <joint name="seg1_to_2" range="0 75" type="ball" pos="-0.0884 -0.07752818 -0.1223635 "/>
+              <geom name="seg2_geom" type="ellipsoid" pos="0 0 0" size="0.2946969 0.3145653 0.4217002" euler="0.005932046 -0.002004978 -0.0047394" />
+              <site name="seg2_site" type="box" pos="0 0 0" size="0.3241666 0.3460218 0.4638702" zaxis="0 0 1" rgba="1 1 0 0.15" />
+            </body>
+          </body>
+        </body>
+    </worldbody>
+
+    <actuator>
+    <motor name="motor0_to_1" joint="seg0_to_1" gear="0 6.63688 0" />
+    <motor name="motor1_to_2" joint="seg1_to_2" gear="0 10.0519 0" />
+    </actuator>
+
+    <sensor>
+    <touch name="seg0_touch" site="seg0_site" />
+    <touch name="seg1_touch" site="seg1_site" />
+    <touch name="seg2_touch" site="seg2_site" />
+        <velocimeter name="torso_vel" site="seg0_site" />
+        <gyro name="torso_gyro" site="seg0_site" />
+        <accelerometer name="torso_accel" site="seg0_site" />
+    </sensor>
+
+    <contact>
+    <exclude body1="seg0" body2="seg1" />
+    <exclude body1="seg0" body2="seg2" />
+    <exclude body1="seg1" body2="seg2" />
+    </contact>
+</mujoco>

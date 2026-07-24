@@ -31,7 +31,7 @@ def make_eval(args, has_ball=False):
     from rower_soccer.warp_port.follow_env import WarpFollowEnv
     from rower_soccer.warp_port.render import WarpRenderer
     env = WarpFollowEnv(
-        num_worlds=1, use_graph=False, seed=7,
+        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
         target_speed_range=tuple(args.target_speed),
         spawn_dist_range=tuple(args.spawn_dist),
         bounds=args.bounds, reward_coef=args.reward_coef,
@@ -192,6 +192,7 @@ def main():
                                             save_checkpoint)
 
     env = WarpFollowEnv(num_worlds=args.worlds, seed=args.seed,
+                        creature_xml=args.creature_xml,
                         target_speed_range=tuple(args.target_speed),
                         reward_coef=args.reward_coef,
                         episode_seconds=args.episode_secs,

@@ -122,7 +122,8 @@ class SceneMeta:
     body_ids: list          # creature body ids in uid order (root first)
     qpos_root: int          # start of freejoint qpos (7 numbers)
     qvel_root: int
-    joint_qpos: list        # hinge qpos addresses
+    joint_qpos: list        # non-free joints, in joint order: (qposadr, nq) --
+                             # nq/nv are 1 for hinge/slide, 4/3 for ball
     joint_qvel: list
     sensor_slices: dict     # name -> (start, dim) into sensordata
     nu: int
@@ -280,8 +281,15 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
             elif ball_body is not None and int(model.jnt_bodyid[j]) == ball_body:
                 ball_jnt = j
         elif jnt.name.startswith(prefix):
-            joint_qpos.append(int(jnt.qposadr[0]))
-            joint_qvel.append(int(jnt.dofadr[0]))
+            # nq/nv depend on joint type: hinge/slide are 1 qpos + 1 dof;
+            # ball joints are a 4-number quaternion + 3 angular-velocity dofs.
+            # Reading only qposadr[0]/dofadr[0] (as this used to) silently
+            # truncates a ball joint's state to its quaternion's w component
+            # and one axis of its angular velocity.
+            nq = 4 if jnt.type[0] == mujoco.mjtJoint.mjJNT_BALL else 1
+            nv = 3 if jnt.type[0] == mujoco.mjtJoint.mjJNT_BALL else 1
+            joint_qpos.append((int(jnt.qposadr[0]), nq))
+            joint_qvel.append((int(jnt.dofadr[0]), nv))
     if root_jnt is None:
         raise RuntimeError("creature root freejoint not found")
     if ball is not None and ball_jnt is None:

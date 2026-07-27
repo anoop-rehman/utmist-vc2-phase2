@@ -32,6 +32,7 @@ def make_eval(args, has_ball=False):
     from rower_soccer.warp_port.render import WarpRenderer
     env = WarpFollowEnv(
         num_worlds=1, use_graph=False, seed=7,
+        creature_xml=args.creature_xml,
         target_speed_range=tuple(args.target_speed),
         spawn_dist_range=tuple(args.spawn_dist),
         bounds=args.bounds, reward_coef=args.reward_coef,
@@ -199,6 +200,7 @@ def main():
                                             save_checkpoint)
 
     env = WarpFollowEnv(num_worlds=args.worlds, seed=args.seed,
+                        creature_xml=args.creature_xml,
                         target_speed_range=tuple(args.target_speed),
                         reward_coef=args.reward_coef,
                         episode_seconds=args.episode_secs,
@@ -229,7 +231,16 @@ def main():
     elif args.init_from:
         # Fresh run only: on a real --resume the checkpoint already holds these
         # weights, further trained, and re-seeding would throw that away.
+        before = ac.mlp_extractor.decoder[0].weight.detach().clone()
         load_pretrained(ac, args.init_from, device=trainer.device)
+        if torch.equal(before, ac.mlp_extractor.decoder[0].weight.detach()):
+            raise SystemExit(
+                f"\n--init-from {args.init_from} transferred NOTHING to the "
+                f"decoder.\nload_pretrained copies only shape-matching tensors, "
+                f"so a decoder\nbuilt for a different body is skipped in silence. "
+                f"This env's proprio\nis {len(env.proprio_indices)} wide; the "
+                f"checkpoint's decoder expects something else.\nCheck "
+                f"--creature-xml matches the body the prior was trained on.")
 
     if args.freeze_decoder:
         # log_std stays trainable on purpose. It is exploration noise, not motor

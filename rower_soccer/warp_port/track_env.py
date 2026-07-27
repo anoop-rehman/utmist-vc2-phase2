@@ -45,7 +45,7 @@ import warp as wp
 
 import mujoco_warp as mjw
 
-from rower_soccer.warp_port.scene import build_creature_scene
+from rower_soccer.warp_port.scene import build_creature_scene, touch_slices
 
 CONTROL_DT = 0.025          # 40 Hz, matching rower_ref.py's CTRL_HZ
 SUBSTEPS = 10               # physics dt 0.0025
@@ -136,7 +136,7 @@ class WarpTrackEnv:
         self.jv = torch.as_tensor(m.joint_qvel, device=device)
         self.body_ids = torch.as_tensor(m.body_ids, device=device)
         ss = m.sensor_slices
-        self.sl_touch = [ss[k] for k in sorted(k for k in ss if k.endswith("_touch"))]
+        self.sl_touch = touch_slices(m)
         self.sl_vel, self.sl_gyro, self.sl_accel = (
             ss["torso_vel"], ss["torso_gyro"], ss["torso_accel"])
 

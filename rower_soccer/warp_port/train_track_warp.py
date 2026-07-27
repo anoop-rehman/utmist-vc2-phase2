@@ -159,7 +159,20 @@ def main():
     # The actual deliverable: the reusable low-level controller.
     decoder_path = os.path.join(REPO, "runs_v2", "_init_rower_npmp.pt")
 
+    # Persist best_score. Without it a --resume restarts the comparison at
+    # -inf, so the first post-resume eval overwrites best.pt even when it is
+    # worse -- which is how this run lost its 262.34 policy to a later 251.13.
+    # ppo.py already carries a comment about follow_v5 losing its best weights
+    # exactly this way; same bug, different door.
+    best_meta = os.path.join(run_dir, "best_score.json")
     best_score = float("-inf")
+    if os.path.exists(best_meta):
+        try:
+            with open(best_meta) as f:
+                best_score = float(json.load(f)["best_score"])
+            print(f"[setup] best score so far: {best_score:.2f}", flush=True)
+        except Exception:                                   # noqa: BLE001
+            pass
     mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
     if args.resume and os.path.exists(ckpt_path):
@@ -219,7 +232,13 @@ def main():
             if ep_rew > best_score:
                 best_score = ep_rew
                 export_sb3_compatible(ac, best_path)
-                torch.save(ac.state_dict(), decoder_path)
+                # Same export format as best.pt, NOT a raw state_dict: this file
+                # is consumed by load_pretrained, whose _flatten_checkpoint wants
+                # {"mlp_extractor", "action_net", ...}. A raw dump loads nowhere.
+                export_sb3_compatible(ac, decoder_path)
+                with open(best_meta, "w") as f:
+                    json.dump({"best_score": best_score,
+                               "step": trainer.total_steps}, f)
                 print(f"[monitor] new BEST {best_score:.2f} -> {best_path} "
                       f"(+ decoder {decoder_path})", flush=True)
                 if args.gcs_bucket:
@@ -247,7 +266,7 @@ def main():
     save_checkpoint(trainer, ckpt_path)
     export_sb3_compatible(ac, latest_path)
     export_sb3_compatible(ac, final_path)
-    torch.save(ac.state_dict(), decoder_path)
+    export_sb3_compatible(ac, decoder_path)
     if args.gcs_bucket:
         from rower_soccer.warp_port.gcs import sync_blocking, wait_all
         wait_all()

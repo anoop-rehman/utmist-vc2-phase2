@@ -30,7 +30,7 @@ import warp as wp
 
 import mujoco_warp as mjw
 
-from rower_soccer.warp_port.scene import build_creature_scene
+from rower_soccer.warp_port.scene import build_creature_scene, touch_slices
 
 CONTROL_DT = 0.025
 SUBSTEPS = 10  # physics dt 0.0025
@@ -124,7 +124,7 @@ class WarpFollowEnv:
         self.jv = torch.as_tensor(m.joint_qvel, device=device)
         self.body_ids = torch.as_tensor(m.body_ids, device=device)
         ss = m.sensor_slices
-        self.sl_touch = [ss[f"seg{i}_touch"] for i in range(3)]
+        self.sl_touch = touch_slices(m)
         self.sl_vel = ss["torso_vel"]
         self.sl_gyro = ss["torso_gyro"]
         self.sl_accel = ss["torso_accel"]
@@ -134,12 +134,19 @@ class WarpFollowEnv:
         self.target_vel = torch.zeros(self.n, 2, device=device)
         self.t = 0
 
-        self.obs_dim = 33
-        self.act_dim = m.nu
-        self.prev_ctrl = torch.zeros(self.n, m.nu, device=device)
+        # Sized from the creature, not hardcoded to the worm. The worm still
+        # comes out at 29/33 (3 bodies, 2 joints, 3 touch), so existing runs and
+        # checkpoints are unaffected; the rower comes out at 65/69. The formula
+        # is shared with track_env.py on purpose -- a decoder trained there is
+        # only reusable here if proprio is byte-for-byte the same contract.
+        nb, nu = len(m.body_ids), m.nu
+        p_dim = 3 * nb + 1 + nu + nu + 9 + len(self.sl_touch) + 3
+        self.obs_dim = p_dim + 4
+        self.act_dim = nu
+        self.prev_ctrl = torch.zeros(self.n, nu, device=device)
         # obs slices for the policy (matches DrillGymEnv layout)
-        self.proprio_indices = np.arange(0, 29)
-        self.task_indices = np.arange(29, 33)
+        self.proprio_indices = np.arange(0, p_dim)
+        self.task_indices = np.arange(p_dim, p_dim + 4)
 
         self._graph = None
         if use_graph:

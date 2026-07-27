@@ -138,6 +138,26 @@ class SceneMeta:
         return self.ball_body is not None
 
 
+def touch_slices(meta):
+    """Touch-sensor slices in segment order -- the ONE definition of that order.
+
+    The decoder's input is proprio, and proprio contains the touch block, so
+    every env that shares a decoder must lay these out identically. Defining the
+    order in one place is what makes that guaranteed rather than coincidental.
+
+    Sorted numerically, not lexicographically: at 10+ segments a plain sort puts
+    seg10 before seg2 and silently permutes the touch block, which would not
+    crash anything -- it would just quietly feed a trained decoder the wrong
+    inputs. The rower has 9 and the worm 3, so this is not live yet; it is one
+    line to be safe rather than a bug waiting for a bigger creature.
+    """
+    def seg_num(name):
+        digits = "".join(ch for ch in name if ch.isdigit())
+        return int(digits) if digits else -1
+    names = [k for k in meta.sensor_slices if k.endswith("_touch")]
+    return [meta.sensor_slices[k] for k in sorted(names, key=seg_num)]
+
+
 def creature_size(creature_xml_path):
     """(total mass kg, bbox height m) of the creature alone. Sanity/reporting:
     the creature is scaled to the ball, never the other way round."""

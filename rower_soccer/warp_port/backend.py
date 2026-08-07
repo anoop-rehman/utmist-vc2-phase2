@@ -15,6 +15,7 @@ Either way env code must call `forward()` after writing qpos/qvel before reading
 import abc
 
 import mujoco
+import torch
 
 
 class PhysicsBackend(abc.ABC):
@@ -93,3 +94,69 @@ class WarpBackend(PhysicsBackend):
     def forward(self):
         self._mjw.forward(self.wm, self.wd)
         self._wp.synchronize_device()
+
+
+class CpuBackend(PhysicsBackend):
+    """Batched CPU MuJoCo backend: one `MjData` per world, stepped in a Python
+    loop. Fulfills the same contract as `WarpBackend` so the envs are unchanged,
+    but places all state tensors on CPU and imports NO warp/mujoco_warp -- it runs
+    on a machine with no CUDA. Intended for SMALL world counts (interactive play =
+    1 world, eval); it is not a batched-training backend. Training stays on Warp.
+
+    Mutation contract: the env mutates `qpos/qvel/ctrl` in place; `forward()`/
+    `step()` push those into each `MjData`, integrate, then pull results back into
+    the SAME tensor objects, so the env's aliased views stay valid.
+    """
+
+    def __init__(self, model, num_worlds, substeps, *, use_graph=False,
+                 nconmax=64, njmax=512, device="cpu"):
+        # use_graph / nconmax / njmax are Warp-only hints; CPU MuJoCo sizes
+        # contacts dynamically and has no CUDA graph, so they are ignored.
+        self.device = device
+        self.n = num_worlds
+        self.substeps = substeps
+        self.model = model
+        self.datas = [mujoco.MjData(model) for _ in range(num_worlds)]
+        for d in self.datas:
+            mujoco.mj_forward(model, d)
+
+        nq, nv, nu = model.nq, model.nv, model.nu
+        nb, nsd = model.nbody, model.nsensordata
+        self.qpos = torch.zeros(num_worlds, nq, device=device)
+        self.qvel = torch.zeros(num_worlds, nv, device=device)
+        self.ctrl = torch.zeros(num_worlds, nu, device=device)
+        self.xpos = torch.zeros(num_worlds, nb, 3, device=device)
+        # xmat row-major [nbody, 3, 3] -- same convention as WarpBackend's
+        # to_torch(xmat).reshape(n, -1, 3, 3), so all env ego/world_zaxis math
+        # is identical across backends.
+        self.xmat = torch.zeros(num_worlds, nb, 3, 3, device=device)
+        self.sensordata = torch.zeros(num_worlds, nsd, device=device)
+        self._pull()
+
+    def _push(self):
+        for w, d in enumerate(self.datas):
+            d.qpos[:] = self.qpos[w].cpu().numpy()
+            d.qvel[:] = self.qvel[w].cpu().numpy()
+            d.ctrl[:] = self.ctrl[w].cpu().numpy()
+
+    def _pull(self):
+        # In-place row assignment keeps the tensor OBJECTS the env aliases.
+        for w, d in enumerate(self.datas):
+            self.qpos[w] = torch.from_numpy(d.qpos.copy())
+            self.qvel[w] = torch.from_numpy(d.qvel.copy())
+            self.xpos[w] = torch.from_numpy(d.xpos.copy())
+            self.xmat[w] = torch.from_numpy(d.xmat.reshape(-1, 3, 3).copy())
+            self.sensordata[w] = torch.from_numpy(d.sensordata.copy())
+
+    def step(self):
+        self._push()
+        for d in self.datas:
+            for _ in range(self.substeps):
+                mujoco.mj_step(self.model, d)
+        self._pull()
+
+    def forward(self):
+        self._push()
+        for d in self.datas:
+            mujoco.mj_forward(self.model, d)
+        self._pull()

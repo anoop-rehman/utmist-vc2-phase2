@@ -14,7 +14,6 @@ See worm_env_base.WormEnv for shared plumbing and DribbleReward (paper/progress)
 import numpy as np
 import torch
 
-from rower_soccer.warp_port.backend import WarpBackend
 from rower_soccer.warp_port.worm_env_base import (WormEnv, MovingTargetMixin,
                                                   DribbleReward)
 from rower_soccer.warp_port.scene import BallSpec
@@ -24,14 +23,14 @@ class WarpDribbleEnv(MovingTargetMixin, WormEnv):
     def __init__(self, num_worlds=2048,
                  creature_xml="creature_configs/three_seg_worm.xml",
                  episode_seconds=15.0, target_speed_range=(0.04, 0.25),
-                 lookahead=1.0, reward_coef=0.5, bounds=10.0, device="cuda",
+                 lookahead=1.0, reward_coef=0.5, bounds=10.0, device=None,
                  seed=0, use_graph=True, target_dist_range=(2.0, 5.0),
                  ball_spawn_range=(1.5, 3.0), w_player_to_ball=0.1,
                  w_ball_to_target=0.3, reward_mode="paper", progress_scale=2.0,
                  approach_scale=0.5, ball: BallSpec = None, nconmax=64, njmax=512,
                  energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0),
                  fixed_start=False, target_cone=0.0, reward=None, floor_half=5.0,
-                 backend_cls=WarpBackend):
+                 use_gpu=True, backend_cls=None):
         self._lookahead = lookahead
         self._bounds = bounds
         self._speed_range = target_speed_range
@@ -47,11 +46,12 @@ class WarpDribbleEnv(MovingTargetMixin, WormEnv):
             w_player_to_ball=w_player_to_ball, w_ball_to_target=w_ball_to_target,
             approach_scale=approach_scale, progress_scale=progress_scale)
         super().__init__(num_worlds=num_worlds, creature_xml=creature_xml,
-                         episode_seconds=episode_seconds, device=device, seed=seed,
-                         use_graph=use_graph, nconmax=nconmax, njmax=njmax,
-                         reward=reward, floor_half=floor_half,
-                         energy_coef=energy_coef, smooth_coef=smooth_coef,
-                         rew_clip=rew_clip, backend_cls=backend_cls)
+                         episode_seconds=episode_seconds, use_gpu=use_gpu,
+                         device=device, seed=seed, use_graph=use_graph,
+                         nconmax=nconmax, njmax=njmax, reward=reward,
+                         floor_half=floor_half, energy_coef=energy_coef,
+                         smooth_coef=smooth_coef, rew_clip=rew_clip,
+                         backend_cls=backend_cls)
 
     def _ball_spec(self):
         return self._ball or BallSpec()

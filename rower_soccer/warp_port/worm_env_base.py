@@ -23,7 +23,7 @@ import mujoco
 import numpy as np
 import torch
 
-from rower_soccer.warp_port.backend import WarpBackend
+from rower_soccer.warp_port.backend import WarpBackend, CpuBackend
 from rower_soccer.warp_port.scene import BallSpec, build_creature_scene
 
 CONTROL_DT = 0.025    # worm-stack control rate (follow/dribble/decoder)
@@ -226,10 +226,10 @@ class WormEnv:
 
     def __init__(self, num_worlds=2048,
                  creature_xml="creature_configs/three_seg_worm.xml",
-                 episode_seconds=15.0, device="cuda", seed=0, use_graph=True,
-                 nconmax=64, njmax=512, reward=None, backend_cls=WarpBackend,
-                 floor_half=5.0, energy_coef=0.0, smooth_coef=0.0,
-                 rew_clip=(-10.0, 10.0)):
+                 episode_seconds=15.0, use_gpu=True, device=None, seed=0,
+                 use_graph=True, nconmax=64, njmax=512, reward=None,
+                 backend_cls=None, floor_half=5.0, energy_coef=0.0,
+                 smooth_coef=0.0, rew_clip=(-10.0, 10.0)):
         self.n = num_worlds
         self._floor_half = floor_half
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
@@ -238,12 +238,22 @@ class WormEnv:
         self.smooth_coef = smooth_coef
         self.rew_clip = rew_clip
 
+        # Resolve the backend/device from the use_gpu flag. Explicit backend_cls/
+        # device still win (used by tests). CPU => the non-Warp mujoco backend,
+        # cpu tensors, and no CUDA graph.
+        if backend_cls is None:
+            backend_cls = WarpBackend if use_gpu else CpuBackend
+        if device is None:
+            device = "cuda" if use_gpu else "cpu"
+        if not use_gpu:
+            use_graph = False
+
         # 1. scene (subclass hooks) -- arena + ball by default.
         self.model, self.meta = build_creature_scene(
             creature_xml, ball=self._ball_spec(), base_xml=self._base_xml())
         self._post_build_model(self.model)
 
-        # 2. backend owns all mujoco_warp specifics.
+        # 2. backend owns all mujoco_warp specifics (or CPU MuJoCo).
         self.backend = backend_cls(self.model, num_worlds, SUBSTEPS,
                                    use_graph=use_graph, nconmax=nconmax,
                                    njmax=njmax, device=device)

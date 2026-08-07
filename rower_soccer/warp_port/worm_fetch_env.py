@@ -19,7 +19,6 @@ import torch
 
 # fetch_ball / _arena_xml re-exported so existing imports
 # (train_worm_fetch_warp.py) keep working.
-from rower_soccer.warp_port.backend import WarpBackend
 from rower_soccer.warp_port.worm_env_base import (WormEnv, FetchReward,  # noqa: F401
                                                   fetch_ball, _arena_xml)
 
@@ -31,9 +30,9 @@ class WarpWormFetchEnv(WormEnv):
                  creature_xml="creature_configs/three_seg_worm.xml",
                  up_axis_json="creature_configs/three_seg_worm_up_axis.json",
                  floor_half=5.0, spawn_frac=0.9, ball_drop_z=1.0,
-                 ball_kick_std=1.5, device="cuda", seed=0, use_graph=True,
+                 ball_kick_std=1.5, device=None, seed=0, use_graph=True,
                  nconmax=64, njmax=512, episode_seconds=EPISODE_SECONDS,
-                 reward=None, backend_cls=WarpBackend):
+                 reward=None, use_gpu=True, backend_cls=None):
         self._up_axis_json = up_axis_json
         self._spawn_frac = spawn_frac
         self.ball_drop_z = ball_drop_z
@@ -47,10 +46,10 @@ class WarpWormFetchEnv(WormEnv):
         reward = reward or FetchReward(reach_bound=self.reach_bound,
                                        fetch_bound=self.fetch_bound)
         super().__init__(num_worlds=num_worlds, creature_xml=creature_xml,
-                         episode_seconds=episode_seconds, device=device, seed=seed,
-                         use_graph=use_graph, nconmax=nconmax, njmax=njmax,
-                         reward=reward, floor_half=floor_half,
-                         backend_cls=backend_cls)
+                         episode_seconds=episode_seconds, use_gpu=use_gpu,
+                         device=device, seed=seed, use_graph=use_graph,
+                         nconmax=nconmax, njmax=njmax, reward=reward,
+                         floor_half=floor_half, backend_cls=backend_cls)
 
     # -- scene / model hooks ------------------------------------------------
     def _ball_spec(self):

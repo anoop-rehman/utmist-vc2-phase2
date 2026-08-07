@@ -1,0 +1,42 @@
+# DD-PPO validation/benchmark on a multi-GPU RunPod node.
+# Runs the bench mode: N ranks (one per GPU), real NCCL, real per-minibatch
+# all-reduce, replica-drift check, global steps/s. No training artifacts.
+#
+#   sky launch -c ddp2 sky/ddp_bench.yaml --gpus RTXA4000:2 \
+#       --env NPROC=2 --env WANDB_API_KEY=$WANDB_API_KEY --down -y
+name: ddp-bench
+
+resources:
+  accelerators: {RTXA4000: 2}
+  use_spot: false
+  # cloud pinned per-launch: --infra runpod | --infra vast
+
+workdir: .
+
+envs:
+  NPROC: "2"
+  WORLDS_PER_GPU: "8192"      # each A4000 saturates ~8k (measured locally)
+  BENCH_ITERS: "10"
+  WANDB_API_KEY: ""
+
+setup: |
+  set -e
+  python3 -m venv .venv
+  .venv/bin/pip install -q uv
+  # stable-baselines3: ppo.py reuses the SB3-compatible LatentExtractor module
+  # (models/latent_policy.py), so SB3 must exist even though training is pure
+  # torch. Installed BEFORE the torch pin so its dep resolution can't clobber
+  # the cu124 wheel (the POD_SETUP.md trap).
+  .venv/bin/uv pip install --python .venv/bin/python numpy mujoco warp-lang mujoco-warp wandb \
+      stable-baselines3 gymnasium
+  .venv/bin/uv pip install --python .venv/bin/python "torch==2.6.0+cu124" \
+      --index-url https://download.pytorch.org/whl/cu124
+  .venv/bin/python -c "import torch;assert torch.cuda.is_available();print('gpus:',torch.cuda.device_count())"
+
+run: |
+  set -e
+  nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
+  .venv/bin/torchrun --standalone --nproc_per_node=$NPROC \
+      -m rower_soccer.warp_port.train_worm_fetch_ddp \
+      --worlds $WORLDS_PER_GPU --bench-iters $BENCH_ITERS --no-wandb
+  echo "[ddp-bench] complete"

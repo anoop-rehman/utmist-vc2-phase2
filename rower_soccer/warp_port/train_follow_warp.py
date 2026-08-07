@@ -58,6 +58,13 @@ def main():
                    help="max log_std (default 0.0 => std<=1.0, matching the "
                         "[-1,1] action clamp); pass a large value to disable")
     p.add_argument("--z-dim", type=int, default=16)
+    p.add_argument("--freeze-decoder", action="store_true",
+                   help="Freeze the low-level controller (decoder + action head) "
+                        "and train only the task expert that emits z. This is the "
+                        "NPMP/Liu-et-al. arrangement: the motor skill is learned "
+                        "once from the reference motion and then reused, so every "
+                        "task shares one motor style and cannot degrade it. Pair "
+                        "with --init-from a tracking run's decoder.")
     p.add_argument("--init-from", default=None,
                    help="checkpoint to warm-start weights from (checkpoint.pt or "
                         "latest.pt), e.g. a follow policy trained on the same "
@@ -226,7 +233,34 @@ def main():
     elif args.init_from:
         # Fresh run only: on a real --resume the checkpoint already holds these
         # weights, further trained, and re-seeding would throw that away.
+        before = ac.mlp_extractor.decoder[0].weight.detach().clone()
         load_pretrained(ac, args.init_from, device=trainer.device)
+        if torch.equal(before, ac.mlp_extractor.decoder[0].weight.detach()):
+            raise SystemExit(
+                f"\n--init-from {args.init_from} transferred NOTHING to the "
+                f"decoder.\nload_pretrained copies only shape-matching tensors, "
+                f"so a decoder\nbuilt for a different body is skipped in silence. "
+                f"This env's proprio\nis {len(env.proprio_indices)} wide; the "
+                f"checkpoint's decoder expects something else.\nCheck "
+                f"--creature-xml matches the body the prior was trained on.")
+
+    if args.freeze_decoder:
+        # log_std stays trainable on purpose. It is exploration noise, not motor
+        # skill -- the decoder is the skill. Freezing it too would pin the task
+        # policy to whatever noise level the tracking run happened to end at
+        # (0.62 here, which is loud), with no way to quiet down for fine control.
+        frozen = 0
+        for mod in (ac.mlp_extractor.decoder, ac.action_net):
+            for prm in mod.parameters():
+                prm.requires_grad_(False)
+                frozen += prm.numel()
+        trainable = sum(p.numel() for p in ac.parameters() if p.requires_grad)
+        print(f"[setup] decoder FROZEN: {frozen:,} params held, "
+              f"{trainable:,} trainable (expert + critic + log_std)", flush=True)
+        # Adam was built over every parameter; rebuild it over the live ones so
+        # frozen weights cannot drift via weight decay or stale moments.
+        trainer.opt = torch.optim.Adam(
+            [p for p in ac.parameters() if p.requires_grad], lr=args.lr)
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)

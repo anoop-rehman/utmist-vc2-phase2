@@ -62,8 +62,15 @@ class WarpRenderer:
         q = self.data.qpos
         q[:self.n_phys_qpos] = env.qpos[w, :self.n_phys_qpos].detach().cpu().numpy()
 
-        tx, ty = env.target_xy[w].detach().cpu().numpy()
-        q[self.tgt_qpos:self.tgt_qpos + 3] = [tx, ty, target_height]
+        # Not every env has a target. The tracking env (track_env.py) chases a
+        # reference gait, not a point on the pitch, so park the marker far below
+        # the floor where it cannot be seen rather than requiring every env to
+        # invent a target_xy just to be renderable.
+        if getattr(env, "target_xy", None) is not None:
+            tx, ty = env.target_xy[w].detach().cpu().numpy()
+            q[self.tgt_qpos:self.tgt_qpos + 3] = [tx, ty, target_height]
+        else:
+            q[self.tgt_qpos:self.tgt_qpos + 3] = [0.0, 0.0, -100.0]
         q[self.tgt_qpos + 3:self.tgt_qpos + 7] = [1.0, 0.0, 0.0, 0.0]
 
         self.data.qvel[:] = 0.0

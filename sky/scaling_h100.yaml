@@ -1,0 +1,40 @@
+# Single-GPU throughput/VRAM scaling probe for the worm-fetch workload.
+# Measures the two ceilings we care about, per GPU: total env-transitions/s
+# (SM-bound) and max #worlds before OOM (VRAM-bound). Probe-only -- no training,
+# no rendering -- so each job is a few minutes. Results go to wandb.
+#
+#   sky launch -c scale-h100 sky/scaling.yaml --gpus H100:1 \
+#       --env GPU_TAG=h100 --env WANDB_API_KEY=$WANDB_API_KEY --down -y
+name: worm-scale-probe
+
+resources:
+  accelerators: {H100: 1, H100-SXM: 1, H100-NVL: 1}
+  use_spot: false                # short job -> on-demand avoids losing setup to preemption
+  cloud: runpod
+
+workdir: .                       # ~5 MB after .skyignore
+
+envs:
+  GPU_TAG: gpu
+  # Pushed high on purpose: the big cards should saturate throughput then OOM.
+  # The probe stops at the first OOM and records it as that GPU's world ceiling.
+  WORLDS: "2048 8192 32768 65536 131072 262144 524288"
+  WANDB_API_KEY: ""
+
+setup: |
+  set -e
+  python3 -m venv .venv
+  .venv/bin/pip install -q uv
+  # Lean deps: the probe imports only these (no dm_control/SB3/gym/render).
+  .venv/bin/uv pip install --python .venv/bin/python numpy mujoco warp-lang mujoco-warp wandb
+  # Torch LAST, pinned cu124 (POD_SETUP.md trap).
+  .venv/bin/uv pip install --python .venv/bin/python "torch==2.6.0+cu124" \
+      --index-url https://download.pytorch.org/whl/cu124
+  .venv/bin/python -c "import torch;assert torch.cuda.is_available();print('cuda ok',torch.version.cuda)"
+
+run: |
+  set -e
+  nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+  .venv/bin/python -m rower_soccer.warp_port.probe_throughput \
+      --worlds $WORLDS --gpu-tag "$GPU_TAG" --steps 200 --warmup 40
+  echo "[scale] probe complete for $GPU_TAG"

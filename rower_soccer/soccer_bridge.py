@@ -85,7 +85,7 @@ def soccer_to_drill_follow_dict(soccer_obs0, target_xy, proprio_bases, task_keys
 
 
 def drill_follow_obs(soccer_obs0, target_xy, follow_keys, proprio_bases, task_keys):
-    """Flat 41-dim (worm) / 77-dim (rower) drill FOLLOW vector in trained sorted order."""
+    """Flat 33-dim (worm) / 69-dim (rower) drill FOLLOW vector in trained sorted order."""
     d = soccer_to_drill_follow_dict(soccer_obs0, target_xy, proprio_bases, task_keys)
     return build_obs(d, follow_keys)
 

@@ -33,8 +33,9 @@ def make_eval(args):
     """One-world Warp env + renderer, built once and reused. Warp is ground truth."""
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
     from rower_soccer.warp_port.render import WarpRenderer
+    from rower_soccer.warp_port.worm_env_base import _arena_xml
     env = WarpDribbleEnv(
-        num_worlds=1, use_graph=False, seed=7,
+        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
         target_speed_range=tuple(args.target_speed),
         ball_spawn_range=tuple(args.ball_spawn),
         target_dist_range=tuple(args.target_dist),
@@ -46,7 +47,9 @@ def make_eval(args):
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         fixed_start=getattr(args, "fixed_start", False),
         target_cone=getattr(args, "target_cone", 0.0))
-    return env, WarpRenderer(args.creature_xml, has_ball=True)
+    # Render the arena (the physics scene), not the default pitch background.
+    return env, WarpRenderer(args.creature_xml, has_ball=True,
+                             base_xml=_arena_xml(env._floor_half))
 
 
 def main():
@@ -193,6 +196,7 @@ def main():
                                             save_checkpoint)
 
     env = WarpDribbleEnv(num_worlds=args.worlds, seed=args.seed,
+                         creature_xml=args.creature_xml,
                          target_speed_range=tuple(args.target_speed),
                          reward_coef=args.reward_coef,
                          episode_seconds=args.episode_secs,

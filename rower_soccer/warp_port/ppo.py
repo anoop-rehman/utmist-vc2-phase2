@@ -135,7 +135,8 @@ class PPOTrainer:
                  minibatches=8, epochs=4, gamma=0.99, gae_lambda=0.95,
                  clip=0.2, ent_coef=0.005, vf_coef=0.5, max_grad_norm=0.5,
                  z_smooth_coef=0.0, ent_floor=None, ent_ceil=None, device="cuda",
-                 ent_anneal_steps=0, distributed=False):
+                 ent_anneal_steps=0, distributed=False,
+                 z_ar_coef=0.0, z_ar_alpha=0.95):
         # distributed: data-parallel PPO (DD-PPO). Each rank runs its own env +
         # a policy replica; gradients are all-reduced (averaged) before every
         # optimizer step, so replicas stay bit-identical and the effective batch
@@ -157,6 +158,19 @@ class PPOTrainer:
         self.ent_anneal_steps = ent_anneal_steps
         self.max_grad_norm = max_grad_norm
         self.z_smooth_coef = z_smooth_coef
+        # NPMP's autoregressive latent prior (Merel et al. 2019; PIPELINE_V2 line
+        # 110 asks for it). The paper regularises q(z_t) toward
+        # N(alpha * z_{t-1}, sigma), which makes the latent a slow, temporally
+        # coherent motor intention rather than a per-step control signal -- that
+        # smoothness is what makes z reusable by a downstream policy running at a
+        # different cadence. z here is deterministic (stochasticity lives in the
+        # action head, which keeps PPO log-probs exact), so the deterministic
+        # analog is the penalty ||z_t - alpha * z_{t-1}||^2.
+        #
+        # Distinct from z_smooth_coef, which penalises ||z||^2 -- a STATIC prior
+        # (pull toward the origin), with no notion of time. Both may be on.
+        self.z_ar_coef = z_ar_coef
+        self.z_ar_alpha = z_ar_alpha
         self.ent_floor = ent_floor  # min log_std, e.g. -1.5
         # max log_std. Actions are clamped to [-1, 1] in collect(), so a std
         # much above ~1 samples almost entirely into the clamp and explores at
@@ -252,6 +266,20 @@ class PPOTrainer:
         adv_f = adv.reshape(B)
         ret_f = ret.reshape(B)
         adv_f = (adv_f - adv_f.mean()) / (adv_f.std() + 1e-8)
+
+        # Predecessor index for the AR(1) latent prior. obs_buf is [T, N, ...] so
+        # flat index t*N+n has its previous timestep exactly N slots back. Samples
+        # at t=0 have no predecessor in this rollout, and a pair spanning an
+        # episode reset is not a real transition -- both are masked out rather
+        # than silently penalised toward an unrelated state.
+        prev_j = valid_j = None
+        if self.z_ar_coef > 0:
+            ar = torch.arange(B, device=self.device)
+            prev_j = (ar - self.N).clamp(min=0)
+            valid_j = (ar >= self.N).float()
+            done_flat = self.done_buf.reshape(B)
+            valid_j = valid_j * (1.0 - done_flat[prev_j])
+
         idx = torch.randperm(B, device=self.device)
         mb = B // self.minibatches
         stats = {}
@@ -271,6 +299,14 @@ class PPOTrainer:
                 if self.z_smooth_coef > 0:
                     z = self.ac.z(obs[j])
                     loss = loss + self.z_smooth_coef * (z ** 2).mean()
+                if self.z_ar_coef > 0:
+                    z_t = self.ac.z(obs[j])
+                    z_p = self.ac.z(obs[prev_j[j]])
+                    w = valid_j[j]
+                    ar_pen = (((z_t - self.z_ar_alpha * z_p) ** 2).mean(-1) * w).sum() \
+                        / w.sum().clamp(min=1.0)
+                    loss = loss + self.z_ar_coef * ar_pen
+                    stats["z_ar"] = float(ar_pen.detach())
                 self.opt.zero_grad()
                 loss.backward()
                 # DD-PPO: average this minibatch's gradients across all ranks

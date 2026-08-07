@@ -57,19 +57,31 @@ def pixel_to_world(px, py, w, h):
 def sim_thread(follow_path, dribble_path, creature_xml, ready):
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
     from rower_soccer.warp_port.render import WarpRenderer
+    from rower_soccer.warp_port.worm_env_base import _arena_xml
     from rower_soccer.warp_port.ppo import ActorCritic, load_pretrained
 
     env = WarpDribbleEnv(num_worlds=1, use_graph=True, seed=0,
                          creature_xml=creature_xml, episode_seconds=1e6)
+    # Match the render background to the physics scene (now the arena, not the
+    # default pitch), so the walls the worm actually collides with are drawn.
     ren = WarpRenderer(creature_xml, has_ball=True, width=PX, height=PX,
-                       topdown=True, view_half=VIEW_HALF, cam_height=CAM_HEIGHT)
+                       topdown=True, view_half=VIEW_HALF, cam_height=CAM_HEIGHT,
+                       base_xml=_arena_xml(env._floor_half))
 
     dribble_ac = ActorCritic(env.obs_dim, env.act_dim,
                              proprio_indices=env.proprio_indices.tolist(),
                              task_indices=env.task_indices.tolist(), z_dim=16).cuda()
     load_pretrained(dribble_ac, dribble_path, device="cuda"); dribble_ac.eval()
-    follow_ac = ActorCritic(33, env.act_dim, proprio_indices=list(range(0, 29)),
-                            task_indices=list(range(29, 33)), z_dim=16).cuda()
+    # Obs is proprio-FIRST: [proprio(N_PROP) | ball_ego(BALL) | target(6)]. The
+    # follow policy wants the same vector WITHOUT the ball block, so drop [N_PROP,
+    # N_PROP+BALL) (was a leading-slice obs[:, 6:] under the old ball-first layout).
+    N_PROP = len(env.proprio_indices)
+    BALL = 6
+    follow_obs_dim = env.obs_dim - BALL
+    follow_ac = ActorCritic(follow_obs_dim, env.act_dim,
+                            proprio_indices=list(range(N_PROP)),
+                            task_indices=list(range(N_PROP, follow_obs_dim)),
+                            z_dim=16).cuda()
     load_pretrained(follow_ac, follow_path, device="cuda"); follow_ac.eval()
 
     env.reset()
@@ -100,7 +112,8 @@ def sim_thread(follow_path, dribble_path, creature_xml, ready):
             if skill == "dribble":
                 a = dribble_ac.dist(obs.float()).mean.clamp(-1, 1)
             elif skill == "follow":
-                a = follow_ac.dist(obs[:, 6:].float()).mean.clamp(-1, 1)   # drop ball_ego
+                fobs = torch.cat([obs[:, :N_PROP], obs[:, N_PROP + BALL:]], -1)  # drop ball_ego
+                a = follow_ac.dist(fobs.float()).mean.clamp(-1, 1)
             else:
                 a = zero
         env.step(a)

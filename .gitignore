@@ -192,3 +192,7 @@ videos/
 # Agent worktrees (git worktree checkouts created by parallel agents; the work
 # reaches the branch as commits, never as files under here).
 .claude/worktrees/
+
+# WS4: recorded play-server demos (the BC dataset; ship them to GCS, not git)
+demos/
+*.demo.npz

@@ -14,7 +14,10 @@
 # concurrent viewers at the full 20 fps for as long as you leave it up.
 set -euo pipefail
 
-REPO=/workspace/utmist-vc2-phase2
+# Derived, not hardcoded: this has to run the checkout it was invoked from
+# (a worktree, a clone on a laptop), or you tunnel the wrong code to your friends.
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+VENV="${ROWER_VENV:-$REPO/.venv}"
 PORT="${1:-8090}"
 CODE="${2:-$(head -c 6 /dev/urandom | base32 | tr 'A-Z' 'a-z' | head -c 8)}"
 TOOLS="$REPO/.tools"
@@ -41,7 +44,7 @@ export MUJOCO_GL=egl
 export PYTHONPATH="$REPO"
 
 echo "[online] starting the game server on :$PORT (scene compile takes ~15 s)"
-.venv/bin/python -m rower_soccer.game.server --port "$PORT" "${@:3}" \
+"$VENV/bin/python" -m rower_soccer.game.server --port "$PORT" "${@:3}" \
     > logs/game_online.log 2>&1 &
 GAME=$!
 trap 'kill $GAME $TUN 2>/dev/null || true' EXIT INT TERM

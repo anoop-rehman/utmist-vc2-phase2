@@ -224,6 +224,17 @@ def test_target_clip_preserves_bearing():
     assert abs(np.dot(raw / 50.0, clipped / 10.0) - 1.0) < 1e-6
 
 
+def test_uprightness_reads_cos_tilt():
+    from rower_soccer.skills import uprightness
+
+    up = PlayerFrame(obs={"world_zaxis": np.array([0.0, 0.0, 1.0])},
+                     root_pos=np.zeros(3), root_mat=np.eye(3))
+    over = PlayerFrame(obs={"world_zaxis": np.array([0.0, 0.0, -0.9])},
+                       root_pos=np.zeros(3), root_mat=np.eye(3))
+    assert uprightness(up) == 1.0
+    assert uprightness(over) < -0.5
+
+
 def test_ball_fields_need_the_world_ball_state():
     """dm_soccer's `ball_ego_position` is in MuJoCo's INERTIAL frame while the
     drills' `ball_ego` is in the BODY frame, so a frame without `ball_pos` must
@@ -350,18 +361,26 @@ def test_policy_cache_shares_weights_between_players():
     assert a._expert("follow") is b._expert("follow")
 
 
-def test_noise_driven_checkpoint_is_detected():
-    """`follow_ant_v1` trained with ent_ceil=0, so its std sits at ~1.0 against a
-    [-1, 1] action range: the mean is not the policy that was scored. MODE_AUTO
-    must notice, rather than silently emitting a policy that cannot walk."""
+def test_default_mode_is_the_mean():
+    """Gameplay and replay run the action MEAN — the same policy the drills' own
+    `eval_video` scores. A wide action std is reported, never acted on."""
     need_checkpoint()
-    from rower_soccer.skills import MODE_NOISE
+    from rower_soccer.skills import MODE_MEAN
 
     ctrl = SkillController("ant", quiet=True, preload=("follow",))
+    assert ctrl.action_mode == MODE_MEAN
     expert = ctrl._expert("follow")
-    assert expert.info.action_std > 0.9
-    assert expert.noise_driven
-    assert ctrl.resolved_mode("follow") == MODE_NOISE
+    assert expert.info.action_std > 0.9      # ent_ceil=0 pinned log_std at 0
+    assert expert.wide_std                   # noticed...
+    assert ctrl.action_mode == MODE_MEAN     # ...and not acted on
+
+
+def test_follow_default_checkpoint_is_final_not_best():
+    """`best.pt` is whichever checkpoint scored highest on the WARP eval; for
+    follow_ant_v1 that is the 55.8M-step one, whose mean action does not walk in
+    MuJoCo CPU at all (fitness 0.23 vs final.pt's 0.98). Sim2sim is a property of
+    the individual checkpoint, so the registry pins the one that was measured."""
+    assert get_spec("follow").checkpoint_for("ant").endswith("final.pt")
 
 
 # --- soccer env ------------------------------------------------------------
@@ -433,11 +452,16 @@ def test_repeated_act_is_bit_identical():
 
 
 def test_noise_stream_is_a_function_of_tick_seed_and_player():
+    """MODE_NOISE must be reproducible without being repetitive: the same
+    (seed, player_index, tick) always gives the same torques, and no two of those
+    coordinates share a stream."""
     need_checkpoint()
+    from rower_soccer.skills import MODE_NOISE
     _, _, _, frame = stepped_frame(steps=1)
 
     def first_two(seed, player):
-        c = SkillController("ant", quiet=True, seed=seed, player_index=player)
+        c = SkillController("ant", quiet=True, seed=seed, player_index=player,
+                            action_mode=MODE_NOISE)
         c.set_command("follow", (5.0, 5.0))
         return c.act(frame).action, c.act(frame).action
 

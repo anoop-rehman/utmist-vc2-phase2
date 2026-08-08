@@ -17,22 +17,19 @@ Design notes that matter to the callers
   (`registry.py`). Swapping in rower/worm is a `SkillController("rower")` plus a
   checkpoint entry.
 
-* **Reproducible by default, in one of two ways.** Gameplay and replay both need
-  identical output for identical input, so nothing here ever touches a global
-  RNG. `action_mode="mean"` emits the action distribution's mean. `"noise"` adds
-  `std * eps` where `eps` is drawn from a generator seeded by
-  `(seed, player, tick)` — so it is still a pure function of the inputs and a
-  demo still replays bit-for-bit, but the policy gets the exploration noise it
-  was scored with. `"auto"` (the default) picks between them by inspecting the
-  checkpoint, and says which it picked and why.
+* **Deterministic by default.** `act()` emits the action distribution's MEAN —
+  the same thing `warp_port/render.py:eval_video` scores, so what the game runs
+  is what the gate video showed. Nothing here ever touches a global RNG.
 
-  The reason `"mean"` is not simply the answer: `follow_ant_v1` trained with
-  `ent_ceil = 0`, so its `log_std` finished pinned at the ceiling (std ~= 1.0 on
-  every joint, against actions clamped to [-1, 1]). PPO scores the *sampled*
-  policy, so its 0.997 fitness belongs to `clamp(mean + N(0, 1))`, not to the
-  mean. Measured here on CPU MuJoCo, 15 s toward a point 3 m away: sampled walks
-  there (fitness 0.944 at the pitch's solref, 0.996 at the drill's), the mean
-  crouches at the spawn point and never moves (0.23). See MODE_AUTO below.
+  `MODE_NOISE` is the second mode: `mean + noise_scale * std * eps`, with `eps`
+  a pure function of `(seed, player_index, tick)`. It is therefore just as
+  replayable — re-running the same ticks with the same seed gives the same
+  torques — but it reproduces the exploration the policy was *trained* under.
+  Two uses: collecting BC data with the on-policy action distribution, and
+  rescuing a checkpoint whose mean has collapsed (these drills train with
+  `ent_ceil = 0`, so `log_std` sits at its ceiling and mean and sample can be
+  very different policies). It is never the default, because a controller that
+  silently injects noise is a controller whose replay you cannot reason about.
 
 * **Clean skill switching.** `set_command` with a different `skill_id` clears
   every scrap of per-skill state before the next `act()`. Today the experts are
@@ -64,22 +61,15 @@ from rower_soccer.skills.fields import FieldContext, ball_world_xy, get_field
 from rower_soccer.skills import registry as R
 from rower_soccer.skills.policy import load_policy
 
-__all__ = ["SkillController", "SkillControllerPool",
-           "MODE_AUTO", "MODE_MEAN", "MODE_NOISE"]
+__all__ = ["SkillController", "SkillControllerPool", "MODE_MEAN", "MODE_NOISE"]
 
-#: Emit the action distribution's mean. Bit-exact, no seed needed. Correct for
-#: any checkpoint whose mean policy is the behaviour it was scored on.
+#: Emit the action distribution's mean. The default, and what the drills' own
+#: eval scores. Bit-exact for any caller; no seed needed.
 MODE_MEAN = "mean"
-#: Emit `mean + std * eps` with `eps` a pure function of `(seed, player, tick)`.
-#: Still fully reproducible — a replay that re-runs the same ticks with the same
-#: seed gets the same torques — but it restores the exploration noise a
-#: noise-driven checkpoint needs in order to locomote at all.
+#: Emit `mean + noise_scale * std * eps`, with `eps` a pure function of
+#: `(seed, player_index, tick)` — reproducible, but the on-policy distribution
+#: rather than its mean. See the module docstring for when that is what you want.
 MODE_NOISE = "noise"
-#: Inspect the checkpoint and choose. `MODE_NOISE` when the expert's action std is
-#: at/near the [-1, 1] action range (`policy.NOISE_DRIVEN_STD`), else `MODE_MEAN`.
-#: The choice is announced once per expert, with the std that drove it, because a
-#: silent choice here is exactly the kind of thing that costs this project runs.
-MODE_AUTO = "auto"
 
 _ANNOUNCED = set()
 
@@ -91,7 +81,7 @@ class SkillController:
                  creature: str = "ant",
                  *,
                  device: str = "cpu",
-                 action_mode: str = MODE_AUTO,
+                 action_mode: str = MODE_MEAN,
                  checkpoints: Optional[Mapping[str, str]] = None,
                  target_clip: float = R.DEFAULT_TARGET_CLIP,
                  noise_scale: float = 1.0,
@@ -107,33 +97,27 @@ class SkillController:
           device: torch device for the experts. `"cpu"` is right for the game
             server — one 1.4 MB MLP per tick is microseconds, and it keeps the
             play loop off the training GPU.
-          action_mode: `MODE_AUTO` (default), `MODE_MEAN`, or `MODE_NOISE`. All
-            three are reproducible; see the module docstring for which to use.
+          action_mode: `MODE_MEAN` (default) or `MODE_NOISE`. Both are
+            reproducible; see the module docstring for which to use.
           checkpoints: per-skill override, `{"follow": "/path/best.pt"}`. Takes
             precedence over the registry, so WS4 can point at a fresh run without
             editing this package.
           target_clip: metres; see `fields._target_ego`. 0 disables.
-          noise_scale: multiplies the exploration noise in `MODE_NOISE`. 1.0
-            reproduces training exactly and is the default; lower trades gait
-            vigour for stability. It exists because the same std-1.0 noise that
-            makes `follow_ant_v1` walk also flips it: the drill resets every 15 s,
-            so nothing ever taught the ant to stay upright longer than that, and
-            once it is on its back the policy has no recovery. A 45-s match is
-            three drill episodes long. Measure before changing it — 0 turns the
-            gait off entirely, since the gait IS the noise.
+          noise_scale: multiplies the exploration noise in `MODE_NOISE` only
+            (ignored in `MODE_MEAN`). 1.0 reproduces the training distribution;
+            lower trades exploration for stability.
           preload: skills to load immediately rather than on first use — pass the
             slot's expected skills to keep the first tick off the disk.
           seed, player_index: seed the per-tick noise stream in `MODE_NOISE`.
             Distinct `player_index` values keep four ants from receiving the
             identical noise sequence. **WS4: record both in the demo header** —
             with them plus the tick index a replay is bit-exact.
-          quiet: suppress the one-time `MODE_AUTO` announcement.
+          quiet: suppress the one-time per-checkpoint announcement.
           name: label for error messages (e.g. `"home_0"`).
         """
-        if action_mode not in (MODE_AUTO, MODE_MEAN, MODE_NOISE):
-            raise ValueError(
-                f"action_mode must be one of {MODE_AUTO!r}, {MODE_MEAN!r}, "
-                f"{MODE_NOISE!r}; got {action_mode!r}")
+        if action_mode not in (MODE_MEAN, MODE_NOISE):
+            raise ValueError(f"action_mode must be {MODE_MEAN!r} or "
+                             f"{MODE_NOISE!r}; got {action_mode!r}")
         self.creature = creature
         self.name = name or creature
         self.device = device
@@ -158,16 +142,6 @@ class SkillController:
         """True for every mode this class offers: output is a pure function of
         (observation, seed, player_index, tick), so a demo always replays."""
         return True
-
-    def resolved_mode(self, skill_id: Optional[str] = None) -> str:
-        """The mode `act()` will actually use for a skill (resolves MODE_AUTO)."""
-        sid = skill_id or self.skill_id
-        if self.action_mode != MODE_AUTO or sid is None:
-            return self.action_mode if self.action_mode != MODE_AUTO else MODE_MEAN
-        spec = R.get_spec(sid)
-        if spec.kind == R.KIND_ZERO:
-            return MODE_MEAN
-        return MODE_NOISE if self._expert(sid).noise_driven else MODE_MEAN
 
     # -- introspection -----------------------------------------------------
     @property
@@ -271,9 +245,9 @@ class SkillController:
         target = self._resolve_target(spec, frame)
         vec = self.build_obs(spec, frame, target)
         expert = self._expert(spec.skill_id)
-        mode = self.resolved_mode(spec.skill_id)
-        noise = self._noise(expert.info.act_dim) if mode == MODE_NOISE else None
-        action, z = expert.act(vec, mode=mode, noise=noise)
+        noise = (self._noise(expert.info.act_dim)
+                 if self.action_mode == MODE_NOISE else None)
+        action, z = expert.act(vec, mode=self.action_mode, noise=noise)
         self.tick += 1
         return SkillOutput(action=action, z=z, skill_id=spec.skill_id,
                            target_xy=None if target is None else (float(target[0]),
@@ -356,25 +330,25 @@ class SkillController:
         return expert
 
     def _announce(self, skill_id, expert):
-        """Say once, per checkpoint, what mode this expert will run in and why."""
-        if self.quiet or self.action_mode != MODE_AUTO:
+        """Say once, per checkpoint, exactly which weights are in play."""
+        if self.quiet:
             return
         key = (expert.info.path, self.action_mode)
         if key in _ANNOUNCED:
             return
         _ANNOUNCED.add(key)
-        if expert.noise_driven:
-            print(f"[skills] '{skill_id}' <- {expert.info.path}\n"
-                  f"[skills]   {expert.info.describe()}\n"
-                  f"[skills]   action std {expert.info.action_std:.2f} fills the "
-                  f"[-1, 1] action range, so this checkpoint was SCORED as a "
-                  f"sampled policy and its mean action does not locomote.\n"
-                  f"[skills]   -> running MODE_NOISE (seed={self.seed}, "
-                  f"player={self.player_index}); still bit-exact for replay. "
-                  f"Pass action_mode='mean' to override.", flush=True)
-        else:
-            print(f"[skills] '{skill_id}' <- {expert.info.path} "
-                  f"({expert.info.describe()}) -> MODE_MEAN", flush=True)
+        print(f"[skills] '{skill_id}' <- {expert.info.path} "
+              f"({expert.info.describe()}) mode={self.action_mode}", flush=True)
+        if self.action_mode == MODE_MEAN and expert.wide_std:
+            # Not an error, and not auto-corrected: `follow_ant_v1/final.pt` has
+            # std 1.0 and its mean walks perfectly well. But mean and sample are
+            # then very different policies, and which one a training run's
+            # reported fitness refers to decides whether that number describes
+            # what the game will do. Worth one line.
+            print(f"[skills]   note: action std {expert.info.action_std:.2f} "
+                  "fills the [-1, 1] action range (ent_ceil=0 during training), "
+                  "so this expert's mean and sampled policies differ a lot. "
+                  "Running the mean, as the drill eval does.", flush=True)
 
     def __repr__(self):
         return (f"<SkillController {self.name} {self._contract.describe()} "

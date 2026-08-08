@@ -115,13 +115,15 @@ def _effective_target(ctx) -> np.ndarray:
 def _target_ego(ctx) -> np.ndarray:
     """Egocentric target, optionally re-aimed at a nearer waypoint.
 
-    `follow_ant_v1` trained with the target inside a +/-10 m box around a
-    creature that spawns at the origin, so |target_ego| almost never exceeded a
-    few metres. The pitch is 96 x 72 m: a human clicking the far corner would
-    hand the expert an input ~10x anything in its training distribution. Clipping
-    the ego vector's LENGTH (not its direction) keeps the input in-distribution
-    and means "walk toward that point"; the creature re-aims every tick, so it
-    still arrives. `target_clip <= 0` disables it.
+    `follow_ant_v1` spawned its target 1.07-3.22 m from a creature at the origin,
+    so `|target_ego|` in training lived inside that band. The pitch is 96 x 72 m:
+    a human clicking the far corner would hand the expert an input ~15x anything
+    it has seen. Clipping the ego vector's LENGTH (not its direction) keeps the
+    input in-distribution and turns the command into "walk toward that bearing";
+    the creature re-aims every tick, so the waypoint advances with it and it still
+    arrives — pure pursuit. Once the real target is inside `target_clip` the clip
+    stops applying and the expert gets the true, shrinking vector it needs in
+    order to settle. `target_clip <= 0` disables it.
     """
     f = ctx.frame
     ego = to_ego_xy(f.root_pos, f.root_mat, _effective_target(ctx))

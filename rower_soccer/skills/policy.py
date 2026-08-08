@@ -50,7 +50,7 @@ from rower_soccer.skills.api import CheckpointMismatch
 from rower_soccer.skills.contract import REPO_ROOT
 
 __all__ = ["LatentExpert", "PolicyInfo", "load_policy", "resolve_checkpoint",
-           "clear_policy_cache", "policy_cache_size", "NOISE_DRIVEN_STD"]
+           "clear_policy_cache", "policy_cache_size", "WIDE_STD"]
 
 _CACHE = {}
 _LOCK = threading.RLock()
@@ -135,11 +135,10 @@ def _fetch_gcs(uri: str) -> str:
 
 # --- the policy ------------------------------------------------------------
 
-#: Mean action std above which a checkpoint is treated as "noise-driven": its
-#: exploration noise is the same size as its whole action range, so the
-#: distribution MEAN is not the behaviour the run was scored on. See
-#: `LatentExpert.noise_driven` and MODE_AUTO in controller.py.
-NOISE_DRIVEN_STD = 0.5
+#: Mean action std above which mean and sampled policies are meaningfully
+#: different animals: the exploration noise then spans the whole [-1, 1] action
+#: range. Reported at load time, never acted on — see `LatentExpert.wide_std`.
+WIDE_STD = 0.5
 
 
 @dataclass(frozen=True)
@@ -180,21 +179,20 @@ class LatentExpert:
         self._device = device
 
     @property
-    def noise_driven(self) -> bool:
-        """True when this checkpoint's exploration noise is as large as its whole
-        action range, i.e. the distribution MEAN is not the behaviour the run was
-        scored on.
+    def wide_std(self) -> bool:
+        """True when this checkpoint's exploration noise spans its whole action
+        range, so its mean and sampled policies are substantially different.
 
-        `follow_ant_v1` is the motivating case: it trained with `ent_ceil = 0`,
-        so `log_std` sat at its ceiling and finished at std ~= 1.0 on all eight
-        joints, with actions clamped to [-1, 1]. PPO scores the SAMPLED policy,
-        so its 0.997 fitness is the fitness of `clamp(mean + N(0, 1))`. Measured
-        on CPU MuJoCo over 15 s to a point 3 m away: sampled reaches it (fitness
-        0.944-0.996), the mean crouches and never moves (0.23). The gait is the
-        noise. See `controller.MODE_AUTO`.
+        These drills train with `ent_ceil = 0`, which lets `log_std` sit at its
+        ceiling: `follow_ant_v1` finished at std ~= 1.0 on all eight joints
+        against actions clamped to [-1, 1]. That is not by itself a problem —
+        `final.pt`'s mean walks to a 3 m target on CPU MuJoCo with fitness 0.98 —
+        but it does mean "fitness 0.997" is only meaningful once you know which
+        of the two policies produced it. `warp_port/render.py:eval_video` scores
+        the mean, so that is what this package runs by default.
         """
         return (self.info.action_std is not None
-                and self.info.action_std >= NOISE_DRIVEN_STD)
+                and self.info.action_std >= WIDE_STD)
 
     # -- inference ---------------------------------------------------------
     def act(self, obs_vector, mode: str = "mean", noise=None):

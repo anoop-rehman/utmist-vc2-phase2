@@ -179,10 +179,19 @@ def available_skills(creature: str) -> Tuple[str, ...]:
 register_skill(SkillSpec(
     skill_id="follow",
     fields=_FOLLOW_FIELDS,
-    checkpoints={"ant": "runs_v2/follow_ant_v1/best.pt"},
-    doc="Walk to a commanded world point and hold there. The stage-1 skill; the "
-        "ant checkpoint (follow_ant_v1, fitness 0.997) is the only trained "
-        "expert as of the ant sprint's P1.",
+    # final.pt, NOT best.pt. `best.pt` is whichever checkpoint scored highest on
+    # the deterministic WARP eval (train_follow_warp.py:414) — for this run the
+    # 55.8M-step one, ep_rew 570.1 / fitness 0.981. It does not survive the trip
+    # to MuJoCo CPU: measured in the drill scene, 15 s toward a point 3 m away,
+    # its mean action leaves the ant crouched at the spawn point (fitness 0.23)
+    # at every solref from 0.005 to 0.2. `final.pt` (147M steps, warp fitness
+    # 0.997) reaches 0.98 on CPU at the pitch's own solref. Same architecture,
+    # same std, same obs — the earlier checkpoint simply had not yet learned a
+    # gait that transfers. Sim2sim is a per-checkpoint property, not a
+    # per-run one; check it before trusting any new weights.
+    checkpoints={"ant": "runs_v2/follow_ant_v1/final.pt"},
+    doc="Walk to a commanded world point and hold there. The stage-1 skill, and "
+        "the only trained expert as of the ant sprint's P1.",
 ))
 
 register_skill(SkillSpec(

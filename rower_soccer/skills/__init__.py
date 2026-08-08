@@ -36,10 +36,10 @@ target switching, and `api.py` for the data contract WS4 builds against.
 from rower_soccer.skills.api import (CheckpointMismatch, ObservationContractError,
                                      PlayerFrame, SkillCommand, SkillError,
                                      SkillOutput, SkillUnavailable, UnknownSkill,
-                                     ego3_to_world, to_ego_xy, vec_to_ego3,
-                                     world_to_ego3)
+                                     ego3_to_world, to_ego_xy, uprightness,
+                                     vec_to_ego3, world_to_ego3)
 from rower_soccer.skills.contract import CreatureContract, contract_for
-from rower_soccer.skills.controller import (MODE_AUTO, MODE_MEAN, MODE_NOISE,
+from rower_soccer.skills.controller import (MODE_MEAN, MODE_NOISE,
                                             SkillController, SkillControllerPool)
 from rower_soccer.skills.policy import (clear_policy_cache, load_policy,
                                         resolve_checkpoint)
@@ -50,7 +50,7 @@ from rower_soccer.skills.registry import (DEFAULT_TARGET_CLIP, PROPRIO_V1, SKILL
 __all__ = [
     # controller
     "SkillController", "SkillControllerPool",
-    "MODE_AUTO", "MODE_MEAN", "MODE_NOISE",
+    "MODE_MEAN", "MODE_NOISE",
     # data contract
     "PlayerFrame", "SkillCommand", "SkillOutput",
     # registry
@@ -62,6 +62,7 @@ __all__ = [
     "load_policy", "resolve_checkpoint", "clear_policy_cache",
     # geometry
     "to_ego_xy", "world_to_ego3", "vec_to_ego3", "ego3_to_world",
+    "uprightness",
     # errors
     "SkillError", "UnknownSkill", "SkillUnavailable", "CheckpointMismatch",
     "ObservationContractError",

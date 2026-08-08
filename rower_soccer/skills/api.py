@@ -44,6 +44,7 @@ import numpy as np
 __all__ = [
     "PlayerFrame", "SkillCommand", "SkillOutput",
     "to_ego_xy", "ego3_to_world", "world_to_ego3", "vec_to_ego3",
+    "uprightness",
     "SkillError", "UnknownSkill", "SkillUnavailable", "CheckpointMismatch",
     "ObservationContractError",
 ]
@@ -203,6 +204,21 @@ def world_to_ego3(root_pos, root_mat, world_xyz) -> np.ndarray:
     root_mat = np.asarray(root_mat, dtype=np.float64).reshape(3, 3)
     return (root_mat.T @ (np.asarray(world_xyz, dtype=np.float64).ravel()[:3]
                           - root_pos)).astype(np.float32)
+
+
+def uprightness(frame) -> float:
+    """cos(tilt) of a player: +1 upright, 0 on its side, -1 on its back.
+
+    `world_zaxis` is the world z axis expressed in the body frame, so its third
+    component is exactly this. Offered because WS4 needs it: measured over 45-s
+    episodes with `follow_ant_v1/final.pt`, the ant is upright ~62% of ticks
+    (100%/30%/56% across three seeds) and has no righting behaviour once it goes
+    over — the drills train in 15-s episodes, so nothing ever asked it to stay up
+    for a match. Treat `uprightness(frame) < 0.5` as "this player is down" and
+    decide in the game layer (respawn, HUD, skip) rather than expecting the
+    controller to recover.
+    """
+    return float(ravel_obs(frame.obs, "world_zaxis")[2])
 
 
 def vec_to_ego3(root_mat, world_vec) -> np.ndarray:

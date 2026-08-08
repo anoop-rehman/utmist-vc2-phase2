@@ -241,9 +241,28 @@ register_skill(SkillSpec(
 
 register_skill(SkillSpec(
     skill_id="dribble",
+    # Field order CONFIRMED against the delivered checkpoint, not assumed:
+    # dribble_ant_v1's own t_idx is [0..5, 71..74] and p_idx [6..70], i.e.
+    # ball_ego(6) | proprio(65) | target_ego(2) target_ego_future(2) = 75. That
+    # is exactly this tuple, so the provisional guess was right and `load_policy`
+    # accepts it.
     fields=("ball_ego",) + PROPRIO_V1 + ("target_ego", "target_ego_future"),
-    doc="Drive the ball to a commanded world point. WS1 queue item 1. "
-        "PROVISIONAL field order — confirm against the delivered checkpoint.",
+    # best.pt, and unlike `follow` the choice barely matters — which is itself
+    # worth recording. Scored in the CPU soccer env (the env the GAME runs), 6
+    # ball-relative legs each, mean action, via `eval_dribble_soccer.py`:
+    #
+    #     best.pt    ball moved 6/6   median 0.47 m   mean 0.59 m   worst 1.77 m
+    #     final.pt   ball moved 6/6   median 0.36 m   mean 0.65 m   worst 1.83 m
+    #
+    # Each wins one statistic; at n=6 that is a wash, and neither shows anything
+    # like the symmetric-state fixed point that made follow's best.pt unusable.
+    # best.pt also won the warp eval outright (fitness 0.991 vs the run's noisy
+    # tail, which dipped to 0.014 on one eval before recovering), so it is the
+    # better-understood artifact. Re-measure if a v2 lands.
+    checkpoints={"ant": "runs_v2/dribble_ant_v1/best.pt"},
+    doc="Drive the ball to a commanded world point. Trained on the FROZEN "
+        "follow decoder (154,632 params held) — the shared-decoder skill chain "
+        "working end to end, which was the ant sprint's critical-path risk.",
 ))
 
 register_skill(SkillSpec(

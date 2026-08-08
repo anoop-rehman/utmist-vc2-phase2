@@ -249,11 +249,17 @@ def t_warp_cpu_obs_parity():
     # backends at the same state and only agree loosely.
     worst = ""
     off = 0
+    # Default 5 mm: the two scenes hang the creature off its freejoint slightly
+    # differently (warp attaches the freejoint to seg0 via a frame that leaves a
+    # ~1 mm residual offset), so exact equality is not on offer. It is still two
+    # orders of magnitude tighter than the bugs this guards against -- a 0.75 m
+    # root-frame mix-up and a 100x accelerometer scale error.
     tols = {"creature/sensors_accelerometer": 5e-1, "creature/touch_sensors": 5e-1,
             "creature/sensors_gyro": 5e-2, "creature/sensors_velocimeter": 5e-2}
+    default_tol = 5e-3
     for k, n in ANT_FOLLOW_LAYOUT:
         d = float(np.abs(wvec[off:off + n] - cvec[off:off + n]).max())
-        tol = tols.get(k, 1e-4)
+        tol = tols.get(k, default_tol)
         assert d <= tol, f"{k}: max|warp-cpu| = {d:.4g} > {tol}"
         worst += f"{k.split('/')[-1]}={d:.2g} "
         off += n

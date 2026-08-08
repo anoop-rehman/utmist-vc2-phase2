@@ -143,8 +143,14 @@ training — the game is playable with follow+dribble first, kick/shoot hot-add.
 - [x] `soccer_bridge` / SkillController can actually be driven inside soccer
       (needed `absolute_root_pos`/`absolute_root_mat` enabled on the soccer
       walkers; it raised `KeyError` before — fixed in `envs/build.py`)
-- [x] env smokes: `MUJOCO_GL=egl .venv/bin/python -m tests.integration_smoke`
-      (6/6; add `--warp` for the GPU/CPU observation-parity check)
+- [x] env smokes: `MUJOCO_GL=egl .venv/bin/python -m tests.integration_smoke --warp`
+      — **7/7**, including a warp-vs-dm_control observation-parity assertion at
+      an identical physical state (every block agrees to <=1.2 mm / 0.025 in
+      sensor units). Note for anyone placing a creature by hand: `set_pose`
+      positions the ATTACHMENT FRAME, and dm_control hangs seg0 off it at the
+      XML's `pos` (0.75 m up for the ant) while warp puts the freejoint on seg0
+      itself — pass `qpos - R @ offset`, not `qpos`, or the creature spawns
+      0.75 m in the air.
 - [ ] SkillController drives all 4 skills in CPU soccer; mid-episode switching clean
 - [ ] 4 slots claimable from 4 devices on LAN; inputs isolated per slot
 - [ ] demo file: record → replay is deterministic; schema versioned

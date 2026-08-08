@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
-from rower_soccer.game.lobby import Lobby, SLOTS
+from rower_soccer.game.lobby import JoinRefused, Lobby, SLOTS
 from rower_soccer.game import match as M
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -47,7 +47,14 @@ class GameServer:
 
     def __init__(self, args):
         self.args = args
-        self.lobby = Lobby(claim_timeout=args.slot_timeout)
+        self.lobby = Lobby(claim_timeout=args.slot_timeout,
+                           join_code=join_code_of(args),
+                           client_ttl=args.client_ttl)
+        # Every MJPEG viewer costs a thread and ~7 Mbit/s of upload. On a LAN that
+        # ceiling never mattered; on a public URL one bored person with a for-loop
+        # is a denial of service against the four people actually playing.
+        self._streams = 0
+        self._streams_lock = threading.Lock()
         self.sim: M.MatchSim | None = None
         self.ready = threading.Event()
         self.stop_flag = threading.Event()
@@ -371,32 +378,68 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:                   # noqa: BLE001 - socket already gone
                 self.close_connection = True
 
+    def _gated(self, token):
+        """True (and the 403 already sent) if this viewer may not watch.
+
+        Only meaningful with --join-code: without one the server behaves exactly as
+        it did on the LAN. Watching is gated as well as playing because a quick
+        tunnel URL is guessable-by-sharing, not secret, and every viewer costs real
+        upload bandwidth off the same pipe the four players are using.
+        """
+        if self.gs.lobby.join_code is None:
+            return False
+        if token and self.gs.lobby.get(token) is not None:
+            return False
+        self._json(dict(ok=False, error="join code required"), 403)
+        return True
+
     def do_GET(self):
         gs = self.gs
         u = urlparse(self.path)
         q = parse_qs(u.query)
-        token = (q.get("token") or [None])[0]
+        token = (q.get("token") or [None])[0] or self.headers.get("X-Token")
         if u.path == "/":
             return self._static("index.html")
         if u.path.startswith("/static/"):
             return self._static(u.path[len("/static/"):])
         if u.path == "/health":
+            # Deliberately open: it is how you check the tunnel is alive, it says
+            # nothing about the match, and it is the one URL you paste into a chat.
             return self._json(dict(ok=gs.error is None, ready=gs.ready.is_set(),
+                                   gated=gs.lobby.join_code is not None,
                                    error=gs.error))
         if u.path == "/state":
+            if self._gated(token):
+                return
             return self._json(gs.snapshot(token))
         if u.path == "/frame":
+            if self._gated(token):
+                return
             jpeg, _ = gs.wait_frame(-1, timeout=0.0)
             if jpeg is None:
                 return self._send(503, b"no frame yet", "text/plain")
             return self._send(200, jpeg, "image/jpeg")
         if u.path == "/stream":
+            if self._gated(token):
+                return
             return self._stream()
         return self._send(404, b"not found", "text/plain")
 
     def _stream(self):
         """MJPEG. One frame per published frame -- no polling, no duplicate JPEGs:
         `wait_frame` blocks on the sim thread's condition variable."""
+        gs = self.gs
+        with gs._streams_lock:
+            if gs._streams >= gs.args.max_streams:
+                return self._json(dict(ok=False, error="too many viewers"), 503)
+            gs._streams += 1
+        try:
+            self._stream_loop()
+        finally:
+            with gs._streams_lock:
+                gs._streams -= 1
+
+    def _stream_loop(self):
         self.send_response(200)
         self.send_header("Content-Type",
                          "multipart/x-mixed-replace; boundary=frame")
@@ -404,6 +447,16 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
+        # A LAN client that goes away always sends a FIN. A phone that walks out of
+        # wifi range, or a laptop lid closed on a hotel network, does not: the
+        # socket stays open, its send buffer fills, and this thread blocks in
+        # write() until the kernel gives up ~15 minutes later -- holding a slot in
+        # --max-streams the whole time. A send timeout turns that into a normal
+        # disconnect, and the browser reconnects on its own.
+        try:
+            self.connection.settimeout(self.gs.args.stream_timeout)
+        except OSError:
+            pass
         last = -1
         try:
             while not self.gs.stop_flag.is_set():
@@ -424,7 +477,14 @@ class _Handler(BaseHTTPRequestHandler):
         token = d.get("token") or self.headers.get("X-Token")
 
         if u.path == "/join":
-            c = gs.lobby.join(d.get("name", ""), token)
+            # The code travels in the POST body, never the query string: URLs end
+            # up in browser history, in the tunnel's request log, and in whatever
+            # chat app somebody pastes the link into.
+            try:
+                c = gs.lobby.join(d.get("name", ""), token, code=d.get("code"))
+            except JoinRefused:
+                return self._json(dict(ok=False, error="wrong or missing join code",
+                                       need_code=True), 403)
             return self._json(dict(token=c.token, name=c.name, slot=c.slot,
                                    slots=list(SLOTS)))
 
@@ -562,7 +622,35 @@ def build_parser():
     p.add_argument("--slot-timeout", type=float, default=25.0)
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8090)
+    # -- playing over the public internet (docs/PLAY_2V2.md §1b) ---------------
+    p.add_argument("--join-code", default=None,
+                   help="shared secret required before a token is issued. With one "
+                        "set, /state /frame /stream also need a token, so the URL "
+                        "alone gets you nothing. Prefer $ROWER_JOIN_CODE: an "
+                        "argv is visible in `ps` to everyone on the box")
+    p.add_argument("--max-streams", type=int, default=12,
+                   help="concurrent MJPEG viewers. Each is a thread and ~7 Mbit/s")
+    p.add_argument("--stream-timeout", type=float, default=15.0,
+                   help="seconds; drop an MJPEG viewer that stops reading. A remote "
+                        "client that vanishes without a FIN would otherwise hold "
+                        "its thread until the kernel gives up")
+    p.add_argument("--client-ttl", type=float, default=900.0,
+                   help="seconds; forget a seatless client nobody has heard from. "
+                        "0 disables (the LAN behaviour: remember forever)")
     return p
+
+
+def join_code_of(args):
+    """The code, or None for an open server.
+
+    `--join-code` wins when given (`--join-code ''` explicitly means *open*, which
+    is how the selftest stays runnable in a shell that exports the variable);
+    otherwise $ROWER_JOIN_CODE, which is the form to prefer because an argv is
+    readable by anyone with `ps` on this box.
+    """
+    if getattr(args, "join_code", None) is not None:
+        return args.join_code.strip() or None
+    return (os.environ.get("ROWER_JOIN_CODE") or "").strip() or None
 
 
 def main(argv=None):
@@ -580,6 +668,14 @@ def main(argv=None):
           flush=True)
     print(f"[game] (same machine: http://localhost:{args.port}/ ; over ssh, forward "
           f"port {args.port})", flush=True)
+    # Never print the code itself: this log is what gets pasted into a bug report.
+    if gs.lobby.join_code:
+        print(f"[game] join code REQUIRED ({len(gs.lobby.join_code)} chars) -- "
+              f"tell the players out of band, not in the link", flush=True)
+    else:
+        print("[game] no join code: anyone who can reach this port can take a seat. "
+              "Set --join-code (or $ROWER_JOIN_CODE) before tunnelling it out",
+              flush=True)
     httpd = make_httpd(gs, args.host, args.port)
     try:
         httpd.serve_forever()

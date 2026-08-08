@@ -197,6 +197,11 @@ videos/
 demos/
 *.demo.npz
 
+# WS4 going online: the 40 MB cloudflared binary scripts/play_online.sh fetches,
+# and the server/tunnel logs of a play session.
+.tools/
+logs/
+
 # Local wandb run state. Same class as runs_v2/: pure training artifact, and
 # every byte of it also lives on wandb.ai. (The run-2026071*/ dirs already in
 # git predate this and are left alone rather than churning a delete commit.)

@@ -31,12 +31,13 @@ SLOTS = ("home_1", "home_2", "away_1", "away_2")
 class BotClient:
     """One simulated player.  Same endpoints, same token discipline as the browser."""
 
-    def __init__(self, url, name, slot=None, seed=0, skills=("follow",)):
+    def __init__(self, url, name, slot=None, seed=0, skills=("follow",), code=None):
         self.url = url.rstrip("/")
         self.name = name
         self.want_slot = slot
         self.slot = None
         self.token = None
+        self.code = code
         self.rng = random.Random(seed)
         self.skills = tuple(skills)
         self.errors = []
@@ -61,7 +62,11 @@ class BotClient:
 
     # -- lobby -------------------------------------------------------------
     def join(self):
-        r = self._req("/join", {"name": self.name, "token": self.token})
+        r = self._req("/join", {"name": self.name, "token": self.token,
+                                "code": self.code})
+        if "token" not in r:                    # a gated server refused us
+            self.errors.append(f"join: {r.get('error')}")
+            return r
         self.token, self.slot = r["token"], r.get("slot")
         return r
 
@@ -134,12 +139,13 @@ class BotClient:
         return self
 
 
-def run_bots(url, slots=SLOTS, seconds=45.0, hz=2.0, start=False, skills=("follow",)):
+def run_bots(url, slots=SLOTS, seconds=45.0, hz=2.0, start=False, skills=("follow",),
+             code=None):
     """Four bots in four threads -- concurrent, like four phones."""
-    bots = [BotClient(url, f"bot_{s}", slot=s, seed=i, skills=skills)
+    bots = [BotClient(url, f"bot_{s}", slot=s, seed=i, skills=skills, code=code)
             for i, s in enumerate(slots)]
     if start:
-        b0 = BotClient(url, "starter"); b0.join()
+        b0 = BotClient(url, "starter", code=code); b0.join()
         for b in bots:
             b.join()
             b.claim()
@@ -178,7 +184,11 @@ def selftest(seconds=8.0, port=0, pitch_half=(9.0, 7.0), physics_dt=0.005,
             "--pitch-half", str(pitch_half[0]), str(pitch_half[1]),
             "--match-seconds", str(seconds), "--countdown", "0.5",
             "--physics-dt", str(physics_dt), "--demo-dir", demo_dir,
-            "--width", "480", "--height", "320", "--render-hz", "10"]
+            "--width", "480", "--height", "320", "--render-hz", "10",
+            # Explicitly open, so the selftest means the same thing in a shell that
+            # exports ROWER_JOIN_CODE for a real session. The gate has its own
+            # tests (tests/test_gate.py); this one is about the match.
+            "--join-code", ""]
     args = SV.build_parser().parse_args(argv)
     gs = SV.GameServer(args)
     sim_t = threading.Thread(target=gs.run_sim, daemon=True); sim_t.start()
@@ -280,6 +290,9 @@ def main(argv=None):
     p.add_argument("--seconds", type=float, default=45.0)
     p.add_argument("--hz", type=float, default=2.0)
     p.add_argument("--skills", default="follow")
+    p.add_argument("--join-code", default=None,
+                   help="the server's --join-code, if it has one. Defaults to "
+                        "$ROWER_JOIN_CODE so it need not appear in argv")
     p.add_argument("--start", action="store_true", help="also start the match")
     p.add_argument("--selftest", action="store_true",
                    help="run server+bots+demo verification in one process")
@@ -288,8 +301,10 @@ def main(argv=None):
     if a.selftest:
         selftest(seconds=a.selftest_seconds)
         return
+    import os
+    code = a.join_code if a.join_code is not None else os.environ.get("ROWER_JOIN_CODE")
     bots = run_bots(a.url, tuple(a.slots.split(",")), a.seconds, a.hz, a.start,
-                    tuple(a.skills.split(",")))
+                    tuple(a.skills.split(",")), code=code)
     for b in bots:
         print(f"{b.name:12s} slot={b.slot} inputs={b.inputs_sent} errors={b.errors}")
 

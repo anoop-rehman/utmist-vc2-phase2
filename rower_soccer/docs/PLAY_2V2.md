@@ -1,8 +1,10 @@
-# The 2v2 LAN game and the demo format (WS4)
+# The 2v2 game and the demo format (WS4)
 
-Four people, four devices, one wifi, one 45-second ant match — and a file that
-records all four of them well enough to train on. The file is the point: the
-match is the sprint's demo, the demo file is next sprint's BC dataset.
+Four people, four devices, one 45-second ant match — and a file that records all
+four of them well enough to train on. The file is the point: the match is the
+sprint's demo, the demo file is next sprint's BC dataset.
+
+Same wifi: §1. Four different cities: §1b.
 
 ---
 
@@ -53,6 +55,158 @@ Flags worth knowing:
 | `--demo-dir` | `demos` | `''` disables recording |
 | `--render-hz` | `20` | frames, not ticks — the sim always runs at 40 Hz |
 | `--torch-threads` | `1` | **do not raise this**, see §6 |
+| `--join-code` | none | required before a token is issued. Off = anyone who can reach the port can take a seat, which is fine on wifi and not fine on a public URL — see §1b |
+
+## 1b. Playing over the internet (four people, four cities)
+
+One command. It fetches `cloudflared` if you do not have it, invents a join code,
+starts the server, opens a tunnel, and prints the two things you hand out:
+
+```bash
+cd /workspace/utmist-vc2-phase2
+scripts/play_online.sh                  # or: scripts/play_online.sh 8091 my-own-code
+```
+
+```
+  ================================================================
+   URL        https://todd-calvin-intersection-cdt.trycloudflare.com
+   join code  cl7ldzko
+  ================================================================
+```
+
+**Send the URL and the code separately** — a chat message with the link, the code
+said out loud or in a different thread. Everyone opens the URL, types the code
+once, picks a name, taps a free seat, plays. `Ctrl-C` kills the tunnel, the URL
+and the server together; a quick tunnel is per-process, so nothing is left
+running and the link is dead the moment you stop.
+
+Anything the script does you can do by hand:
+
+```bash
+.tools/cloudflared tunnel --url http://localhost:8090 --no-autoupdate   # or wherever
+export ROWER_JOIN_CODE=whatever-you-like
+MUJOCO_GL=egl PYTHONPATH=. .venv/bin/python -m rower_soccer.game.server --port 8090
+```
+
+`cloudflared` is one static binary and needs no Cloudflare account:
+
+```bash
+curl -sSL -o .tools/cloudflared \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+chmod +x .tools/cloudflared
+```
+
+### The join code
+
+The URL is public and guessable-by-sharing, so a shared secret gates it.
+
+| | |
+|---|---|
+| `$ROWER_JOIN_CODE` | **prefer this.** An `--join-code` argv is visible to anyone with `ps` on this box |
+| `--join-code CODE` | wins over the environment. `--join-code ''` explicitly means *open* |
+| neither | open — the LAN behaviour, unchanged. The banner says so at startup |
+
+The gate is on **token issuance**, not on each endpoint, because a token is the
+only key to everything else: `/claim`, `/input`, `/release` and `/control` all
+begin by resolving a token to a client. No token, no seat, no creature — there is
+no second check to forget. With a code set, `/state`, `/frame` and `/stream` need
+a token too, so the URL alone does not even get you a view of the pitch; `/` and
+`/health` stay open, since you have to load the page to be asked for a code.
+
+The code goes in the POST body, never a query string, and is never echoed in a
+response or written to a log — the startup banner prints its *length*. Reconnects
+present the token, not the code, so a phone waking up mid-match is not asked to
+retype a passphrase. Tests: `tests/test_lobby.py` (the data structure) and
+`tests/test_gate.py` (over a real socket, including that a rejected client never
+reaches the sim's input inbox).
+
+Accepted trade: `/stream` and `/state` carry the **token** in the query string,
+because an `<img src>` cannot send a header, so it lands in cloudflared's log and
+Cloudflare's. That is a per-session capability which dies with the process, not
+the shared secret — the code itself never appears in a URL anywhere. A cookie
+would close even that, and is not worth the machinery for four known people.
+
+Scripted clients take `--join-code` too:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m rower_soccer.game.sim_client \
+    --url https://<your>.trycloudflare.com --join-code cl7ldzko --seconds 45 --start
+```
+
+### What was actually measured
+
+Server on this pod (RTX 4000 Ada, Xeon E5-2650 v4), defaults (960×640, 20 Hz,
+JPEG q75), everything below over the **public https URL**, not localhost.
+
+| | |
+|---|---|
+| frame size | 44 KB → **7.06 Mbit/s per viewer** at 20 fps |
+| one viewer, 120 s | 2396 frames, 19.96 fps, longest gap 350 ms, stream never dropped |
+| two viewers, **7 minutes**, one unbroken response each | 8392 and 8395 frames, 19.98 fps, longest gap **181 ms**, neither cut |
+| four viewers, 150 s, *while four remote players played a 45 s match* | 19.6 fps each, 6.92 Mbit/s each = **27.7 Mbit/s aggregate**, longest gap 0.9 s, all four alive at the end |
+| that match, over the tunnel | 319 inputs from 4 clients, **0 errors**, played to full time |
+| MJPEG time-to-first-byte | 46–270 ms |
+| inter-frame gap | p50 50 ms, p95 148 ms |
+| `POST /input` round trip | **p50 116 ms**, p95 147 ms, max 201 ms |
+| `GET /state` poll | p50 116 ms, p95 132 ms |
+| longest single tunnel run | 3 h 22 min, no reconnects needed |
+
+Those round trips are pod → Cloudflare's edge → pod, i.e. *twice* the pod-to-edge
+leg. A real player pays their own leg to the edge instead of the return one, so
+expect broadly similar numbers plus their home latency. Input is click-to-set-a-
+target, not twitch aiming, so this is not a gameplay problem.
+
+**Each player needs ~7 Mbit/s down**, and the pod needs ~28 Mbit/s up for four.
+That is the one hard requirement; a phone on a weak connection will fall behind.
+Drop it with `--render-hz 12 --width 640 --height 428 --quality 60` (~2 Mbit/s).
+
+### Caveats, and what was *not* tested
+
+* **Quick tunnels have no uptime guarantee.** Cloudflare says so on startup. The
+  URL changes every run, and there is no account, no DNS and no way to get the
+  same link back. That is the right trade for a private session and the wrong one
+  for anything scheduled.
+* **RunPod's port proxy was evaluated and rejected**: `https://<pod>-<port>
+  .proxy.runpod.net` returns a Cloudflare 404 for any port not declared as an
+  exposed HTTP port when the pod was created, and the ports that *are* declared
+  on this pod are already held by its own nginx. Changing that list needs a pod
+  restart. Measured, not assumed.
+* **Not tested: four real humans on four real home connections.** Everything
+  above was measured from the pod itself through the public URL, so the internet
+  leg is real but the last mile is not. Packet loss on a phone's LTE, a hotel
+  captive portal, and corporate proxies that buffer `multipart/x-mixed-replace`
+  are all unknowns.
+* **Not tested: a real browser.** `client.js` was reviewed and parse-checked, but
+  no Chrome or Safari ran it — there is no browser on this box. The server side
+  of every flow it drives *was* exercised over HTTP.
+* **The picture can freeze for a few seconds when the host is busy.** The same
+  four-viewer test run while a GPU training job had the box (load average 7.6)
+  gave 18.6 fps and a **4.8 s** gap, against 19.6 fps and 0.9 s on an idle box
+  (load 3.7). This is the server choosing to **drop frames, never ticks** (§6):
+  the match ran to full time either way and not one input was lost. It is not the
+  tunnel — all four viewers see the identical gap at the identical moment, and a
+  viewer on localhost sees it too. If you want a smooth picture, do not start a
+  training run during the match.
+
+### What changes when the players are remote
+
+| Failure | What happens |
+|---|---|
+| someone closes their laptop mid-match | their seat reads as empty after `--slot-timeout` (25 s) and the `scripted` baseline drives their creature; the match does not stall. Coming back with the same token resumes the seat if nobody took it |
+| the video stream dies | the browser re-opens it: on the `error` event with backoff, when the tab becomes visible again, when the OS reports the network is back, and when a pixel probe shows the picture frozen while the server's frame counter keeps climbing |
+| a phone walks out of wifi without closing the socket | `--stream-timeout` (15 s) drops the wedged viewer. Without it that thread blocks in `write()` until the kernel gives up ~15 minutes later, holding a `--max-streams` slot. Verified: a viewer that stops reading for 5 s is left alone and catches up; one that stops for 25 s is closed |
+| a player's connection is just *slow* | not a problem — `wait_frame` hands out the newest frame, never a queue, so a slow viewer silently drops frames instead of lagging behind. Only a viewer that takes in nothing at all for 15 s is cut |
+| someone shares the link wider than you meant | they can load the page and nothing else. `--max-streams` (12) caps how much upload strangers-with-a-code could burn |
+| a stranger's browser loads the page every day | seatless clients are forgotten after `--client-ttl` (900 s). Without it that dict grows forever and the spectator list fills with page loads |
+| two tabs from one person | two tokens, two spectators, and the second tab cannot take the first's seat. Harmless |
+
+| Flag | Default | |
+|---|---|---|
+| `--join-code` | none | see above; prefer `$ROWER_JOIN_CODE` |
+| `--max-streams` | `12` | concurrent MJPEG viewers |
+| `--stream-timeout` | `15` | seconds before a non-reading viewer is dropped |
+| `--client-ttl` | `900` | seconds before a seatless client is forgotten; `0` = never |
+| `--slot-timeout` | `25` | seconds before an idle seat can be taken by someone else |
 
 ## 2. Prove it works without four humans
 
@@ -235,6 +389,16 @@ browser  --POST /input {token, skill, u, v}-->  server (request thread)
 * **Reconnect is by token, not by socket.** A phone that sleeps and comes back
   resumes its seat; a seat silent for `--slot-timeout` seconds becomes claimable,
   but only when somebody actually asks for it.
+* **The join code gates token issuance, not endpoints.** Everything else already
+  had to resolve a token, so gating the one place tokens are minted closes every
+  door at once — the same structural argument as the line above. §1b.
+* **The browser re-opens its own video.** On a LAN the MJPEG `<img>` was set once
+  in the markup; over the internet it is a long-lived response across a CDN and a
+  phone that suspends radios, so `client.js` owns the `src` and reconnects on
+  error, on tab-visible, on network-back, and on a frozen-pixels probe that is
+  cross-checked against the server's frame counter (so a *legitimately* still
+  picture — the server dropping frames under load — is not mistaken for a dead
+  connection).
 * **Inputs apply at a tick boundary**, in the order seats → match control →
   inputs, so a claim that lands in the same tick as `start` is already visible
   when the demo header snapshots who is playing.

@@ -75,7 +75,7 @@ def _install_pytest_shim():
     return True
 
 
-FAST = ["test_recording", "test_lobby"]
+FAST = ["test_recording", "test_lobby", "test_gate"]
 SLOW = ["test_endtoend"]
 
 

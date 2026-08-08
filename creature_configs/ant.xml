@@ -1,0 +1,129 @@
+<mujoco model="ant">
+    <!-- MuJoCo Gym ant, adapted to this repo's creature conventions (see
+         ANT_SPRINT_PLAN.md). Hand-written, unlike the evolved creatures -
+         there is no .creature genotype for it.
+
+         Conventions honoured (creature.py + warp_port/scene.py both key on
+         them): bodies named seg0..seg8 with seg0 the root; joints segA_to_B;
+         motors motorA_to_B; one segN_site + segN_touch per body; torso_vel /
+         torso_gyro / torso_accel on the root site.
+
+         Morphology note: Gym's ant has four fixed "aux" hip-stub capsules as
+         jointless child bodies. Those are folded INTO seg0 as extra geoms here,
+         deliberately: it removes 4 jointless bodies, giving 9 bodies / 8 joints
+         / 9 touch sensors, which makes the proprio width 65 and act width 8 -
+         byte-identical to the two-arm rower's observation contract. A decoder
+         or policy architecture sized for one fits the other exactly.
+
+         mass_scale=27.5 relative to Gym's ant (density 5 -> 137.5, gear 150 ->
+         4125, armature 1 -> 27.5, damping 1 -> 27.5), per the invariance rule
+         in three_seg_worm.xml's header: density, gear, armature, damping scale
+         together, which leaves the creature's own motion exactly invariant
+         (F = ma) while bringing total mass to ~22 kg, the worm's class, so the
+         ball momentum ratio carries over to the drills.
+
+         Leg layout (top view), seg{i}=upper (hip seg0_to_i), seg{i+4}=lower
+         (ankle seg{i}_to_{i+4}):
+              seg2/6  +y  seg1/5
+                  \\    |    /
+              (x neg)  seg0  (x pos)
+                  /    |    \\
+              seg3/7  (y neg)  seg4/8       -->
+    <compiler angle="degree" />
+    <default>
+        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="4125" />
+        <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="137.5" />
+        <joint limited="true" armature="27.5" damping="27.5" solreflimit=".04 1" solimplimit="0 .8 .03" />
+    </default>
+    <asset>
+        <material name="self" rgba=".8 .6 .4 1" />
+    </asset>
+
+    <worldbody>
+        <body name="seg0" pos="0 0 0.75">
+            <camera name="floating" pos="-2.11 0 1.05" xyaxes="0 -1 0 .5 0 1" mode="trackcom" fovy="70" />
+            <camera name="egocentric" pos="0.3 0 .11" xyaxes="0 -1 0 0 0 1" fovy="90" />
+            <geom name="seg0_geom" type="sphere" pos="0 0 0" size="0.25" />
+            <!-- hip stubs, fused (see header) -->
+            <geom name="seg0_stub1" type="capsule" fromto="0 0 0  0.2  0.2 0" size="0.08" />
+            <geom name="seg0_stub2" type="capsule" fromto="0 0 0 -0.2  0.2 0" size="0.08" />
+            <geom name="seg0_stub3" type="capsule" fromto="0 0 0 -0.2 -0.2 0" size="0.08" />
+            <geom name="seg0_stub4" type="capsule" fromto="0 0 0  0.2 -0.2 0" size="0.08" />
+            <site name="seg0_site" type="sphere" pos="0 0 0" size="0.27" rgba="1 1 0 0.15" />
+
+            <!-- leg 1: +x +y -->
+            <body name="seg1" pos="0.2 0.2 0">
+                <joint name="seg0_to_1" type="hinge" axis="0 0 1" pos="0 0 0" range="-30 30" />
+                <geom name="seg1_geom" type="capsule" fromto="0 0 0 0.2 0.2 0" size="0.08" />
+                <site name="seg1_site" type="capsule" fromto="0 0 0 0.2 0.2 0" size="0.09" rgba="1 1 0 0.15" />
+                <body name="seg5" pos="0.2 0.2 0">
+                    <joint name="seg1_to_5" type="hinge" axis="-1 1 0" pos="0 0 0" range="30 70" />
+                    <geom name="seg5_geom" type="capsule" fromto="0 0 0 0.4 0.4 0" size="0.08" />
+                    <site name="seg5_site" type="capsule" fromto="0 0 0 0.4 0.4 0" size="0.09" rgba="1 1 0 0.15" />
+                </body>
+            </body>
+
+            <!-- leg 2: -x +y -->
+            <body name="seg2" pos="-0.2 0.2 0">
+                <joint name="seg0_to_2" type="hinge" axis="0 0 1" pos="0 0 0" range="-30 30" />
+                <geom name="seg2_geom" type="capsule" fromto="0 0 0 -0.2 0.2 0" size="0.08" />
+                <site name="seg2_site" type="capsule" fromto="0 0 0 -0.2 0.2 0" size="0.09" rgba="1 1 0 0.15" />
+                <body name="seg6" pos="-0.2 0.2 0">
+                    <joint name="seg2_to_6" type="hinge" axis="1 1 0" pos="0 0 0" range="-70 -30" />
+                    <geom name="seg6_geom" type="capsule" fromto="0 0 0 -0.4 0.4 0" size="0.08" />
+                    <site name="seg6_site" type="capsule" fromto="0 0 0 -0.4 0.4 0" size="0.09" rgba="1 1 0 0.15" />
+                </body>
+            </body>
+
+            <!-- leg 3: -x -y -->
+            <body name="seg3" pos="-0.2 -0.2 0">
+                <joint name="seg0_to_3" type="hinge" axis="0 0 1" pos="0 0 0" range="-30 30" />
+                <geom name="seg3_geom" type="capsule" fromto="0 0 0 -0.2 -0.2 0" size="0.08" />
+                <site name="seg3_site" type="capsule" fromto="0 0 0 -0.2 -0.2 0" size="0.09" rgba="1 1 0 0.15" />
+                <body name="seg7" pos="-0.2 -0.2 0">
+                    <joint name="seg3_to_7" type="hinge" axis="-1 1 0" pos="0 0 0" range="-70 -30" />
+                    <geom name="seg7_geom" type="capsule" fromto="0 0 0 -0.4 -0.4 0" size="0.08" />
+                    <site name="seg7_site" type="capsule" fromto="0 0 0 -0.4 -0.4 0" size="0.09" rgba="1 1 0 0.15" />
+                </body>
+            </body>
+
+            <!-- leg 4: +x -y -->
+            <body name="seg4" pos="0.2 -0.2 0">
+                <joint name="seg0_to_4" type="hinge" axis="0 0 1" pos="0 0 0" range="-30 30" />
+                <geom name="seg4_geom" type="capsule" fromto="0 0 0 0.2 -0.2 0" size="0.08" />
+                <site name="seg4_site" type="capsule" fromto="0 0 0 0.2 -0.2 0" size="0.09" rgba="1 1 0 0.15" />
+                <body name="seg8" pos="0.2 -0.2 0">
+                    <joint name="seg4_to_8" type="hinge" axis="1 1 0" pos="0 0 0" range="30 70" />
+                    <geom name="seg8_geom" type="capsule" fromto="0 0 0 0.4 -0.4 0" size="0.08" />
+                    <site name="seg8_site" type="capsule" fromto="0 0 0 0.4 -0.4 0" size="0.09" rgba="1 1 0 0.15" />
+                </body>
+            </body>
+        </body>
+    </worldbody>
+
+    <actuator>
+        <motor name="motor0_to_1" joint="seg0_to_1" />
+        <motor name="motor1_to_5" joint="seg1_to_5" />
+        <motor name="motor0_to_2" joint="seg0_to_2" />
+        <motor name="motor2_to_6" joint="seg2_to_6" />
+        <motor name="motor0_to_3" joint="seg0_to_3" />
+        <motor name="motor3_to_7" joint="seg3_to_7" />
+        <motor name="motor0_to_4" joint="seg0_to_4" />
+        <motor name="motor4_to_8" joint="seg4_to_8" />
+    </actuator>
+
+    <sensor>
+        <touch name="seg0_touch" site="seg0_site" />
+        <touch name="seg1_touch" site="seg1_site" />
+        <touch name="seg2_touch" site="seg2_site" />
+        <touch name="seg3_touch" site="seg3_site" />
+        <touch name="seg4_touch" site="seg4_site" />
+        <touch name="seg5_touch" site="seg5_site" />
+        <touch name="seg6_touch" site="seg6_site" />
+        <touch name="seg7_touch" site="seg7_site" />
+        <touch name="seg8_touch" site="seg8_site" />
+        <velocimeter name="torso_vel" site="seg0_site" />
+        <gyro name="torso_gyro" site="seg0_site" />
+        <accelerometer name="torso_accel" site="seg0_site" />
+    </sensor>
+</mujoco>

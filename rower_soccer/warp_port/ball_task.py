@@ -211,6 +211,9 @@ class SegmentedBallTask:
         self._reset_segments(idx)
         # qpos was written directly; xpos/sensordata are stale until forward().
         self._forward()
+        # The ball just teleported; re-baseline the contact diagnostic for
+        # these worlds so it measures THIS segment's displacement.
+        self._ball_track_respawn(idx)
 
     # -- spawn helpers (indexed; the base's _spawn_root writes ALL worlds) ---
     def _write_ball(self, idx, ball_xy):

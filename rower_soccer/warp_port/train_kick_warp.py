@@ -239,14 +239,11 @@ def run(args, task, make_env_fn, make_eval_fn):
     best_score = float("-inf")
     mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
-    if args.resume and os.path.exists(ckpt_path):
-        start_steps = load_checkpoint(trainer, ckpt_path)
-        print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
-    elif args.init_from:
-        # Warm start only on a fresh run: on --resume the checkpoint already
-        # holds these weights, further trained.
-        load_pretrained(ac, args.init_from, device=trainer.device)
-
+    # Freeze BEFORE any checkpoint load: it rebuilds the optimizer over
+    # only the trainable parameters, and load_checkpoint restores a saved
+    # optimizer state into it. Freeze afterwards and a frozen-decoder run
+    # can be checkpointed but never resumed -- the saved single reduced
+    # parameter group does not match a full-parameter Adam.
     if args.freeze_decoder:
         if args.plain:
             raise SystemExit("--freeze-decoder is meaningless with --plain: the "
@@ -272,6 +269,15 @@ def run(args, task, make_env_fn, make_eval_fn):
         # frozen weights cannot drift via stale moments.
         trainer.opt = torch.optim.Adam(
             [p for p in ac.parameters() if p.requires_grad], lr=args.lr)
+
+    if args.resume and os.path.exists(ckpt_path):
+        start_steps = load_checkpoint(trainer, ckpt_path)
+        print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
+    elif args.init_from:
+        # Warm start only on a fresh run: on --resume the checkpoint already
+        # holds these weights, further trained.
+        load_pretrained(ac, args.init_from, device=trainer.device)
+
 
     print(f"[setup] task={task} worlds={env.n} obs={env.obs_dim} "
           f"act={env.act_dim} proprio={len(env.proprio_indices)} "

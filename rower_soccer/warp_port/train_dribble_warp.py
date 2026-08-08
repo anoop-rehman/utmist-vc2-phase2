@@ -66,6 +66,15 @@ def main():
                    help="max log_std (default 0.0 => std<=1.0, matching the "
                         "[-1,1] action clamp); pass a large value to disable")
     p.add_argument("--z-dim", type=int, default=16)
+    p.add_argument("--freeze-decoder", action="store_true",
+                   help="Freeze the low-level controller (decoder + action head) "
+                        "and train only the task expert that emits z. This is the "
+                        "NPMP/Liu-et-al. arrangement: the motor skill is learned "
+                        "once by follow and reused, so every drill shares one "
+                        "z-space by construction. Pair with --init-from.")
+    p.add_argument("--freeze-log-std", action="store_true",
+                   help="with --freeze-decoder, also hold the inherited "
+                        "per-joint exploration noise")
     p.add_argument("--init-from", default=None,
                    help="follow checkpoint to warm-start from (checkpoint.pt or "
                         "latest.pt). Task encoder + critic input layer re-init; "
@@ -211,6 +220,8 @@ def main():
                          energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
                          fixed_start=args.fixed_start,
                          target_cone=args.target_cone)
+    if args.plain and (args.freeze_decoder or args.init_from):
+        raise SystemExit("--plain has no decoder to freeze or warm-start into.")
     if args.plain:
         ac = SimpleActorCritic(env.obs_dim, env.act_dim)
     else:
@@ -230,6 +241,36 @@ def main():
     best_score = float("-inf")
     mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
+    if args.freeze_decoder:
+        # Freeze the low-level controller and train only the task expert that
+        # emits z -- the NPMP/Liu-et-al. arrangement, and the whole reason the
+        # drills share one decoder. Ported from train_follow_warp.
+        #
+        # This runs BEFORE any checkpoint load on purpose: it rebuilds the
+        # optimizer over only the live parameters, and load_checkpoint restores
+        # a saved optimizer state into it. Freeze afterwards and a frozen run
+        # can be checkpointed but never resumed -- the saved single reduced
+        # parameter group does not match a full-parameter Adam.
+        frozen = 0
+        for mod in (ac.mlp_extractor.decoder, ac.action_net):
+            for prm in mod.parameters():
+                prm.requires_grad_(False)
+                frozen += prm.numel()
+        if args.freeze_log_std:
+            if ac.state_dependent_std:
+                for prm in ac.log_std_net.parameters():
+                    prm.requires_grad_(False)
+                    frozen += prm.numel()
+            else:
+                ac.log_std.requires_grad_(False)
+                frozen += ac.log_std.numel()
+        trainable = sum(p.numel() for p in ac.parameters() if p.requires_grad)
+        print(f"[setup] decoder FROZEN: {frozen:,} params held, "
+              f"{trainable:,} trainable (expert + critic"
+              f"{'' if args.freeze_log_std else ' + log_std'})", flush=True)
+        trainer.opt = torch.optim.Adam(
+            [p for p in ac.parameters() if p.requires_grad], lr=args.lr)
+
     if args.resume and os.path.exists(ckpt_path):
         start_steps = load_checkpoint(trainer, ckpt_path)
         print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
@@ -237,7 +278,19 @@ def main():
         # Warm start only on a fresh run: on --resume the checkpoint already
         # contains these weights (further trained), and re-seeding from follow
         # would throw away the dribble progress it holds.
+        #
+        # Hard-fail if nothing reached the decoder. load_pretrained copies only
+        # shape-matching tensors, so a prior built for a different body -- or
+        # for a stale obs contract -- is skipped in total silence and the run
+        # trains from scratch while reporting a warm start.
+        before = ac.mlp_extractor.decoder[0].weight.detach().clone()
         load_pretrained(ac, args.init_from, device=trainer.device)
+        if torch.equal(before, ac.mlp_extractor.decoder[0].weight.detach()):
+            raise SystemExit(
+                f"\n--init-from {args.init_from} transferred NOTHING to the "
+                f"decoder.\nThis env's proprio is {len(env.proprio_indices)} "
+                f"wide; the checkpoint's decoder expects something else.\n"
+                f"Check --creature-xml matches the body the prior was trained on.")
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"proprio={len(env.proprio_indices)} task={len(env.task_indices)} "
@@ -269,6 +322,10 @@ def main():
         eta_min = max(0.0, (deadline - now) / 60)
         if it % 5 == 0:
             fit = float(env.fitness().mean())
+            # Ball contact, not reward, is this drill's real gate: every failed
+            # dribble run in the history reported plausible fitness while never
+            # touching the ball (docs/STAGE2_MULTITASK.md 8).
+            b_disp, b_frac, b_spd = env.ball_stats()
             # diverged: world-steps whose physics went non-finite (see ppo.collect).
             # Expected to be 0 or a trickle. If it climbs, the contact model is wrong
             # and the run is training on garbage -- do not ignore it.
@@ -276,6 +333,7 @@ def main():
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
                   f"fitness={fit:.3f} std={stats['std']:.3f} "
+                  f"ball_disp={b_disp:.2f}m moved={100*b_frac:.0f}% "
                   f"cone={np.rad2deg(env.target_cone):.0f}deg "
                   f"diverged={trainer.n_diverged:,}", flush=True)
             if use_wandb:
@@ -286,6 +344,9 @@ def main():
                            # Unshaped Table-S3 fitness: the gate metric, and the
                            # one number the velocity shaping terms cannot inflate.
                            "train/fitness": fit,
+                           "train/ball_disp": b_disp,
+                           "train/ball_moved_frac": b_frac,
+                           "train/ball_speed": b_spd,
                            "train/entropy": stats["ent"], "train/std": stats["std"],
                            "train/cone_deg": float(np.rad2deg(env.target_cone)),
                            "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"]})

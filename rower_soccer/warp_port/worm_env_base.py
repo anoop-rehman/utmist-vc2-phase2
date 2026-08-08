@@ -389,6 +389,49 @@ class WormEnv:
     def _ball_vel_xyz(self):
         return self.qvel[:, self.bv:self.bv + 3]
 
+    # -- ball-contact diagnostic -------------------------------------------
+    # THE metric for every ball drill, and it is not optional. docs/
+    # STAGE2_MULTITASK.md 8 records that every failed dribble run reported
+    # plausible, near-identical fitness under three different reward functions
+    # -- because the creature never touched the ball, and what was actually
+    # being plotted was the target drifting away from a stationary ball.
+    # Fitness structurally cannot distinguish that from progress. Displacement
+    # from spawn can, and it is one cheap tensor op per step.
+    def _ball_track_reset(self):
+        """Call from _reset_state once the ball is placed."""
+        self.ball_spawn_xy = self._ball_xy().clone()
+        self.ball_max_disp = torch.zeros(self.n, device=self.device)
+
+    def _ball_track_respawn(self, idx):
+        """Re-baseline the tracked worlds after the ball is teleported. The
+        segmented strike drills (kick/shoot) re-place the ball mid-episode;
+        without this, displacement would be measured from a spawn point the
+        ball no longer has any relation to."""
+        if getattr(self, "ball_spawn_xy", None) is None:
+            return
+        self.ball_spawn_xy[idx] = self._ball_xy()[idx]
+        self.ball_max_disp[idx] = 0.0
+
+    def _ball_track_step(self, done):
+        if getattr(self, "ball_spawn_xy", None) is None:
+            return
+        d = torch.linalg.norm(self._ball_xy() - self.ball_spawn_xy, dim=-1)
+        self.ball_max_disp = torch.maximum(self.ball_max_disp, d)
+        if done:
+            # Latch at episode end. The instantaneous value is 0 just after
+            # every reset, so an unlatched curve swings with episode phase and
+            # is unreadable.
+            self.ep_ball_disp = self.ball_max_disp.clone()
+
+    def ball_stats(self):
+        """(mean max displacement from spawn, fraction of worlds that moved it
+        > 0.5 m, mean ball speed now), over the last COMPLETED episode."""
+        disp = getattr(self, "ep_ball_disp", None)
+        if disp is None:
+            return 0.0, 0.0, 0.0
+        return (float(disp.mean()), float((disp > 0.5).float().mean()),
+                float(torch.linalg.norm(self._ball_vel_xy(), dim=-1).mean()))
+
     # -- spawn helper -------------------------------------------------------
     def _spawn_root(self, xy=None, yaw=None, quat=None):
         """Write the creature root freejoint (qpos already zeroed by reset()).
@@ -450,6 +493,8 @@ class WormEnv:
         self.prev_ctrl = torch.zeros(self.n, self.act_dim, device=self.device)
         self._forward()
         self.reward.reset(self)   # after forward(): frames/ball positions valid
+        if self.meta.has_ball:
+            self._ball_track_reset()
         return self._obs()
 
     def _sanitize(self):
@@ -489,6 +534,8 @@ class WormEnv:
         self._update_task()
         self.t += 1
         done = self.t >= self.episode_steps
+        if self.meta.has_ball:
+            self._ball_track_step(done)
         rew = self._regularize(self.reward(self), a)
         return self._obs(), rew, done
 

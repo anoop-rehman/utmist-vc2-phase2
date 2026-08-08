@@ -21,15 +21,42 @@ from dm_control.locomotion.soccer.team import RGBA_BLUE, RGBA_RED  # noqa: E402
 CREATURE_XMLS = {
     "rower": os.path.join(_REPO_ROOT, "creature_configs", "two_arm_rower_blueprint.xml"),
     "worm": os.path.join(_REPO_ROOT, "creature_configs", "three_seg_worm.xml"),
+    # The ant sprint's validation body (docs/ANT_SPRINT_PLAN.md). Same 8
+    # actuators / 65-wide proprio as the rower, so every trained architecture
+    # dimension carries over to the creature swap unchanged.
+    "ant": os.path.join(_REPO_ROOT, "creature_configs", "ant.xml"),
 }
 
 # Team composition: rower attacks, worm defends (project default).
 DEFAULT_TEAM = ("rower", "worm")
 
 
-def make_creature(kind="rower", team="home"):
+def make_creature(kind="rower", team="home", expose_root_pose=False):
+    """One creature walker.
+
+    expose_root_pose enables the `absolute_root_pos` / `absolute_root_mat`
+    observables. It is FALSE for drills and TRUE for the soccer env, and the
+    asymmetry is deliberate:
+
+    * The drills' observation is the trained obs contract (ant/rower: 65 proprio
+      + task). Enabling two more keys there would silently widen it to 77 and
+      every checkpoint would slice the wrong columns.
+    * The soccer env needs them. dm_soccer's `CoreObservablesAdder` enables only
+      `walker.observables.proprioception` + the kinematic sensors, and root pose
+      is (correctly) not in proprioception -- but `soccer_bridge.py` and, after
+      it, WS3's SkillController rebuild each skill's egocentric task block
+      (`target_ego`, ball targets, ...) from the root pose, so without these two
+      keys the bridge raises KeyError('absolute_root_pos') and no drill policy
+      can be driven inside soccer at all. They are extra keys in the soccer
+      observation dict, never part of any policy's input vector -- consumers
+      select by name.
+    """
     rgba = RGBA_BLUE if team == "home" else RGBA_RED
-    return Creature(CREATURE_XMLS[kind], marker_rgba=rgba)
+    creature = Creature(CREATURE_XMLS[kind], marker_rgba=rgba)
+    if expose_root_pose:
+        creature.observables.absolute_root_pos.enabled = True
+        creature.observables.absolute_root_mat.enabled = True
+    return creature
 
 
 def make_soccer_env(home_team=DEFAULT_TEAM, away_team=DEFAULT_TEAM,
@@ -42,8 +69,8 @@ def make_soccer_env(home_team=DEFAULT_TEAM, away_team=DEFAULT_TEAM,
         home_team = ("rower",) * n_home
     if n_away is not None:
         away_team = ("rower",) * n_away
-    home = [make_creature(k, "home") for k in home_team]
-    away = [make_creature(k, "away") for k in away_team]
+    home = [make_creature(k, "home", expose_root_pose=True) for k in home_team]
+    away = [make_creature(k, "away", expose_root_pose=True) for k in away_team]
     return create_soccer_env(
         home_players=home,
         away_players=away,

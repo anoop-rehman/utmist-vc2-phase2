@@ -131,7 +131,20 @@ training — the game is playable with follow+dribble first, kick/shoot hot-add.
 
 ## Integration checklist (WS5 owns)
 
-- [ ] ant in `CREATURE_XMLS`; 4-ant soccer env steps ≥ realtime on target host
+- [x] ant in `CREATURE_XMLS`; 4-ant soccer env steps ≥ realtime on target host
+      — **2.8x realtime idle** (9.0 ms/control step), **1.8x with 640×480
+      top-down rendering in the loop**, on a Xeon E5-2650 v4 @ 2.2 GHz. That
+      CPU is slower per core than any current laptop, so **host the server on
+      the laptop; no pod + port-forward is needed**. (Under heavy contention
+      from four concurrent agents the same bench read 1.16x — still above
+      realtime, but the game host should not be sharing a box with training.)
+      Shadows/MSAA must stay off (four 8192² shadowmaps ≈ 100 ms/frame).
+- [x] GPU→CPU sim2sim gap measured and closed out — see the section below
+- [x] `soccer_bridge` / SkillController can actually be driven inside soccer
+      (needed `absolute_root_pos`/`absolute_root_mat` enabled on the soccer
+      walkers; it raised `KeyError` before — fixed in `envs/build.py`)
+- [x] env smokes: `MUJOCO_GL=egl .venv/bin/python -m tests.integration_smoke`
+      (6/6; add `--warp` for the GPU/CPU observation-parity check)
 - [ ] SkillController drives all 4 skills in CPU soccer; mid-episode switching clean
 - [ ] 4 slots claimable from 4 devices on LAN; inputs isolated per slot
 - [ ] demo file: record → replay is deterministic; schema versioned
@@ -154,17 +167,108 @@ the first place.
 the property that makes it easy to train should also make it far less
 chaos-sensitive. Untested assumption, so test it early and cheaply.
 
-**WS5 owns an early gap probe** (do this in P1, before WS4 commits to a
-backend): run `follow_ant_v1/best.pt` deterministically in the warp follow env
-and in the CPU drill/soccer path from matched initial states; report
-divergence over 15 s and fitness in both. Then:
+### PROBE RESULT — 2026-08-08 (WS5). Verdict: **no escalation. Build the CPU dm_control game as planned.**
 
-- gap small → CPU dm_control game as planned (simplest, laptop-hostable).
-- gap large → escalate, in order of cost: (a) stiffen/soften the CPU side's
-  solref toward warp's effective contact behaviour, (b) brief CPU-side
-  finetune of the drill policies, (c) build a warp 2v2 game backend (the
-  expensive option this sprint was scoped to avoid — and which self-play will
-  need eventually anyway, so it is not wasted work, just not now).
+`follow_ant_v1/best.pt`, deterministic (distribution mean, never sampled), 15 s
+episodes, 6 episodes, matched initial states — warp's root pose, root velocity,
+joint angles, joint velocities, target and target velocity all copied into the
+dm_control drill.
+
+| arm | fitness (median) | root-trajectory divergence vs warp (median @1 s / @5 s / @15 s) |
+|---|---|---|
+| **warp** (training sim) | **0.905** | — |
+| **CPU dm_control**, closed loop | **0.892** | 0.48 m / 0.03 m / **0.047 m** |
+| CPU, warp's actions replayed open-loop | 0.375 | 0.27 m / 1.43 m / 1.23 m |
+| CPU with the pre-fix observation (below) | 0.284 | 0.46 m / 1.96 m / 4.65 m |
+
+Read the first two rows together with the third. The backends really do differ
+— replay warp's exact action sequence open-loop on CPU and the paths separate
+by metres, so the contacts are as different as documented. **It does not matter
+closed-loop.** Per-episode CPU-vs-warp separation after a full 15 s, all six
+episodes: **0.066, 0.125, 0.026, 0.061, 0.025, 0.033 m**. Per-episode fitness
+(warp → CPU): 0.917→0.899, 0.929→0.948, 0.899→0.866, 0.911→0.910,
+0.086→0.086, 0.897→0.886. The two sims separate over the first second (the
+spawn transient) and the policy then pulls them back together and holds them
+within centimetres. The worm's 0.4 m in 0.6 s was a body that topples; the ant
+is statically stable and its feedback loop absorbs the gap. The bet in the
+paragraph above was right.
+
+The 0.086 pair is the freeze in (3) below — and note it fired on the **same
+seed in both backends, to three decimal places**. Even the policy's failure
+mode is reproduced identically across the sim2sim boundary.
+
+Artifacts: `runs_v2/follow_ant_v1/videos/ws5_sim2sim_warp_vs_cpu.mp4`
+(side-by-side, left warp / right dm_control, same policy, same initial state —
+warp 0.939 vs CPU 0.932 on that episode) and
+`ws5_ant_follow_in_soccer_dithered.mp4` (the ant driven by `soccer_bridge`
+inside the real CPU soccer env). Both also in
+`gs://vc2-2026-checkpoints/follow_ant_v1/videos/`.
+
+Consequences, in order of importance:
+
+1. **WS4 is unblocked**: keep the authoritative CPU dm_control soccer sim. No
+   solref stiffening, no CPU finetune, no warp 2v2 backend this sprint.
+2. **The gap we were actually carrying was an OBSERVATION bug, not physics.**
+   `warp_port/follow_env.py` scales the accelerometer `/100` and clips to
+   ±50 (it is otherwise the only unbounded input, spiking to ~5,700 m/s² on
+   contact); `creature.py` returned it raw, so the dm_control path fed the same
+   policy a different vector. That alone cost fitness 0.89 → 0.28 and 4.6 m of
+   divergence — i.e. every "sim2sim gap" number taken on the CPU drill was
+   dominated by it. Fixed in `creature.py: CreatureObservables.sensors_accelerometer`
+   (the scaling now lives with the observation, so drills, `soccer_bridge`,
+   the play server and WS3's SkillController all inherit it). All live
+   checkpoints post-date the warp-side scaling (2026-07-15), so nothing needs
+   retraining. `tests/integration_smoke.py` asserts the contract.
+3. **A real robustness bug, in BOTH backends** (so: not sim2sim, and it will
+   bite the game): `follow_ant_v1` has an absorbing "sit down and do nothing"
+   fixed point — torso height collapses to 0.35 m (vs 0.40-0.47 m walking),
+   the action goes constant, and the ant never moves again (root path 0.27 m in
+   15 s). It fired on **1 of 6 probe seeds, in both backends identically**, and
+   **deterministically whenever the commanded target is
+   within ~1° of dead ahead**, which is exactly what a human clicking "go
+   there" produces. Bearing sweep, 3 m away, CPU drill, **static** target,
+   400 steps (fitness = mean `exp(-0.5·d)`; torso height 0.35 m is the frozen
+   pose, ~0.42-0.51 m is walking):
+
+   | bearing | 0° | 0.5° | 1° | 2° | 5° | 10° | 30° | 90° | 180° |
+   |---|---|---|---|---|---|---|---|---|---|
+   | fitness | **0.23** | **0.23** | 0.64 | 0.81 | 0.84 | 0.83 | 0.81 | 0.83 | 0.76 |
+   | height  | 0.35 | 0.36 | 0.48 | 0.42 | 0.47 | 0.41 | 0.40 | 0.44 | 0.51 |
+
+   The ant is bilaterally symmetric, so a target with zero lateral offset is a
+   symmetric observation and the policy answers it with a symmetric,
+   net-zero-thrust action. A static target is fine at every other bearing
+   (0.64-0.84) — this is *not* "the drill only trained on moving targets".
+   Mitigations measured at bearing 0°:
+
+   | mitigation | fitness |
+   |---|---|
+   | none | 0.23 |
+   | target drifts 0.05 m/s sideways | 0.23 (insufficient) |
+   | target drifts 0.20 m/s sideways | 0.71 |
+   | Gaussian action noise σ=0.05 | 0.23 (insufficient) |
+   | Gaussian action noise σ=0.20 | 0.69 |
+   | command the bearing 2° off instead | 0.81 |
+
+   **WS3/WS4 action** (cheapest and best of the three): `SkillController` must
+   never hand the follow expert a target with `|target_ego_y| ≈ 0` — rotate the
+   commanded bearing by ~3° when it is under that. 3° costs 5 cm of aim at 1 m,
+   i.e. nothing. **Validated end to end in the real CPU soccer env** via
+   `soccer_bridge`, ant commanded 3 m dead ahead:
+
+   | | t=0 | 2 s | 4 s | 6 s | 15 s |
+   |---|---|---|---|---|---|
+   | no dither | 2.99 m | 2.94 | 2.94 | 2.94 | 2.94 (frozen, h 0.35) |
+   | 3° dither | 2.99 m | 0.58 | 0.11 | 0.02 | 0.17 (arrived, holds) |
+
+   **WS1 action**: worth one retrain arm with stationary targets in the
+   curriculum; today's checkpoint is usable *with* the dither and unusable
+   without it.
+4. Note for `play_server.py`: it already pins `env.target_vel[0] = 0.0` (a
+   static target). That is safe for the worm and unsafe for the ant — see 3.
+
+Repro: the probe scripts are the ones described above; the CPU/warp
+observation-parity assertion is `tests/integration_smoke.py --warp`.
 
 ## Open question (needs answer before launch)
 

@@ -187,6 +187,36 @@ class CreatureObservables(legacy_base.WalkerObservables):
     return observable.MJCFFeature('qvel', self._entity.observable_joints)
 
   @composer.observable
+  def sensors_accelerometer(self):
+    """Torso accelerometer, SCALED /100 and clipped to +/-50.
+
+    This is part of the observation contract, not a preference. Every policy is
+    trained in mujoco_warp, and `warp_port/follow_env.py:_obs()` applies exactly
+    this transform before the accelerometer reaches the network (see the long
+    comment there: raw contact impacts spike it to ~5,700 m/s^2 while every other
+    input sits near 1, which both dominates the first layer and blew up a
+    training run through the PPO ratio). dm_control's base walker returns the
+    sensor raw, so until this override existed the CPU path fed the SAME policy a
+    different observation -- a pure obs bug that reads as a physics sim2sim gap.
+
+    Measured on `follow_ant_v1/best.pt`, 15 s episodes from warp-matched initial
+    states (WS5 sim2sim probe, 2026-08-08; medians over 6 episodes):
+
+        arm                          fitness   traj divergence vs warp @15 s
+        warp (training sim)            0.905    --
+        CPU, raw accelerometer         0.284    4.65 m      <- the bug
+        CPU, this scaling              0.892    0.047 m
+
+    i.e. the entire apparent CPU/GPU gap on the ant was this line. Keep it in
+    lockstep with the warp envs; if one changes, both change.
+    """
+    sensors = self._entity.mjcf_model.sensor.accelerometer
+    def scaled(physics):
+      raw = np.reshape(physics.bind(sensors).sensordata, -1)
+      return np.clip(raw / 100.0, -50.0, 50.0)
+    return observable.Generic(scaled)
+
+  @composer.observable
   def bodies_pos(self):
     """Position of bodies relative to root, in the egocentric frame."""
     bodies = self._entity.bodies

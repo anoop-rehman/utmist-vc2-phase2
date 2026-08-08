@@ -188,3 +188,7 @@ videos/
 
 # MkDocs build output
 /site/
+
+# Agent worktrees (git worktree checkouts created by parallel agents; the work
+# reaches the branch as commits, never as files under here).
+.claude/worktrees/

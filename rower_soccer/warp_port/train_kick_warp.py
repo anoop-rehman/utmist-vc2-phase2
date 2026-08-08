@@ -40,6 +40,9 @@ def make_env(args, num_worlds, seed, use_graph=True):
         w_player_to_ball=args.w_player_to_ball, w_ball_to_cmd=args.w_ball_to_cmd,
         approach_scale=args.approach_scale, reward_mode=args.reward_mode,
         reward_kind=args.reward_kind, w_arrive=args.w_arrive,
+        segment_seconds_range=tuple(args.segment_secs_range),
+        target_dist_range=tuple(args.target_dist_range),
+        time_coef=args.time_coef,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         floor_half=args.floor_half, fixed_start=args.fixed_start,
         target_cone=args.target_cone)
@@ -166,6 +169,17 @@ def main():
                         "which is what shoot already does.")
     p.add_argument("--w-arrive", type=float, default=3.0,
                    help="weight of the arrival term under --reward-kind point")
+    p.add_argument("--segment-secs-range", type=float, nargs=2, default=[2.0, 6.0],
+                   help="Table S2's randomized kick window. This, not a contact "
+                        "budget or a body penalty, is what separates kick from "
+                        "dribble: the ant tops out near 0.6 m/s, so it cannot "
+                        "carry the ball to a 4-8 m target inside 2-6 s.")
+    p.add_argument("--target-dist-range", type=float, nargs=2, default=[4.0, 8.0],
+                   help="Table S2 calls the kick target DISTANT; randomized per "
+                        "attempt so the policy cannot memorise one range")
+    p.add_argument("--time-coef", type=float, default=0.0,
+                   help="decay arrival by exp(-k*t) at closest approach, so a "
+                        "fast pass beats a slow trickle. 0 = paper-faithful")
     p.add_argument("--target-cone", type=float, default=0.0,
                    help="stage 2+: command may sit up to +/- this many RADIANS "
                         "off the colinear line (with --fixed-start)")

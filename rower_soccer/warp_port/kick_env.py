@@ -35,7 +35,7 @@ import torch
 from rower_soccer.warp_port.ball_task import (KickReward, KickToPointReward,
                                               SegmentedBallTask)
 from rower_soccer.warp_port.scene import BallSpec
-from rower_soccer.warp_port.worm_env_base import WormEnv
+from rower_soccer.warp_port.worm_env_base import CONTROL_DT, WormEnv
 
 
 class WarpKickEnv(SegmentedBallTask, WormEnv):
@@ -50,11 +50,36 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                  rew_clip=(-10.0, 10.0), fixed_start=False, target_cone=0.0,
                  reward=None, floor_half=10.0, use_gpu=True, backend_cls=None,
                  reward_coef=0.5, out_of_play_dist=12.0,
-                 reward_kind="direction", w_arrive=3.0):
+                 reward_kind="direction", w_arrive=3.0,
+                 segment_seconds_range=(2.0, 6.0), target_dist_range=(4.0, 8.0),
+                 target_z=None, time_coef=0.0):
         self._ball = ball
         self.ball_spawn_range = ball_spawn_range
         self.target_dist = target_dist
         self._segment_seconds = segment_seconds
+        # Paper-faithful kick-to-target (Liu et al. 2022, Table S2): "a small
+        # window of time (randomized between two and six seconds) in which to
+        # manoeuvre the ball and kick it to a DISTANT fixed target".
+        #
+        # The randomized window is the mechanism that separates kick from
+        # dribble, and it does so without constraining the body at all. The ant
+        # tops out around 0.6 m/s, so in a 2-6 s window it can cover at most
+        # ~3.6 m -- it physically CANNOT carry the ball to a 4-8 m target in
+        # time, and must strike it. That is why no contact budget (which the
+        # paper applies to `shoot`, not to kick) and no release gate are needed
+        # here. Randomizing the window also stops the policy timing its swing to
+        # a fixed clock.
+        self._segment_seconds_range = segment_seconds_range
+        self._target_dist_range = target_dist_range
+        # The target is a POINT IN SPACE, not a spot on the floor. Grading in xy
+        # only would score a ball sailing two metres OVER the target as a
+        # perfect pass, which is not a pass. Defaults to the ball's resting
+        # centre height, i.e. "at the receiver's feet".
+        self._target_z = target_z
+        # Optional decay on how long the ball took to get there: a fast pass and
+        # a slow trickle should not score alike. Off by default (0.0), because
+        # the paper's window already bounds the time.
+        self._time_coef = time_coef
         self._speed_clip = speed_clip
         # Public mutable knobs the trainer / eval set at runtime, same names as
         # dribble's so the trainers stay interchangeable.
@@ -88,21 +113,37 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         return 12  # ball_ego(6) + target_ego3(3) + cmd_dir_ego3(3)
 
     def _task_init(self):
-        self._init_segments(segment_seconds=self._segment_seconds,
+        self._init_segments(segment_seconds=max(self._segment_seconds,
+                                                self._segment_seconds_range[1]),
                             speed_clip=self._speed_clip)
         self.ball_spawn_range = self._clamped_spawn_range(self.ball_spawn_range)
-        # Arrival tracking, mirroring shoot's seg_goal_best. `seg_target_best` is
-        # the CLOSEST the ball has come to the commanded point this segment, so a
-        # kick is graded on where the ball actually got, not on how fast it left.
         dev = self.device
+        if self._target_z is None:
+            self._target_z = float(self.meta.ball_radius)
+        # Per-world segment budget, redrawn on every restart (Table S2's 2-6 s).
+        # `segment_steps` from the base stays as the hard ceiling.
+        lo, hi = self._segment_seconds_range
+        self._seg_lo = max(1, int(round(lo / CONTROL_DT)))
+        self._seg_hi = max(self._seg_lo, int(round(hi / CONTROL_DT)))
+        self.seg_limit = torch.full((self.n,), float(self._seg_hi), device=dev)
+        # `seg_target_best` is the CLOSEST the ball has come to the target this
+        # segment -- "passes through" semantics, not "stops on". A ball that
+        # rockets through the receiver's feet is a good pass; one that has to be
+        # weighted to die exactly there is a putt, and not what a game wants.
         self.seg_target_best = torch.full((self.n,), float(self.target_dist),
                                           device=dev)
+        self.seg_best_t = torch.zeros(self.n, device=dev)   # when that happened
         self.target_fit_sum = torch.zeros(self.n, device=dev)
         self.prev_target_fit_sum = torch.zeros(self.n, device=dev)
         self.prev_n_segments = torch.zeros(self.n, device=dev)
 
+    def _target_xyz(self):
+        z = torch.full((self.n, 1), self._target_z, device=self.device)
+        return torch.cat([self.target_xy, z], -1)
+
     def _target_dist_now(self):
-        return torch.linalg.norm(self._ball_xy() - self.target_xy, dim=-1)
+        """3-D ball-to-target distance (see _target_z on why not xy)."""
+        return torch.linalg.norm(self._ball_xyz() - self._target_xyz(), dim=-1)
 
     def _task_obs(self):
         return torch.cat([self._ball_ego6(),
@@ -122,10 +163,12 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         # speed thrown away, while fitness rose the whole run. shoot never had
         # this bug because it keeps its segment open and scores arrival.
         self._bank(released)
-        self.seg_target_best = torch.minimum(self.seg_target_best,
-                                             self._target_dist_now())
+        d_now = self._target_dist_now()
+        closer = d_now < self.seg_target_best
+        self.seg_best_t = torch.where(closer, self.seg_t, self.seg_best_t)
+        self.seg_target_best = torch.minimum(self.seg_target_best, d_now)
 
-        timeout = self.seg_t >= self.segment_steps
+        timeout = self.seg_t >= self.seg_limit
         # Out of play: the ball has rolled so far past the target that the
         # segment cannot be rescued, so holding it open only wastes steps.
         out = self._target_dist_now() > self.out_of_play_dist
@@ -135,9 +178,21 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         self._bank(end)
         if bool(end.any()):
             idx = end.nonzero(as_tuple=True)[0]
-            self.target_fit_sum[idx] += torch.exp(
-                -self._reward_coef * self.seg_target_best[idx])
+            self.target_fit_sum[idx] += self.arrival()[idx]
         self._close_segments(end)
+
+    def arrival(self):
+        """exp(-c*d) at closest approach, optionally decayed by how long it took.
+
+        The paper's kick-to-target fitness is exp(-1/2 ||x_ball - x_target||)
+        (Table S3). Same form here; `time_coef` (default 0, i.e. paper-faithful)
+        is the only addition, for when a fast pass should beat a slow one by
+        more than the window alone enforces.
+        """
+        a = torch.exp(-self._reward_coef * self.seg_target_best)
+        if self._time_coef:
+            a = a * torch.exp(-self._time_coef * self.seg_best_t * CONTROL_DT)
+        return a
 
     # -- spawning -----------------------------------------------------------
     def _spawn_worlds(self, idx, root_xy=None, yaw=None):
@@ -186,12 +241,25 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
             cang = self._rand(k) * (2 * np.pi)
         cmd = torch.stack([torch.cos(cang), torch.sin(cang)], -1)
         self.cmd_dir[idx] = cmd
-        self.target_xy[idx] = ball_xy + cmd * self.target_dist
-        # Baseline arrival at the spawn separation, so a segment that never
-        # touches the ball scores exp(-c * target_dist) rather than a free 1.0.
-        if hasattr(self, "seg_target_best"):
-            self.seg_target_best[idx] = torch.linalg.norm(
-                ball_xy - self.target_xy[idx], dim=-1)
+        if hasattr(self, "seg_limit"):
+            # Redraw the window and the target range per attempt (Table S2).
+            t0, t1 = self._target_dist_range
+            dist = t0 + (t1 - t0) * self._rand(k)
+            self.target_xy[idx] = ball_xy + cmd * dist.unsqueeze(-1)
+            self.seg_limit[idx] = torch.randint(
+                self._seg_lo, self._seg_hi + 1, (k,), device=self.device).float()
+            # Baseline arrival at the spawn separation, so a segment that never
+            # touches the ball scores exp(-c*d0) rather than a free 1.0.
+            ball_xyz = torch.cat(
+                [ball_xy, torch.full((k, 1), float(self.meta.ball_radius),
+                                     device=self.device)], -1)
+            tgt_xyz = torch.cat(
+                [self.target_xy[idx], torch.full((k, 1), self._target_z,
+                                                 device=self.device)], -1)
+            self.seg_target_best[idx] = torch.linalg.norm(ball_xyz - tgt_xyz, dim=-1)
+            self.seg_best_t[idx] = 0.0
+        else:
+            self.target_xy[idx] = ball_xy + cmd * self.target_dist
 
     def _reset_state(self):
         n = self.n

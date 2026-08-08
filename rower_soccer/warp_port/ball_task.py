@@ -378,8 +378,7 @@ class KickToPointReward(_StrikeReward):
     def __call__(self, env):
         # Paid once, on the step the segment closes -- env.seg_reset is exactly
         # that set (it is assigned in _close_segments for the worlds that ended).
-        arrived = torch.exp(-self.reward_coef * env.seg_target_best)
-        pay = self.w_arrive * arrived * env.seg_reset.float()
+        pay = self.w_arrive * env.arrival() * env.seg_reset.float()
         return (pay + self.w_strike * env.credit
                 + env.shaping_scale * self._shaping(env))
 
@@ -387,7 +386,7 @@ class KickToPointReward(_StrikeReward):
         """Mean arrival over this episode's completed segments, plus the one in
         flight -- the same shape as ShootReward.fitness, and directly comparable
         across the two drills because both are exp(-c*d) in [0, 1]."""
-        cur = torch.exp(-self.reward_coef * env.seg_target_best)
+        cur = env.arrival()
         n = env.n_segments + 1.0
         live = (env.target_fit_sum + cur) / n
         prev = env.prev_target_fit_sum / env.prev_n_segments.clamp(min=1.0)

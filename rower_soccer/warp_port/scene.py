@@ -165,10 +165,15 @@ def creature_size(creature_xml_path):
     d = mujoco.MjData(m)
     mujoco.mj_forward(m, d)
     mass = float(m.body_mass[1:].sum())  # skip worldbody
-    lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
-    for g in range(m.ngeom):
-        lo = np.minimum(lo, d.geom_xpos[g] - m.geom_size[g])
-        hi = np.maximum(hi, d.geom_xpos[g] + m.geom_size[g])
+    # geom_rbound (bounding-sphere radius), NOT geom_size: geom_size is only a
+    # 3-vector half-extent for BOXES. For a sphere it is (r, 0, 0) and for a
+    # capsule (r, halflen, 0), so size[2] is identically zero and the bbox came
+    # out with ZERO height on any creature whose geoms sit at one z -- the ant,
+    # whose legs are horizontal in the rest pose, measured 0.00 m and divided
+    # probe_speed by zero.
+    r = m.geom_rbound[:, None]
+    lo = (d.geom_xpos - r).min(axis=0)
+    hi = (d.geom_xpos + r).max(axis=0)
     return mass, float((hi - lo)[2])
 
 

@@ -20,6 +20,11 @@ is not follow's obs with four numbers appended:
   target_ego (2), target_ego_future (2)                   -> 35:39  [task]
                                                              = 39 dims
 
+Those numbers are the THREE-SEGMENT WORM's; the widths are computed from the
+creature, exactly as in follow_env. The 8-actuator ant/rower give proprio 65,
+so obs = 6 + 65 + 4 = 75. Only the proprio block has to match follow's for the
+decoder to transfer, and by construction it does.
+
 ball_ego is 3-D, matching the 2v2 game's ball_ego_position (3) +
 ball_ego_linear_velocity (3). It has to be: the ball obs survives distillation
 into the dribble prior, and the prior is evaluated on GAME observations.
@@ -36,7 +41,8 @@ import warp as wp
 
 import mujoco_warp as mjw
 
-from rower_soccer.warp_port.scene import BallSpec, build_creature_ball_scene
+from rower_soccer.warp_port.scene import (BallSpec, build_creature_ball_scene,
+                                          touch_slices)
 
 CONTROL_DT = 0.025
 SUBSTEPS = 10
@@ -129,7 +135,11 @@ class WarpDribbleEnv:
         self.jv = torch.as_tensor(m.joint_qvel, device=device)
         self.body_ids = torch.as_tensor(m.body_ids, device=device)
         ss = m.sensor_slices
-        self.sl_touch = [ss[f"seg{i}_touch"] for i in range(3)]
+        # Sized from the creature, not hardcoded to the worm's three segments --
+        # the same fix follow_env got. touch_slices() is the ONE definition of
+        # the touch-block order, so the proprio contract stays byte-identical
+        # between follow and dribble and a follow decoder transfers unchanged.
+        self.sl_touch = touch_slices(m)
         self.sl_vel = ss["torso_vel"]
         self.sl_gyro = ss["torso_gyro"]
         self.sl_accel = ss["torso_accel"]
@@ -140,12 +150,21 @@ class WarpDribbleEnv:
         self.target_vel = torch.zeros(self.n, 2, device=device)
         self.t = 0
 
-        self.obs_dim = 39
-        self.act_dim = m.nu
-        self.prev_ctrl = torch.zeros(self.n, m.nu, device=device)
+        # Sized from the creature, not hardcoded. The worm still comes out at
+        # 29 proprio / 39 obs (3 bodies, 2 joints, 3 touch) so existing runs and
+        # checkpoints are unaffected; the ant/rower come out at 65 / 75. The
+        # proprio formula is shared verbatim with follow_env and track_env on
+        # purpose -- a decoder trained there is only reusable here if proprio is
+        # byte-for-byte the same contract.
+        nb, nu = len(m.body_ids), m.nu
+        p_dim = 3 * nb + 1 + nu + nu + 9 + len(self.sl_touch) + 3
+        self.obs_dim = 6 + p_dim + 4
+        self.act_dim = nu
+        self.prev_ctrl = torch.zeros(self.n, nu, device=device)
         # Sorted-key order: ball_ego first, then creature/*, then target_*.
-        self.proprio_indices = np.arange(6, 35)
-        self.task_indices = np.concatenate([np.arange(0, 6), np.arange(35, 39)])
+        self.proprio_indices = np.arange(6, 6 + p_dim)
+        self.task_indices = np.concatenate(
+            [np.arange(0, 6), np.arange(6 + p_dim, 6 + p_dim + 4)])
 
         self._graph = None
         if use_graph:
@@ -218,6 +237,9 @@ class WarpDribbleEnv:
 
         self.t = 0
         self.prev_ctrl = torch.zeros(self.n, self.act_dim, device=self.device)
+        # Where the ball STARTED, kept for the contact diagnostic below.
+        self.ball_spawn_xy = ball_xy.clone()
+        self.ball_max_disp = torch.zeros(n, device=dev)
         self._forward()
         pos, _ = self._root_frames()
         self.prev_bt = torch.linalg.norm(self._ball_xy() - self.target_xy, dim=-1)
@@ -264,6 +286,15 @@ class WarpDribbleEnv:
 
         self.t += 1
         done = self.t >= self.episode_steps
+        # Contact diagnostic: the FURTHEST the ball has been moved this episode,
+        # latched at episode end. Latched rather than instantaneous because the
+        # instantaneous value swings with episode phase (it is 0 just after every
+        # reset), which makes the training curve unreadable.
+        if getattr(self, "ball_max_disp", None) is not None:
+            d_spawn = torch.linalg.norm(self._ball_xy() - self.ball_spawn_xy, dim=-1)
+            self.ball_max_disp = torch.maximum(self.ball_max_disp, d_spawn)
+            if done:
+                self.ep_ball_disp = self.ball_max_disp.clone()
         rew = self._reward()
         if self.energy_coef > 0:
             rew = rew - self.energy_coef * (a ** 2).mean(-1)
@@ -356,6 +387,25 @@ class WarpDribbleEnv:
         shaping = (self.w_p2b * v_p2b.clamp(min=0.0)
                    + self.w_b2t * v_b2t.clamp(min=0.0))
         return fitness + self.shaping_scale * shaping
+
+    def ball_stats(self):
+        """Ball-contact diagnostic. THE metric for this drill, per
+        docs/STAGE2_MULTITASK.md 8: every failed dribble run reported
+        near-identical fitness under three different reward functions, because
+        the creature never touched the ball and what was being plotted was the
+        target drifting away from a stationary ball. Fitness cannot distinguish
+        that from progress; ball displacement can.
+
+        Returns, over the last COMPLETED episode: (mean max displacement from
+        spawn, fraction of worlds that moved the ball > 0.5 m, mean ball speed
+        right now).
+        """
+        disp = getattr(self, "ep_ball_disp", None)
+        if disp is None:
+            return 0.0, 0.0, 0.0
+        spd = torch.linalg.norm(self._ball_vel_xy(), dim=-1)
+        return (float(disp.mean()), float((disp > 0.5).float().mean()),
+                float(spd.mean()))
 
     def fitness(self):
         """Unshaped Table-S3 fitness, for gating (mode-agnostic)."""

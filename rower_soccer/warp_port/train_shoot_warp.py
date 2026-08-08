@@ -46,9 +46,12 @@ def make_env(args, num_worlds, seed, use_graph=True):
 def make_eval(args):
     """One-world Warp env + renderer. base_xml=None so the render scene is the
     PITCH -- the same scene shoot's physics runs in. Passing the arena here (as
-    the other drills do) would draw a goal-less world and hide the whole task."""
+    the other drills do) would draw a goal-less world and hide the whole task.
+
+    use_graph=True for the reason measured in train_kick_warp.make_eval: without
+    it one eval episode on this scene costs ~13 minutes of blocked training."""
     from rower_soccer.warp_port.render import WarpRenderer
-    env = make_env(args, num_worlds=1, seed=7, use_graph=False)
+    env = make_env(args, num_worlds=1, seed=7, use_graph=True)
     return env, WarpRenderer(args.creature_xml, has_ball=True, base_xml=None,
                              distance=14.0, elevation=-25.0)
 

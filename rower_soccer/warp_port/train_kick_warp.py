@@ -45,10 +45,23 @@ def make_env(args, num_worlds, seed, use_graph=True):
 
 
 def make_eval(args):
-    """One-world Warp env + renderer, built once and reused. Warp is ground truth."""
+    """One-world Warp env + renderer, built once and reused. Warp is ground truth.
+
+    use_graph=True, where the follow/dribble trainers pass False. Measured on the
+    shoot env (the heavier of the two -- it runs on the full pitch), one control
+    step of the ONE-world eval env:
+
+        graph=True    80 ms/step        graph=False   1280 ms/step
+
+    A 15 s eval episode is 600 steps, so that is the difference between a ~50 s
+    eval and a ~13 min one, taken every --video-secs (default 300 s) with
+    training BLOCKED throughout. Verified in the same process that the training
+    env's 256-world graph and the eval env's 1-world graph coexist: both keep
+    stepping after the second capture, zero divergence in either.
+    """
     from rower_soccer.warp_port.render import WarpRenderer
     from rower_soccer.warp_port.worm_env_base import _arena_xml
-    env = make_env(args, num_worlds=1, seed=7, use_graph=False)
+    env = make_env(args, num_worlds=1, seed=7, use_graph=True)
     # Render the arena the physics actually runs in, not the default pitch.
     return env, WarpRenderer(args.creature_xml, has_ball=True,
                              base_xml=_arena_xml(env._floor_half), distance=8.0)

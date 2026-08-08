@@ -22,18 +22,19 @@ What a caller must supply per player per tick: a `PlayerFrame`.
 
 `obs` is one player's dm_soccer observation dict (the `i`-th entry of
 `timestep.observation`). `root_pos`/`root_mat` are the player root body's world
-pose, which dm_soccer does NOT put in the observation (`creature.py`'s
-`proprioception` deliberately drops `absolute_root_pos`/`absolute_root_mat`
-because the low-level decoder must never see global position or heading). The
-pose is needed only to turn a *world* target — where the human clicked — into the
-egocentric target the expert was trained on. `skills.soccer.SoccerFrameSource`
-reads it straight off `physics`; `PlayerFrame.from_physics` does the same for a
-single walker.
+pose. They are NOT part of proprioception — `creature.py` drops them on purpose,
+because the low-level decoder must never see global position or heading — but the
+soccer env does enable them as extra observation keys
+(`envs/build.make_creature(expose_root_pose=True)`), so a frame can be built
+three ways: `SoccerFrameSource` (off live physics, what the game loop uses),
+`PlayerFrame.from_physics` (one walker), or `PlayerFrame.from_obs` (dict only,
+what a replay uses). The pose is needed to turn a *world* target — where the
+human clicked — into the egocentric target the expert was trained on.
 
-**WS4, record `root_pos` and `root_mat` in the demo file.** They are 12 floats
-per player per tick and they are the only thing in a `PlayerFrame` that is not
-already in the observation. Without them a recorded demo cannot be replayed
-through a SkillController.
+**WS4: a recorded observation dict is enough to replay a player, EXCEPT for the
+ball.** `ball_pos` / `ball_vel` must be recorded separately (6 floats per tick,
+shared by all players); the game's own `ball_ego_*` observables are in a
+different frame and cannot substitute. See `PlayerFrame.ball_pos`.
 """
 
 from dataclasses import dataclass, field
@@ -131,10 +132,29 @@ class PlayerFrame:
         return self.root_pos[:2]
 
     @classmethod
-    def from_physics(cls, obs, physics, walker) -> "PlayerFrame":
+    def from_physics(cls, obs, physics, walker, ball_pos=None, ball_vel=None):
         """Build a frame for `walker` (a `creature.Creature`) from live physics."""
         b = physics.bind(walker.root_body)
-        return cls(obs=obs, root_pos=np.array(b.xpos), root_mat=np.array(b.xmat))
+        return cls(obs=obs, root_pos=np.array(b.xpos), root_mat=np.array(b.xmat),
+                   ball_pos=ball_pos, ball_vel=ball_vel)
+
+    @classmethod
+    def from_obs(cls, obs, ball_pos=None, ball_vel=None) -> "PlayerFrame":
+        """Build a frame from the observation dict alone.
+
+        Works because `envs/build.make_creature(..., expose_root_pose=True)`
+        enables `absolute_root_pos` / `absolute_root_mat` on soccer walkers
+        (extra keys in the dict; never part of any policy's input vector). This
+        is the path a demo REPLAY should use — it needs no live simulator, so a
+        recorded observation stream can be pushed back through a controller and
+        checked against the recorded actions. The ball's world state still has to
+        be supplied, because it is genuinely not in the observation in a usable
+        frame (see `ball_pos`).
+        """
+        return cls(obs=obs,
+                   root_pos=ravel_obs(obs, "absolute_root_pos"),
+                   root_mat=ravel_obs(obs, "absolute_root_mat"),
+                   ball_pos=ball_pos, ball_vel=ball_vel)
 
 
 @dataclass(frozen=True)

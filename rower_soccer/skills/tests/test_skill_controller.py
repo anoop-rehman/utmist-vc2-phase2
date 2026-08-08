@@ -224,6 +224,40 @@ def test_target_clip_preserves_bearing():
     assert abs(np.dot(raw / 50.0, clipped / 10.0) - 1.0) < 1e-6
 
 
+def test_raw_accelerometer_is_rejected():
+    """`creature.py` pre-scales the accelerometer (/100, clip 50) to match the
+    warp contract. Serving the raw sensor instead is exactly the bug WS5 found
+    behind the apparent ant sim2sim gap, so an out-of-range value must raise
+    rather than be silently scaled a second time."""
+    from rower_soccer.skills.fields import FieldContext, get_field
+
+    ok = PlayerFrame(obs={"sensors_accelerometer": np.array([1.0, -2.0, 3.0])},
+                     root_pos=np.zeros(3), root_mat=np.eye(3))
+    raw = PlayerFrame(obs={"sensors_accelerometer": np.array([0.0, 0.0, 5700.0])},
+                      root_pos=np.zeros(3), root_mat=np.eye(3))
+    build = get_field("sensors_accelerometer").build
+    assert np.allclose(build(FieldContext(ok, None, 0.0)), [1.0, -2.0, 3.0])
+    with raises(ObservationContractError, "RAW"):
+        build(FieldContext(raw, None, 0.0))
+
+
+def test_frame_from_obs_matches_frame_from_physics():
+    """A replay must be able to rebuild a frame from the recorded observation
+    alone (plus the ball), with no simulator."""
+    _, src, ts, frame = stepped_frame(steps=3)
+    replayed = PlayerFrame.from_obs(ts.observation[0],
+                                    ball_pos=frame.ball_pos,
+                                    ball_vel=frame.ball_vel)
+    assert np.allclose(replayed.root_pos, frame.root_pos, atol=1e-9)
+    assert np.allclose(replayed.root_mat, frame.root_mat, atol=1e-9)
+
+    ctrl = SkillController("ant", quiet=True)
+    spec = get_spec("follow")
+    np.testing.assert_array_equal(
+        ctrl.build_obs(spec, frame, np.array([2.0, 1.0])),
+        ctrl.build_obs(spec, replayed, np.array([2.0, 1.0])))
+
+
 def test_uprightness_reads_cos_tilt():
     from rower_soccer.skills import uprightness
 

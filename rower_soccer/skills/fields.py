@@ -7,14 +7,16 @@ it from a `PlayerFrame`. Adding a skill is then a config entry — a field order
 and a checkpoint path — not a new adapter.
 
 The field set below reproduces `warp_port/follow_env.py`'s `_obs()` exactly. Two
-scalings are part of the observation contract and are easy to get wrong:
+scalings are part of the observation contract, and both are applied by
+`creature.py`'s observables, so both are PASS-THROUGH here:
 
-  * accelerometer is divided by 100 and clamped to +/-50. It is the only
-    unbounded input (contact spikes reach ~5,700 m/s^2); the warp env applies
-    this, dm_soccer does NOT, so we must.
-  * touch is divided by 10,000 — and `creature.py`'s `touch_sensors` observable
-    ALREADY divides by 10,000. So from a soccer observation it is passed through
-    untouched. Dividing again here would be a silent 1e-4 on nine inputs.
+  * touch is divided by 10,000 (`CreatureObservables.touch_sensors`).
+  * the accelerometer is divided by 100 and clipped to +/-50
+    (`CreatureObservables.sensors_accelerometer`). It is the only unbounded
+    input — contact spikes reach ~5,700 m/s^2.
+
+Re-applying either would be a silent 1e-4 (touch) or 1e-2 (accel) on real
+inputs, which is why `_accel` checks the range rather than transforming.
 
 Verified against a live ant in the CPU soccer env (see tests): dm_soccer's
 `bodies_pos`, `joints_pos`, `joints_vel`, `world_zaxis` and `body_height` are
@@ -162,8 +164,27 @@ register_field(FieldSpec(
 
 
 def _accel(ctx):
-    a = ravel_obs(ctx.frame.obs, "sensors_accelerometer") / ACCEL_SCALE
-    return np.clip(a, -ACCEL_CLIP, ACCEL_CLIP).astype(np.float32)
+    """Pass-through — `creature.py`'s `sensors_accelerometer` observable already
+    applies `/100` and `clip(+/-50)`, matching the warp envs.
+
+    It did not always. Until WS5's fix the CPU path served the raw sensor while
+    every policy was trained on the scaled one, and the resulting behaviour gap
+    read convincingly as a physics sim2sim gap (WS5 measured fitness 0.284 raw vs
+    0.892 scaled on `follow_ant_v1/best.pt`, 4.65 m of trajectory divergence vs
+    0.047 m). Doubling the scaling here would be the same bug with the sign
+    flipped, so the value is checked instead of transformed: a correctly scaled
+    accelerometer is bounded by the clip, and a raw one blows past it on the first
+    real contact.
+    """
+    a = ravel_obs(ctx.frame.obs, "sensors_accelerometer")
+    if np.abs(a).max() > ACCEL_CLIP + 1e-6:
+        raise ObservationContractError(
+            f"sensors_accelerometer = {a} exceeds the contract's clip of "
+            f"+/-{ACCEL_CLIP}, so this observation is RAW. The drills train on "
+            f"raw/{ACCEL_SCALE:g} clipped to +/-{ACCEL_CLIP:g}; check that "
+            "creature.py's CreatureObservables still overrides "
+            "sensors_accelerometer to apply it.")
+    return a.astype(np.float32)
 
 
 register_field(FieldSpec(

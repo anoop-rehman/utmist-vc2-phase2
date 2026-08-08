@@ -120,6 +120,12 @@ retype a passphrase. Tests: `tests/test_lobby.py` (the data structure) and
 `tests/test_gate.py` (over a real socket, including that a rejected client never
 reaches the sim's input inbox).
 
+Accepted trade: `/stream` and `/state` carry the **token** in the query string,
+because an `<img src>` cannot send a header, so it lands in cloudflared's log and
+Cloudflare's. That is a per-session capability which dies with the process, not
+the shared secret — the code itself never appears in a URL anywhere. A cookie
+would close even that, and is not worth the machinery for four known people.
+
 Scripted clients take `--join-code` too:
 
 ```bash

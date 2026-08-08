@@ -344,6 +344,57 @@ class KickReward(_StrikeReward):
         return torch.where(env.credit_count > 0, cur, prev)
 
 
+class KickToPointReward(_StrikeReward):
+    """Kick graded on WHERE THE BALL ARRIVED, not how fast it left.
+
+    reward = w_arrive * exp(-c * closest ball-to-target distance)   [at segment end]
+             + w_strike * (banked strike speed along the command)   [small]
+             + shaping_scale * shaping
+
+    Why this exists. `KickReward` scores `max(ball_velocity . command)`, a
+    PROJECTION, and a projection cannot tell a hard wild kick from a gentle
+    accurate one: 7.6 m/s at 60 degrees off and 3.8 m/s dead on both score 3.8.
+    Since "hit harder" is a far easier gradient than "aim better", RL takes it.
+    Measured on kick_ant_v1 over 2243 strikes: median aim error 35 deg, mean 48,
+    only 24% of strikes inside 15 deg, 16% sent BACKWARDS, 37% of ball speed
+    thrown away -- all while fitness rose monotonically for 446M steps.
+
+    Distance to a point 4 m away is savage about aim where a cosine is not: 35
+    degrees off is a 2.4 m miss. shoot already scores this way (exp(-d) to the
+    goal mouth) and is the drill whose videos actually look right, which is the
+    corroborating evidence for the diagnosis.
+
+    w_strike is kept small rather than dropped. Arrival alone is satisfiable by
+    walking the ball to the target -- that is dribble, not kick -- so the strike
+    term (paid only at contact-break) keeps a genuine strike in the objective.
+    The env's release gate does the structural work; this term just prices it.
+    """
+
+    def __init__(self, w_arrive=3.0, reward_coef=0.5, **kw):
+        super().__init__(**kw)
+        self.w_arrive = w_arrive
+        self.reward_coef = reward_coef
+
+    def __call__(self, env):
+        # Paid once, on the step the segment closes -- env.seg_reset is exactly
+        # that set (it is assigned in _close_segments for the worlds that ended).
+        arrived = torch.exp(-self.reward_coef * env.seg_target_best)
+        pay = self.w_arrive * arrived * env.seg_reset.float()
+        return (pay + self.w_strike * env.credit
+                + env.shaping_scale * self._shaping(env))
+
+    def fitness(self, env):
+        """Mean arrival over this episode's completed segments, plus the one in
+        flight -- the same shape as ShootReward.fitness, and directly comparable
+        across the two drills because both are exp(-c*d) in [0, 1]."""
+        cur = torch.exp(-self.reward_coef * env.seg_target_best)
+        n = env.n_segments + 1.0
+        live = (env.target_fit_sum + cur) / n
+        prev = env.prev_target_fit_sum / env.prev_n_segments.clamp(min=1.0)
+        return torch.where(env.n_segments > 0, live,
+                           torch.where(env.prev_n_segments > 0, prev, cur))
+
+
 class ShootReward(_StrikeReward):
     """kick's reward with the command pinned at the goal, plus the goal bonus.
 

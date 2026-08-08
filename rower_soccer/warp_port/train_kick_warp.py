@@ -39,6 +39,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
         speed_clip=args.speed_clip, w_strike=args.w_strike,
         w_player_to_ball=args.w_player_to_ball, w_ball_to_cmd=args.w_ball_to_cmd,
         approach_scale=args.approach_scale, reward_mode=args.reward_mode,
+        reward_kind=args.reward_kind, w_arrive=args.w_arrive,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         floor_half=args.floor_half, fixed_start=args.fixed_start,
         target_cone=args.target_cone)
@@ -154,6 +155,17 @@ def main():
     p.add_argument("--fixed-start", action="store_true",
                    help="stage 1: ball dead ahead and the command colinear with "
                         "it, so walking forward strikes it at the target")
+    p.add_argument("--reward-kind", default="direction",
+                   choices=["direction", "point"],
+                   help="'direction' scores max(ball_vel . command) -- a "
+                        "projection, so it cannot distinguish a hard wild kick "
+                        "from a gentle accurate one, and RL climbs the easier "
+                        "'hit harder' gradient (kick_ant_v1: median aim error "
+                        "35 deg, 16%% of strikes backwards). 'point' scores "
+                        "exp(-c*d) to the commanded point at closest approach, "
+                        "which is what shoot already does.")
+    p.add_argument("--w-arrive", type=float, default=3.0,
+                   help="weight of the arrival term under --reward-kind point")
     p.add_argument("--target-cone", type=float, default=0.0,
                    help="stage 2+: command may sit up to +/- this many RADIANS "
                         "off the colinear line (with --fixed-start)")

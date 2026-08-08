@@ -32,7 +32,8 @@ kick with its task encoder AND critic input layer intact -- not just the decoder
 import numpy as np
 import torch
 
-from rower_soccer.warp_port.ball_task import KickReward, SegmentedBallTask
+from rower_soccer.warp_port.ball_task import (KickReward, KickToPointReward,
+                                              SegmentedBallTask)
 from rower_soccer.warp_port.scene import BallSpec
 from rower_soccer.warp_port.worm_env_base import WormEnv
 
@@ -47,7 +48,9 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                  device=None, seed=0, use_graph=True, ball: BallSpec = None,
                  nconmax=64, njmax=512, energy_coef=0.0, smooth_coef=0.0,
                  rew_clip=(-10.0, 10.0), fixed_start=False, target_cone=0.0,
-                 reward=None, floor_half=10.0, use_gpu=True, backend_cls=None):
+                 reward=None, floor_half=10.0, use_gpu=True, backend_cls=None,
+                 reward_coef=0.5, out_of_play_dist=12.0,
+                 reward_kind="direction", w_arrive=3.0):
         self._ball = ball
         self.ball_spawn_range = ball_spawn_range
         self.target_dist = target_dist
@@ -58,10 +61,16 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         self.shaping_scale = 1.0
         self.fixed_start = fixed_start
         self.target_cone = target_cone
-        reward = reward or KickReward(
-            mode=reward_mode, w_strike=w_strike,
-            w_player_to_ball=w_player_to_ball, w_ball_to_cmd=w_ball_to_cmd,
-            approach_scale=approach_scale)
+        self._reward_coef = reward_coef
+        self.out_of_play_dist = out_of_play_dist
+        if reward is None:
+            common = dict(mode=reward_mode, w_strike=w_strike,
+                          w_player_to_ball=w_player_to_ball,
+                          w_ball_to_cmd=w_ball_to_cmd,
+                          approach_scale=approach_scale)
+            reward = (KickToPointReward(w_arrive=w_arrive,
+                                        reward_coef=reward_coef, **common)
+                      if reward_kind == "point" else KickReward(**common))
         super().__init__(num_worlds=num_worlds, creature_xml=creature_xml,
                          episode_seconds=episode_seconds, use_gpu=use_gpu,
                          device=device, seed=seed, use_graph=use_graph,
@@ -82,6 +91,18 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         self._init_segments(segment_seconds=self._segment_seconds,
                             speed_clip=self._speed_clip)
         self.ball_spawn_range = self._clamped_spawn_range(self.ball_spawn_range)
+        # Arrival tracking, mirroring shoot's seg_goal_best. `seg_target_best` is
+        # the CLOSEST the ball has come to the commanded point this segment, so a
+        # kick is graded on where the ball actually got, not on how fast it left.
+        dev = self.device
+        self.seg_target_best = torch.full((self.n,), float(self.target_dist),
+                                          device=dev)
+        self.target_fit_sum = torch.zeros(self.n, device=dev)
+        self.prev_target_fit_sum = torch.zeros(self.n, device=dev)
+        self.prev_n_segments = torch.zeros(self.n, device=dev)
+
+    def _target_dist_now(self):
+        return torch.linalg.norm(self._ball_xy() - self.target_xy, dim=-1)
 
     def _task_obs(self):
         return torch.cat([self._ball_ego6(),
@@ -91,10 +112,31 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
     def _update_task(self):
         _, released = self._strike_update()
         self.seg_t += 1.0
+
+        # Bank the strike at release, but DO NOT end the segment there -- the
+        # ball still has to travel, and where it ends up is the whole point.
+        # This is the structural fix behind the aim problem: the old code ended
+        # the segment the instant the ball left the creature, so nothing after
+        # contact could be measured and the only gradient available was "hit it
+        # harder". Measured on kick_ant_v1: median aim error 35 deg, 37% of ball
+        # speed thrown away, while fitness rose the whole run. shoot never had
+        # this bug because it keeps its segment open and scores arrival.
+        self._bank(released)
+        self.seg_target_best = torch.minimum(self.seg_target_best,
+                                             self._target_dist_now())
+
         timeout = self.seg_t >= self.segment_steps
-        end = released | timeout
-        # Bank BEFORE closing: _close_segments zeroes seg_best/touched.
+        # Out of play: the ball has rolled so far past the target that the
+        # segment cannot be rescued, so holding it open only wastes steps.
+        out = self._target_dist_now() > self.out_of_play_dist
+        end = timeout | out
+        # A segment that ends without release ever firing (creature still
+        # standing over the ball) still banks whatever strike it made.
         self._bank(end)
+        if bool(end.any()):
+            idx = end.nonzero(as_tuple=True)[0]
+            self.target_fit_sum[idx] += torch.exp(
+                -self._reward_coef * self.seg_target_best[idx])
         self._close_segments(end)
 
     # -- spawning -----------------------------------------------------------
@@ -145,6 +187,11 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         cmd = torch.stack([torch.cos(cang), torch.sin(cang)], -1)
         self.cmd_dir[idx] = cmd
         self.target_xy[idx] = ball_xy + cmd * self.target_dist
+        # Baseline arrival at the spawn separation, so a segment that never
+        # touches the ball scores exp(-c * target_dist) rather than a free 1.0.
+        if hasattr(self, "seg_target_best"):
+            self.seg_target_best[idx] = torch.linalg.norm(
+                ball_xy - self.target_xy[idx], dim=-1)
 
     def _reset_state(self):
         n = self.n
@@ -156,6 +203,13 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         self._spawn_worlds(idx, root_xy=torch.zeros(n, 2, device=self.device),
                            yaw=yaw)
         self._reset_segments(idx)
+        # Same fallback shape as credit_sum: a rollout that lands inside a fresh
+        # episode reports the PREVIOUS episode's arrival rather than 0/0. Both
+        # snapshots must be taken BEFORE _reset_episode_stats, which zeroes
+        # n_segments.
+        self.prev_target_fit_sum = self.target_fit_sum.clone()
+        self.prev_n_segments = self.n_segments.clone()
+        self.target_fit_sum.zero_()
         self._reset_episode_stats()
 
     def _sanitize_task(self, idx):

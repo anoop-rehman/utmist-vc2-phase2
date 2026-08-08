@@ -14,8 +14,12 @@ const KEYS = ["follow", "dribble", "kick", "shoot", "scripted"];
 const S = {
   token: localStorage.getItem("tok") || null,
   name: localStorage.getItem("name") || "",
+  // Remembered so a phone that sleeps mid-match does not ask for a passphrase to
+  // come back. Sent in the POST body only -- never in a URL, which would put it in
+  // browser history and in the tunnel's request log.
+  code: localStorage.getItem("code") || "",
   slot: null, skill: "idle", available: [], state: null,
-  drag: null, lastEvent: 0,
+  drag: null, lastEvent: 0, streamAt: 0, streamTries: 0, movedAt: 0, movedFrame: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -30,12 +34,34 @@ async function post(path, body) {
 }
 
 // --- lobby -----------------------------------------------------------------
-async function join() {
+// One join at a time. poll() re-joins on a 403 five times a second, and without
+// this a server that says no would stack up window.prompt() dialogs forever.
+let _joining = null;
+function join() {
+  if (!_joining) _joining = _join().finally(() => { _joining = null; });
+  return _joining;
+}
+
+async function _join() {
   S.name = ($("name").value || S.name || "player").slice(0, 24);
   localStorage.setItem("name", S.name);
-  const r = await post("/join", { name: S.name, token: S.token });
+  let r = await post("/join", { name: S.name, token: S.token, code: S.code });
+  // Only a gated server that did not accept the remembered code gets this far, so
+  // ask once and try again with a clean slate. (A merely *stale* token -- server
+  // restarted, or --client-ttl reaped us -- never lands here: the remembered code
+  // is still good, so the server just issues a new token.)
+  if (r.need_code) {
+    localStorage.removeItem("code");
+    S.code = window.prompt("join code") || "";
+    if (!S.code) { log("! a join code is required"); return false; }
+    localStorage.setItem("code", S.code);
+    r = await post("/join", { name: S.name, token: null, code: S.code });
+  }
+  if (!r.token) { log("! " + (r.error || "join failed")); return false; }
   S.token = r.token; S.slot = r.slot;
   localStorage.setItem("tok", S.token);
+  openStream();
+  return true;
 }
 
 async function claim(slot) {
@@ -45,6 +71,68 @@ async function claim(slot) {
 }
 
 async function release() { await post("/release", {}); S.slot = null; }
+
+// --- the video stream ------------------------------------------------------
+// On a LAN the MJPEG stream is opened once in the markup and never thought about
+// again. Over the internet it is a long-lived HTTP response crossing a CDN, a
+// home router and a phone that suspends radios in the background -- it WILL be
+// cut, sometimes with an error event and sometimes by simply going quiet. So the
+// stream is opened from script (it also needs the token on a gated server) and
+// re-opened whenever it dies or silently freezes.
+function openStream() {
+  if (!S.token) return;
+  const now = Date.now();
+  if (now - S.streamAt < 1500) return;          // never hammer it
+  S.streamAt = now;
+  S.pix = null; S.movedAt = 0; S.movedFrame = 0;
+  // Cache-buster: without it a re-set src can be served from the image cache and
+  // the picture stays dead. The token is a per-session capability, not the code.
+  view.src = "/stream?token=" + encodeURIComponent(S.token) + "&r=" + now;
+}
+
+view.addEventListener("error", () => {
+  S.streamTries++;
+  const wait = Math.min(1000 * S.streamTries, 8000);
+  log("! video dropped; retrying");
+  setTimeout(openStream, wait);
+});
+view.addEventListener("load", () => { S.streamTries = 0; });
+// A backgrounded tab gets its stream throttled or torn down with no error; the
+// picture is then permanently stale when the player comes back to it.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { S.streamAt = 0; openStream(); }
+});
+window.addEventListener("online", () => { S.streamAt = 0; openStream(); });
+
+// Freeze detector. `error` does not fire for a stream that is merely silent (a
+// CDN idling out a long response, a phone that suspended its radio), and an <img>
+// gives no portable per-frame event -- so sample a few pixels instead.
+//
+// The trick is not to mistake a *still* picture for a *dead* one. The server
+// legitimately stops sending when it drops frames under host load: measured, a
+// busy box freezes the picture for ~5 s at a stretch while the match itself runs
+// on perfectly. So the comparison is against the server's own frame counter from
+// /state: only "the server rendered 40+ new frames and our pixels never moved"
+// means the bytes are being lost between there and here.
+const _probe = document.createElement("canvas");
+_probe.width = 24; _probe.height = 16;
+const _pctx = _probe.getContext("2d", { willReadFrequently: true });
+function checkFrozen(st) {
+  if (document.hidden || !view.naturalWidth) return;
+  let sig;
+  try {
+    _pctx.drawImage(view, 0, 0, _probe.width, _probe.height);
+    const d = _pctx.getImageData(0, 0, _probe.width, _probe.height).data;
+    sig = 0;
+    for (let i = 0; i < d.length; i += 17) sig = (sig * 31 + d[i]) | 0;
+  } catch (e) { return; }               // tainted or not yet decodable
+  if (sig !== S.pix) { S.pix = sig; S.movedAt = Date.now(); S.movedFrame = st.frame; }
+  else if (S.movedAt && Date.now() - S.movedAt > 6000 &&
+           st.frame - S.movedFrame > 40) {
+    log("! video froze; reconnecting");
+    openStream();
+  }
+}
 
 // --- input -----------------------------------------------------------------
 async function setSkill(s) {
@@ -154,6 +242,15 @@ function log(line) {
 async function poll() {
   try {
     const r = await fetch("/state?token=" + encodeURIComponent(S.token || ""));
+    if (r.status === 403) {
+      // Gated server, and our token is not (or no longer) one it knows: it was
+      // restarted, or --client-ttl reaped us while the laptop was shut. Re-join
+      // with the remembered code; only a wrong code reaches the prompt.
+      if (!S.code) { $("phase").textContent = "join code required"; return; }
+      $("phase").textContent = "reconnecting";
+      await join();
+      return;
+    }
     const st = await r.json();
     S.state = st;
     S.available = st.available_skills || [];
@@ -168,7 +265,7 @@ async function poll() {
     whoEl.classList.toggle("seated", !!S.slot);
     const me = (st.players || []).find((p) => p.slot === S.slot);
     if (me && me.skill !== S.skill) { S.skill = me.skill; }
-    paintSkills(); paintSeats(st); paintOverlay(st);
+    paintSkills(); paintSeats(st); paintOverlay(st); checkFrozen(st);
     (st.events || []).forEach((e) => {
       const key = e.tick + e.type + (e.slot || "") + (e.team || "");
       if (poll._seen.has(key)) return;

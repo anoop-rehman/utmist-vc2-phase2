@@ -16,7 +16,9 @@
   </header>
 
   <div id="stage">
-    <img id="view" src="/stream" alt="pitch">
+    <!-- src is set by client.js after /join: a gated server wants the token, and
+         the stream has to be re-openable when the internet eats it. -->
+    <img id="view" alt="pitch">
     <canvas id="overlay"></canvas>
     <div id="banner"></div>
   </div>

@@ -272,43 +272,6 @@ def main():
     best_score = float("-inf")
     mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
-    if args.resume and os.path.exists(ckpt_path):
-        start_steps = load_checkpoint(trainer, ckpt_path)
-        print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
-    elif args.init_from:
-        # Fresh run only: on a real --resume the checkpoint already holds these
-        # weights, further trained, and re-seeding would throw that away.
-        before = ac.mlp_extractor.decoder[0].weight.detach().clone()
-        load_pretrained(ac, args.init_from, device=trainer.device)
-        if torch.equal(before, ac.mlp_extractor.decoder[0].weight.detach()):
-            raise SystemExit(
-                f"\n--init-from {args.init_from} transferred NOTHING to the "
-                f"decoder.\nload_pretrained copies only shape-matching tensors, "
-                f"so a decoder\nbuilt for a different body is skipped in silence. "
-                f"This env's proprio\nis {len(env.proprio_indices)} wide; the "
-                f"checkpoint's decoder expects something else.\nCheck "
-                f"--creature-xml matches the body the prior was trained on.")
-
-    # Style reference. Optional and body-specific: it grades this creature's gait
-    # against the evolved gait the NPMP tracker was built from, so a worm run (2
-    # joints) must not be scored against the rower's 8-joint reference. Mismatch
-    # disables it loudly rather than silently reporting nonsense.
-    style_ref = None
-    if not args.no_style:
-        try:
-            from rower_soccer.tools.style import load_reference
-            style_ref = load_reference(args.style_ref)
-            if len(style_ref["names"]) != env.act_dim:
-                print(f"[setup] style DISABLED: reference has "
-                      f"{len(style_ref['names'])} joints, this body has "
-                      f"{env.act_dim}", flush=True)
-                style_ref = None
-            else:
-                print(f"[setup] style reference {args.style_ref} "
-                      f"({len(style_ref['names'])} joints)", flush=True)
-        except Exception as e:                              # noqa: BLE001
-            print(f"[setup] style DISABLED: {e}", flush=True)
-
     if args.freeze_decoder:
         # log_std stays trainable by default. The original reasoning was that it
         # is exploration noise, not motor skill, and that pinning it would deny
@@ -349,6 +312,50 @@ def main():
         # frozen weights cannot drift via weight decay or stale moments.
         trainer.opt = torch.optim.Adam(
             [p for p in ac.parameters() if p.requires_grad], lr=args.lr)
+
+    # The --freeze-decoder block sits ABOVE this deliberately: it rebuilds
+    # trainer.opt over only the trainable parameters, and load_checkpoint
+    # restores a saved optimizer state into it. Freeze after loading and a
+    # frozen-decoder run can be checkpointed but never resumed -- the saved
+    # state's single reduced parameter group does not match a full-parameter
+    # Adam ("loaded state dict contains a parameter group that doesn't match
+    # the size of optimizer's group").
+    if args.resume and os.path.exists(ckpt_path):
+        start_steps = load_checkpoint(trainer, ckpt_path)
+        print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
+    elif args.init_from:
+        # Fresh run only: on a real --resume the checkpoint already holds these
+        # weights, further trained, and re-seeding would throw that away.
+        before = ac.mlp_extractor.decoder[0].weight.detach().clone()
+        load_pretrained(ac, args.init_from, device=trainer.device)
+        if torch.equal(before, ac.mlp_extractor.decoder[0].weight.detach()):
+            raise SystemExit(
+                f"\n--init-from {args.init_from} transferred NOTHING to the "
+                f"decoder.\nload_pretrained copies only shape-matching tensors, "
+                f"so a decoder\nbuilt for a different body is skipped in silence. "
+                f"This env's proprio\nis {len(env.proprio_indices)} wide; the "
+                f"checkpoint's decoder expects something else.\nCheck "
+                f"--creature-xml matches the body the prior was trained on.")
+
+    # Style reference. Optional and body-specific: it grades this creature's gait
+    # against the evolved gait the NPMP tracker was built from, so a worm run (2
+    # joints) must not be scored against the rower's 8-joint reference. Mismatch
+    # disables it loudly rather than silently reporting nonsense.
+    style_ref = None
+    if not args.no_style:
+        try:
+            from rower_soccer.tools.style import load_reference
+            style_ref = load_reference(args.style_ref)
+            if len(style_ref["names"]) != env.act_dim:
+                print(f"[setup] style DISABLED: reference has "
+                      f"{len(style_ref['names'])} joints, this body has "
+                      f"{env.act_dim}", flush=True)
+                style_ref = None
+            else:
+                print(f"[setup] style reference {args.style_ref} "
+                      f"({len(style_ref['names'])} joints)", flush=True)
+        except Exception as e:                              # noqa: BLE001
+            print(f"[setup] style DISABLED: {e}", flush=True)
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)

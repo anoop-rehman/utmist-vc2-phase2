@@ -239,27 +239,12 @@ def main():
     best_score = float("-inf")
     mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
-    if args.resume and os.path.exists(ckpt_path):
-        start_steps = load_checkpoint(trainer, ckpt_path)
-        print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
-    elif args.init_from:
-        # Warm start only on a fresh run: on --resume the checkpoint already
-        # contains these weights (further trained), and re-seeding from follow
-        # would throw away the dribble progress it holds.
-        #
-        # Hard-fail if nothing transferred. load_pretrained copies only
-        # shape-matching tensors, so a decoder built for a DIFFERENT BODY is
-        # skipped in total silence and the run trains from scratch while
-        # claiming a warm start. Same guard train_follow_warp carries.
-        before = ac.mlp_extractor.decoder[0].weight.detach().clone()
-        load_pretrained(ac, args.init_from, device=trainer.device)
-        if torch.equal(before, ac.mlp_extractor.decoder[0].weight.detach()):
-            raise SystemExit(
-                f"\n--init-from {args.init_from} transferred NOTHING to the "
-                f"decoder.\nThis env's proprio is {len(env.proprio_indices)} "
-                f"wide; the checkpoint's decoder expects something else.\n"
-                f"Check --creature-xml matches the body the prior was trained on.")
-
+    # Freeze BEFORE any checkpoint is loaded. save_checkpoint stores the
+    # optimizer state, and under --freeze-decoder that optimizer holds only the
+    # trainable parameter group; restoring it into an Adam built over every
+    # parameter raises "loaded state dict contains a parameter group that
+    # doesn't match the size of optimizer's group", so a frozen-decoder run
+    # could be checkpointed but never resumed.
     if args.freeze_decoder:
         # Freeze the motor skill, train only the expert that drives it. See
         # train_follow_warp's copy of this block for the log_std reasoning: the
@@ -287,6 +272,27 @@ def main():
         # frozen weights cannot drift via stale moments.
         trainer.opt = torch.optim.Adam(
             [p for p in ac.parameters() if p.requires_grad], lr=args.lr)
+
+    if args.resume and os.path.exists(ckpt_path):
+        start_steps = load_checkpoint(trainer, ckpt_path)
+        print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
+    elif args.init_from:
+        # Warm start only on a fresh run: on --resume the checkpoint already
+        # contains these weights (further trained), and re-seeding from follow
+        # would throw away the dribble progress it holds.
+        #
+        # Hard-fail if nothing transferred. load_pretrained copies only
+        # shape-matching tensors, so a decoder built for a DIFFERENT BODY is
+        # skipped in total silence and the run trains from scratch while
+        # claiming a warm start. Same guard train_follow_warp carries.
+        before = ac.mlp_extractor.decoder[0].weight.detach().clone()
+        load_pretrained(ac, args.init_from, device=trainer.device)
+        if torch.equal(before, ac.mlp_extractor.decoder[0].weight.detach()):
+            raise SystemExit(
+                f"\n--init-from {args.init_from} transferred NOTHING to the "
+                f"decoder.\nThis env's proprio is {len(env.proprio_indices)} "
+                f"wide; the checkpoint's decoder expects something else.\n"
+                f"Check --creature-xml matches the body the prior was trained on.")
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"proprio={len(env.proprio_indices)} task={len(env.task_indices)} "

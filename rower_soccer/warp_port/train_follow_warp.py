@@ -30,16 +30,18 @@ def make_eval(args, has_ball=False):
     """
     from rower_soccer.warp_port.follow_env import WarpFollowEnv
     from rower_soccer.warp_port.render import WarpRenderer
+    from rower_soccer.warp_port.worm_env_base import _arena_xml
     env = WarpFollowEnv(
-        num_worlds=1, use_graph=False, seed=7,
-        creature_xml=args.creature_xml,
+        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
         target_speed_range=tuple(args.target_speed),
         spawn_dist_range=tuple(args.spawn_dist),
         bounds=args.bounds, reward_coef=args.reward_coef,
         w_vel_shaping=args.vel_shaping, reward_mode=args.reward_mode,
         progress_scale=args.progress_scale, episode_seconds=args.episode_secs,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
-    return env, WarpRenderer(args.creature_xml, has_ball=False)
+    # Render the arena (the physics scene), not the default pitch background.
+    return env, WarpRenderer(args.creature_xml, has_ball=False,
+                             base_xml=_arena_xml(env._floor_half))
 
 
 _STYLE_REF_DEFAULT = os.path.join(

@@ -54,28 +54,43 @@ def pixel_to_world(px, py, w, h):
     return float(x), float(y)
 
 
-def sim_thread(follow_path, dribble_path, creature_xml, ready):
+def sim_thread(follow_path, dribble_path, creature_xml, ready, use_gpu=True):
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
     from rower_soccer.warp_port.render import WarpRenderer
+    from rower_soccer.warp_port.worm_env_base import _arena_xml
     from rower_soccer.warp_port.ppo import ActorCritic, load_pretrained
 
-    env = WarpDribbleEnv(num_worlds=1, use_graph=True, seed=0,
+    # use_gpu=False -> CpuBackend + cpu tensors (no CUDA). The base forces
+    # use_graph off on CPU, so the value passed here is honored only on GPU.
+    env = WarpDribbleEnv(num_worlds=1, use_gpu=use_gpu, use_graph=use_gpu, seed=0,
                          creature_xml=creature_xml, episode_seconds=1e6)
+    dev = env.device   # single source of truth: policy follows the env's device
+    # Match the render background to the physics scene (now the arena, not the
+    # default pitch), so the walls the worm actually collides with are drawn.
     ren = WarpRenderer(creature_xml, has_ball=True, width=PX, height=PX,
-                       topdown=True, view_half=VIEW_HALF, cam_height=CAM_HEIGHT)
+                       topdown=True, view_half=VIEW_HALF, cam_height=CAM_HEIGHT,
+                       base_xml=_arena_xml(env._floor_half))
 
     dribble_ac = ActorCritic(env.obs_dim, env.act_dim,
                              proprio_indices=env.proprio_indices.tolist(),
-                             task_indices=env.task_indices.tolist(), z_dim=16).cuda()
-    load_pretrained(dribble_ac, dribble_path, device="cuda"); dribble_ac.eval()
-    follow_ac = ActorCritic(33, env.act_dim, proprio_indices=list(range(0, 29)),
-                            task_indices=list(range(29, 33)), z_dim=16).cuda()
-    load_pretrained(follow_ac, follow_path, device="cuda"); follow_ac.eval()
+                             task_indices=env.task_indices.tolist(), z_dim=16).to(dev)
+    load_pretrained(dribble_ac, dribble_path, device=dev); dribble_ac.eval()
+    # Obs is proprio-FIRST: [proprio(N_PROP) | ball_ego(BALL) | target(6)]. The
+    # follow policy wants the same vector WITHOUT the ball block, so drop [N_PROP,
+    # N_PROP+BALL) (was a leading-slice obs[:, 6:] under the old ball-first layout).
+    N_PROP = len(env.proprio_indices)
+    BALL = 6
+    follow_obs_dim = env.obs_dim - BALL
+    follow_ac = ActorCritic(follow_obs_dim, env.act_dim,
+                            proprio_indices=list(range(N_PROP)),
+                            task_indices=list(range(N_PROP, follow_obs_dim)),
+                            z_dim=16).to(dev)
+    load_pretrained(follow_ac, follow_path, device=dev); follow_ac.eval()
 
     env.reset()
     with state_lock:
         state["target"] = env.target_xy[0].detach().cpu().numpy().copy()
-    zero = torch.zeros(1, env.act_dim, device="cuda")
+    zero = torch.zeros(1, env.act_dim, device=dev)
     ready.set()
 
     while True:
@@ -92,7 +107,7 @@ def sim_thread(follow_path, dribble_path, creature_xml, ready):
 
         with state_lock:
             skill = state["skill"]
-            tgt = torch.tensor(state["target"], dtype=torch.float32, device="cuda")
+            tgt = torch.tensor(state["target"], dtype=torch.float32, device=dev)
         env.target_xy[0] = tgt
         env.target_vel[0] = 0.0
         obs = env._obs()
@@ -100,7 +115,8 @@ def sim_thread(follow_path, dribble_path, creature_xml, ready):
             if skill == "dribble":
                 a = dribble_ac.dist(obs.float()).mean.clamp(-1, 1)
             elif skill == "follow":
-                a = follow_ac.dist(obs[:, 6:].float()).mean.clamp(-1, 1)   # drop ball_ego
+                fobs = torch.cat([obs[:, :N_PROP], obs[:, N_PROP + BALL:]], -1)  # drop ball_ego
+                a = follow_ac.dist(fobs.float()).mean.clamp(-1, 1)
             else:
                 a = zero
         env.step(a)
@@ -189,11 +205,14 @@ def main():
     p.add_argument("--dribble", required=True)
     p.add_argument("--creature-xml", default="creature_configs/three_seg_worm.xml")
     p.add_argument("--port", type=int, default=8085)
+    p.add_argument("--cpu", action="store_true",
+                   help="run the env + policy on CPU (no CUDA); default is GPU")
     args = p.parse_args()
 
     ready = threading.Event()
     threading.Thread(target=sim_thread,
                      args=(args.follow, args.dribble, args.creature_xml, ready),
+                     kwargs={"use_gpu": not args.cpu},
                      daemon=True).start()
     ready.wait()
     print(f"[play] serving on http://0.0.0.0:{args.port}  "

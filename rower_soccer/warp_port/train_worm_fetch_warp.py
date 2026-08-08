@@ -1,7 +1,7 @@
 """PPO on fetch for OUR worm (see worm_fetch_env.py).
 
     MUJOCO_GL=egl .venv/bin/python -m rower_soccer.warp_port.train_worm_fetch_warp \
-        --run-name fetch_worm_arena --scene arena \
+        --run-name fetch_worm_arena \
         --init-from runs_v2/_init_follow_base.pt
 """
 import argparse
@@ -37,7 +37,6 @@ def main():
     p.add_argument("--init-from", default=None,
                    help="follow/dribble checkpoint; the decoder transfers "
                         "(identical 29-dim proprio contract)")
-    p.add_argument("--scene", choices=["arena", "pitch"], default="arena")
     p.add_argument("--floor-half", type=float, default=5.0)
     p.add_argument("--spawn-frac", type=float, default=0.9)
     p.add_argument("--ball-drop-z", type=float, default=1.0)
@@ -81,7 +80,7 @@ def main():
         wandb.define_metric("*", step_metric="env_step")
 
     env_kw = dict(creature_xml=args.creature_xml, up_axis_json=args.up_axis_json,
-                  scene=args.scene, floor_half=args.floor_half,
+                  floor_half=args.floor_half,
                   spawn_frac=args.spawn_frac, ball_drop_z=args.ball_drop_z,
                   ball_kick_std=args.ball_kick_std)
     env = WarpWormFetchEnv(num_worlds=args.worlds, seed=args.seed, **env_kw)
@@ -108,12 +107,12 @@ def main():
         load_pretrained(ac, args.init_from, device=trainer.device)
 
     eval_env = WarpWormFetchEnv(num_worlds=1, seed=7, use_graph=False, **env_kw)
-    base = _arena_xml(args.floor_half) if args.scene == "arena" else None
+    base = _arena_xml(args.floor_half)
     eval_ren = WarpRenderer(args.creature_xml, has_ball=True,
                             base_xml=base, ball=fetch_ball())
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
-          f"scene={args.scene} arch={'plain' if args.plain else 'latent'} "
+          f"arch={'plain' if args.plain else 'latent'} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
 
     t0 = time.perf_counter()

@@ -87,7 +87,8 @@ class WarpRenderer:
         return self.renderer.render()
 
 
-def eval_video(env, ac, path, renderer, fps=40, deterministic=True):
+def eval_video(env, ac, path, renderer, fps=40, deterministic=True,
+               record_joints=False):
     """Run ONE deterministic episode in the Warp env `env`, render it, and return
     (ep_reward, final_fitness). Both come from Warp -- the sim being trained in.
 
@@ -95,12 +96,18 @@ def eval_video(env, ac, path, renderer, fps=40, deterministic=True):
     action head's log_std is exploration noise, and at our entropy floor it is 0.30
     on a +/-1 action, which would swamp exactly the fine control an eval is meant to
     measure.
+
+    record_joints additionally returns the world-0 joint trajectory [T, nu], which
+    is what rower_soccer.tools.style grades. It is taken from THIS rollout rather
+    than a second one so the style number costs no extra simulation and describes
+    exactly the episode in the video.
     """
     import imageio
+    import numpy as np
     import torch
 
     obs = env.reset()
-    ep_rew, done, frames = 0.0, False, []
+    ep_rew, done, frames, q = 0.0, False, [], []
     while not done:
         with torch.no_grad():
             d = ac.dist(obs.float())
@@ -108,9 +115,13 @@ def eval_video(env, ac, path, renderer, fps=40, deterministic=True):
         obs, r, done = env.step(a)
         ep_rew += float(r[0])
         frames.append(renderer.frame(env, w=0))
+        if record_joints:
+            q.append(env.qpos[0, env.jq].detach().float().cpu().numpy().copy())
 
     fitness = float(env.fitness()[0]) if hasattr(env, "fitness") else float("nan")
     with imageio.get_writer(path, fps=fps, quality=7) as wr:
         for f in frames:
             wr.append_data(f)
+    if record_joints:
+        return ep_rew, fitness, np.stack(q)
     return ep_rew, fitness

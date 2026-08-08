@@ -82,6 +82,12 @@ def parse_args():
     p.add_argument("--skip-gate", action="store_true",
                    help="train even if the body cannot drive the reference "
                         "(you almost certainly do not want this)")
+    p.add_argument("--publish-decoder", action="store_true",
+                   help="on completion, ALSO copy this run's decoder to the "
+                        "shared runs_v2/_init_rower_npmp.pt that the downstream "
+                        "trainers default to. Opt-in on purpose: the shared path "
+                        "is a single global slot, so an unqualified write from a "
+                        "smoke test silently destroys a finished run's decoder.")
     return p.parse_args()
 
 
@@ -156,8 +162,14 @@ def main():
     mid_path = os.path.join(run_dir, "checkpoint_mid.pt")
     best_path = os.path.join(run_dir, "best.pt")
     final_path = os.path.join(run_dir, "final.pt")
-    # The actual deliverable: the reusable low-level controller.
-    decoder_path = os.path.join(REPO, "runs_v2", "_init_rower_npmp.pt")
+    # The actual deliverable: the reusable low-level controller. Scoped to the
+    # run, NOT to a shared runs_v2/_init_rower_npmp.pt. That shared path used to
+    # be written unconditionally on every new-best eval, which makes a 45-second
+    # smoke run indistinguishable from a 95M-step run: whoever wrote last owns
+    # the file. --publish-decoder promotes this run's copy to the shared name as
+    # a deliberate, final act. Same failure class as the best_score reset below.
+    decoder_path = os.path.join(run_dir, "_init_rower_npmp.pt")
+    shared_decoder = os.path.join(REPO, "runs_v2", "_init_rower_npmp.pt")
 
     # Persist best_score. Without it a --resume restarts the comparison at
     # -inf, so the first post-resume eval overwrites best.pt even when it is
@@ -244,6 +256,11 @@ def main():
                 if args.gcs_bucket:
                     from rower_soccer.warp_port.gcs import sync_async
                     sync_async(best_path, args.gcs_bucket, args.run_name)
+                    # The decoder is the one artifact downstream runs need and
+                    # the one that was never uploaded: npmp_rower_v2 reached
+                    # 12.8deg over 94.9M steps and the file died with its pod,
+                    # because only best.pt was ever synced. It is 1.4 MB.
+                    sync_async(decoder_path, args.gcs_bucket, args.run_name)
             if use_wandb:
                 import wandb
                 wandb.log({"env_step": trainer.total_steps,
@@ -270,10 +287,16 @@ def main():
     if args.gcs_bucket:
         from rower_soccer.warp_port.gcs import sync_blocking, wait_all
         wait_all()
-        for path in (cfg_path, ckpt_path, latest_path, final_path):
+        for path in (cfg_path, ckpt_path, latest_path, final_path, decoder_path):
             sync_blocking(path, args.gcs_bucket, args.run_name)
+    if args.publish_decoder:
+        shutil.copy2(decoder_path, shared_decoder)
+        print(f"[setup] published decoder -> {shared_decoder}", flush=True)
     print(f"[setup] done in {(time.perf_counter()-t0)/60:.1f}min; "
-          f"decoder -> {decoder_path}", flush=True)
+          f"decoder -> {decoder_path}"
+          + ("" if args.publish_decoder else
+             "\n[setup] NOT published to the shared path; pass --publish-decoder "
+             "to make downstream trainers pick this one up by default."), flush=True)
 
 
 if __name__ == "__main__":

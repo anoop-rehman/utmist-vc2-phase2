@@ -173,7 +173,11 @@ class MatchSim:
         self.tick = 0
         self._reset_env()
         for c in self.commands:
-            c.skill = "scripted" if c.controller == "scripted" else "idle"
+            # A human keeps whatever they armed in the lobby -- pressing "follow"
+            # while waiting and having it silently forgotten at kickoff is the kind
+            # of thing that makes a game feel broken. Filled seats are re-armed.
+            if c.controller != "human":
+                c.skill = "scripted" if c.controller == "scripted" else "idle"
         self.writer = None
         self.demo_path = None
         if demo_path:
@@ -190,10 +194,14 @@ class MatchSim:
         if self.phase == PHASE_ENDED:
             return self.demo_path
         self._emit("match_end", reason=reason, score=list(self.score))
-        self.phase = PHASE_ENDED
+        # Close the file BEFORE announcing the end. `phase == "ended"` is what every
+        # watcher (the clients, the CI self test) waits on before reading the demo,
+        # and compressing a 45 s match takes long enough that flipping the flag
+        # first hands them a half-written file.
         if self.writer is not None:
             self.last_demo = self.writer.close()
             self.writer = None
+        self.phase = PHASE_ENDED
         return self.last_demo
 
     def abort(self):
@@ -237,6 +245,13 @@ class MatchSim:
         # which would make the action-replay determinism check fail by a hair.
         pre = self._capture_state() if self.writer is not None else None
 
+        # The ball's WORLD pose, read once and handed to every player. The skills
+        # need it in world coordinates rather than from `ball_ego_position`, which
+        # dm_soccer expresses in MuJoCo's inertial frame -- an axis permutation away
+        # from the body frame the drills trained in. See GameSkillLayer.act.
+        ball = (self.task.ball.get_pose(self.physics)[0],
+                self.task.ball.get_velocity(self.physics)[0])
+
         outs, actions = [], []
         for p in range(self.n_players):
             cmd = self.commands[p]
@@ -245,7 +260,8 @@ class MatchSim:
                 out = None
                 actions.append(np.zeros(self.act_dim, np.float32))
             else:
-                out = self.controller.act(p, obs_list[p], skill, cmd.target, cmd.aim)
+                out = self.controller.act(p, obs_list[p], skill, cmd.target, cmd.aim,
+                                          ball=ball)
                 actions.append(out.action)
             outs.append(out)
             # Show the human where their creature is actually being sent (for

@@ -233,9 +233,10 @@ def selftest(seconds=8.0, port=0, pitch_half=(9.0, 7.0), physics_dt=0.005,
         assert report["inputs_sent"] > 0
 
         # 5. the demo
-        demos = sorted(os.path.join(demo_dir, f) for f in os.listdir(demo_dir))
+        demos = sorted(os.path.join(demo_dir, f) for f in os.listdir(demo_dir)
+                       if f.endswith(".npz"))       # never the writer's .tmp
         assert demos, "no demo written"
-        path = demos[-1]
+        path = max(demos, key=os.path.getmtime)
         d = read_demo(path)
         report["demo"] = path
         report["n_ticks"] = d.n_ticks

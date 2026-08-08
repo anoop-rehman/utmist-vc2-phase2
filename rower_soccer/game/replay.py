@@ -149,7 +149,9 @@ def replay_controller(demo, tol=1e-5, players=None, max_ticks=None):
                 continue
             obs = _obs_dict(demo, t, p)
             frame = PlayerFrame(obs=obs, root_pos=demo.arrays["player_pos"][t, p],
-                                root_mat=demo.arrays["player_mat"][t, p])
+                                root_mat=demo.arrays["player_mat"][t, p],
+                                ball_pos=demo.arrays["ball_pos"][t],
+                                ball_vel=demo.arrays["ball_vel"][t])
             ctrl.set_command(skill, tuple(demo.arrays["target"][t, p]))
             # In MODE_NOISE the action depends on the controller's OWN tick, which
             # resets on a skill switch -- so restore it rather than assume t.

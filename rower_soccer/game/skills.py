@@ -153,7 +153,18 @@ class GameSkillLayer:
         return out
 
     # -- the tick ----------------------------------------------------------
-    def act(self, p, obs, skill, target, aim=None) -> SkillTick:
+    def act(self, p, obs, skill, target, aim=None, ball=None) -> SkillTick:
+        """`ball` is the ball's WORLD (pos, vel).
+
+        Not optional in practice, and not derivable from `obs`: dm_soccer builds
+        `ball_ego_position` with `objtype='body', reftype='body'`, which in MuJoCo
+        means the INERTIAL frames, while the drills compute `ball_ego` in the BODY
+        frame. For the ant those differ by a whole axis permutation (WS3 measured
+        |ximat - xmat| = 1.09), so feeding the game's own ball observation to a
+        drill-trained expert hands it a permuted vector. The world position plus
+        the drill's own transform sidesteps it -- and is why the demo schema stores
+        `ball_pos`/`ball_vel` rather than trusting the observation.
+        """
         from rower_soccer.skills import PlayerFrame, SkillError
 
         ctrl = self.pool[p]
@@ -171,7 +182,11 @@ class GameSkillLayer:
                 print(f"[skills] player {p}: {exc}", flush=True)
             ctrl.clear_command()
 
-        frame = PlayerFrame.from_physics(obs, self._env.physics, self._walkers[p])
+        ph = self._env.physics
+        b = ph.bind(self._walkers[p].root_body)
+        bp, bv = ball if ball is not None else (None, None)
+        frame = PlayerFrame(obs=obs, root_pos=np.array(b.xpos),
+                            root_mat=np.array(b.xmat), ball_pos=bp, ball_vel=bv)
         ctrl_tick = int(ctrl.tick)          # read BEFORE act(): act() increments it
         out = ctrl.act(frame)
         used = target if out.target_xy is None else np.asarray(out.target_xy, np.float64)

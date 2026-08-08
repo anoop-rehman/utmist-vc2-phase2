@@ -11,11 +11,11 @@ Threading (both halves are load-bearing, same reason as warp_port/play_server.py
 
   * ONE sim thread creates and owns the dm_control env, the EGL render context and
     the torch policies, then steps + renders forever.  MuJoCo's EGL context must be
-    created AND used on one thread, and keeping werkzeug away from it also stops a
-    request handler from stepping physics inline.
-  * Flask handles requests on other threads and only touches small locked state:
-    the command inbox (writes) and the latest JPEG / snapshot (reads).  It never
-    touches physics.
+    created AND used on one thread, and keeping the HTTP handlers away from it also
+    stops a request from stepping physics inline.
+  * Request threads (stdlib ThreadingHTTPServer -- no flask, which is not installed
+    in the project venv) touch only small locked state: the command inbox (writes)
+    and the latest JPEG / snapshot (reads).  They never touch physics.
 
 Inputs are high-level only: a click sets a world target, a key picks a skill.  The
 torques come from the skill experts through the shared frozen decoder -- humans are
@@ -51,7 +51,8 @@ class GameServer:
         self.sim: M.MatchSim | None = None
         self.ready = threading.Event()
         self.stop_flag = threading.Event()
-        self.error = None
+        self.error = None       # fatal: the sim thread never started
+        self.tick_error = None  # non-fatal: one tick blew up, the server stayed up
 
         self._cmd_lock = threading.Lock()
         self._inbox: dict[str, dict] = {}         # slot -> pending {skill,target,aim}
@@ -85,6 +86,7 @@ class GameServer:
         out["events"] = events
         out["frame"] = frame_no
         out["stats"] = dict(self.stats)
+        out["tick_error"] = self.tick_error
         out["demos"] = self.demos[-5:]
         out["available_skills"] = list(self._skills)
         out["match_seconds"] = self.args.match_seconds
@@ -158,7 +160,25 @@ class GameServer:
             self._autofill(sim)
             self._apply_control(sim)
             self._apply_inputs(sim)
-            sim.step()
+            try:
+                sim.step()
+            except Exception as exc:            # noqa: BLE001
+                # A bad tick must not silently freeze the world: without this the
+                # loop dies, the HTTP layer keeps serving the last frame, and four
+                # people stare at a still picture wondering whose wifi broke. Keep
+                # whatever the match recorded, say so on /state, and stay up.
+                import traceback
+                self.tick_error = "".join(traceback.format_exception(exc))
+                print(self.tick_error, flush=True)
+                kept = sim.end_match("error")
+                if kept:
+                    self.demos.append(kept)
+                sim.phase = M.PHASE_LOBBY
+                for c in sim.commands:
+                    c.skill = "idle"
+                self._publish_state(sim)
+                time.sleep(0.5)
+                continue
             t1 = time.perf_counter()
             # DROP FRAMES, NEVER TICKS. The physics tick is the authoritative state
             # that four humans and the demo file all depend on; a rendered frame is

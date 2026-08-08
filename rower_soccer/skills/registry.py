@@ -44,10 +44,19 @@ PROPRIO_V1: Tuple[str, ...] = (
     "world_zaxis",
 )
 
-# Metres. See fields._target_ego for why a commanded point far outside the
-# drill's +/-10 m training box is re-aimed to a nearer waypoint on the same
-# bearing rather than fed in raw.
-DEFAULT_TARGET_CLIP = 10.0
+# Metres. A commanded point further away than this is re-aimed to a waypoint on
+# the same bearing (see `fields._target_ego`), because the expert never saw a
+# distant target and its response to one is undefined.
+#
+# 3.2 m is not a guess: it is the top of `follow_ant_v1`'s `spawn_dist` range
+# (1.07-3.22 m, from the run's config.json). The drill spawns its target inside
+# that band and the creature chases it, so `|target_ego|` in training lived
+# almost entirely in [0, 3.2]. The pitch is 96 x 72 m — a human clicking the far
+# corner is ~15x outside it. Measured: at 3 m the ant arrives within 0.04 m; the
+# first version of this constant was 10 m and the ant made almost no progress
+# toward a 12 m target. Raise it only with evidence, and remember that raising it
+# is the same as asking the expert to extrapolate.
+DEFAULT_TARGET_CLIP = 3.2
 
 # Where a target comes from.
 TARGET_COMMAND = "command"   # the human's clicked point

@@ -94,6 +94,7 @@ class SkillController:
                  action_mode: str = MODE_AUTO,
                  checkpoints: Optional[Mapping[str, str]] = None,
                  target_clip: float = R.DEFAULT_TARGET_CLIP,
+                 noise_scale: float = 1.0,
                  preload: Sequence[str] = (),
                  seed: int = 0,
                  player_index: int = 0,
@@ -112,6 +113,14 @@ class SkillController:
             precedence over the registry, so WS4 can point at a fresh run without
             editing this package.
           target_clip: metres; see `fields._target_ego`. 0 disables.
+          noise_scale: multiplies the exploration noise in `MODE_NOISE`. 1.0
+            reproduces training exactly and is the default; lower trades gait
+            vigour for stability. It exists because the same std-1.0 noise that
+            makes `follow_ant_v1` walk also flips it: the drill resets every 15 s,
+            so nothing ever taught the ant to stay upright longer than that, and
+            once it is on its back the policy has no recovery. A 45-s match is
+            three drill episodes long. Measure before changing it — 0 turns the
+            gait off entirely, since the gait IS the noise.
           preload: skills to load immediately rather than on first use — pass the
             slot's expected skills to keep the first tick off the disk.
           seed, player_index: seed the per-tick noise stream in `MODE_NOISE`.
@@ -130,6 +139,7 @@ class SkillController:
         self.device = device
         self.action_mode = action_mode
         self.target_clip = float(target_clip)
+        self.noise_scale = float(noise_scale)
         self.seed = int(seed)
         self.player_index = int(player_index)
         self.quiet = bool(quiet)
@@ -281,7 +291,8 @@ class SkillController:
         and CUDA.
         """
         ss = np.random.SeedSequence([self.seed, self.player_index, self.tick])
-        return np.random.default_rng(ss).standard_normal(act_dim).astype(np.float32)
+        eps = np.random.default_rng(ss).standard_normal(act_dim)
+        return (eps * self.noise_scale).astype(np.float32)
 
     def action(self, frame: PlayerFrame) -> np.ndarray:
         """`act(frame).action`, for callers that do not record demos."""

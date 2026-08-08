@@ -17,11 +17,19 @@ So `load_policy` refuses anything it cannot prove is the right checkpoint:
   * `p_idx` / `t_idx` — the extractor's own record of which columns of the
     observation are proprio and which are task — must equal, element for element,
     the indices derived from the skill's field order and this creature's
-    contract. This catches a wrong body, a wrong skill, a reordered obs, and a
-    checkpoint trained on a different obs layout, all at once.
+    contract. That catches a wrong body, a wrong skill, and a task block in the
+    wrong place, all at once.
   * every weight shape must match the constructed module (`strict=True`), so a
     different z_dim or hidden width is rejected rather than partially loaded.
   * the action width must match the live env's action spec.
+
+The one thing this CANNOT catch: a permutation *within* the proprio block.
+`p_idx` records which columns are proprio, not which field occupies each column,
+so reordering `PROPRIO_V1` leaves it as `range(65)` and every check still passes
+while the decoder receives a permuted input. No information in the checkpoint
+format can detect that. It is guarded instead by a golden-value test on
+`PROPRIO_V1` (`tests/test_skill_controller.py`), and by keeping that tuple the
+single place the order is written down.
 
 Caching is keyed on (realpath, mtime, size, device, layout), so four players
 sharing one checkpoint load it once, and re-exporting a checkpoint mid-session
@@ -41,8 +49,8 @@ import numpy as np
 from rower_soccer.skills.api import CheckpointMismatch
 from rower_soccer.skills.contract import REPO_ROOT
 
-__all__ = ["LatentPolicy", "load_policy", "resolve_checkpoint",
-           "clear_policy_cache", "policy_cache_size"]
+__all__ = ["LatentExpert", "PolicyInfo", "load_policy", "resolve_checkpoint",
+           "clear_policy_cache", "policy_cache_size", "NOISE_DRIVEN_STD"]
 
 _CACHE = {}
 _LOCK = threading.RLock()

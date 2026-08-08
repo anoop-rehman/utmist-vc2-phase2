@@ -43,7 +43,7 @@ import numpy as np
 
 __all__ = [
     "PlayerFrame", "SkillCommand", "SkillOutput",
-    "to_ego_xy", "ego3_to_world", "world_to_ego3",
+    "to_ego_xy", "ego3_to_world", "world_to_ego3", "vec_to_ego3",
     "SkillError", "UnknownSkill", "SkillUnavailable", "CheckpointMismatch",
     "ObservationContractError",
 ]
@@ -86,12 +86,31 @@ class PlayerFrame:
         so both `strip_singleton_obs_buffer_dim` settings work.
       root_pos: (3,) world position of the walker's root body (`seg0`).
       root_mat: (3, 3) world<-body rotation of the root body, row-major, i.e.
-        `world_vec = root_mat @ body_vec`. Accepts a flat (9,) too.
+        `world_vec = root_mat @ body_vec`. Accepts a flat (9,) too. This is
+        MuJoCo's `xmat` (the BODY frame), not `ximat` (the inertial frame) —
+        see `ball_pos` below for why the distinction bites.
+      ball_pos: (3,) WORLD position of the ball, optional. Required by any skill
+        that observes the ball (`dribble`/`kick`/`shoot`) or targets it
+        (`scripted`).
+
+        Why not read it out of `obs["ball_ego_position"]`? Because dm_soccer
+        builds that sensor with `objtype='body', reftype='body'`, which in MuJoCo
+        means the INERTIAL frames, while the warp drill envs compute their
+        `ball_ego` in the BODY frame (`_to_ego3` uses `xmat`). For the ant those
+        two frames differ by a full axis permutation — measured `|ximat - xmat|`
+        = 1.09, because MuJoCo orders principal axes of inertia and the ant's
+        torso is nearly symmetric, so the ordering is arbitrary. Feeding the game
+        observation straight into a drill-trained expert would hand it a permuted
+        ball vector. Taking the world position and applying the drill's own
+        transform sidesteps the whole question.
+      ball_vel: (3,) WORLD linear velocity of the ball, optional; same reasoning.
     """
 
     obs: Mapping[str, np.ndarray]
     root_pos: np.ndarray
     root_mat: np.ndarray
+    ball_pos: Optional[np.ndarray] = None
+    ball_vel: Optional[np.ndarray] = None
 
     def __post_init__(self):
         object.__setattr__(
@@ -100,6 +119,11 @@ class PlayerFrame:
         object.__setattr__(
             self, "root_mat",
             np.asarray(self.root_mat, dtype=np.float64).ravel().reshape(3, 3))
+        for name in ("ball_pos", "ball_vel"):
+            v = getattr(self, name)
+            if v is not None:
+                object.__setattr__(
+                    self, name, np.asarray(v, dtype=np.float64).ravel()[:3])
 
     @property
     def root_xy(self) -> np.ndarray:
@@ -179,6 +203,14 @@ def world_to_ego3(root_pos, root_mat, world_xyz) -> np.ndarray:
     root_mat = np.asarray(root_mat, dtype=np.float64).reshape(3, 3)
     return (root_mat.T @ (np.asarray(world_xyz, dtype=np.float64).ravel()[:3]
                           - root_pos)).astype(np.float32)
+
+
+def vec_to_ego3(root_mat, world_vec) -> np.ndarray:
+    """Rotate a world-frame VECTOR (no translation) into the root body frame —
+    `warp_port/worm_env_base._vec_to_ego3`, used for the ball's velocity."""
+    root_mat = np.asarray(root_mat, dtype=np.float64).reshape(3, 3)
+    return (root_mat.T @ np.asarray(world_vec, dtype=np.float64).ravel()[:3]
+            ).astype(np.float32)
 
 
 def ego3_to_world(root_pos, root_mat, ego_xyz) -> np.ndarray:

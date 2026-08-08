@@ -95,15 +95,27 @@ class SoccerFrameSource:
         self._bind_key = None
         self._bindings = []
         self._ball_binding = None
+        self._ball_joint = None
 
     def _refresh_bindings(self):
         physics = self._env.physics
         key = id(physics)
         if key == self._bind_key:
             return
+        ball = self._env.task.ball
         self._bindings = [physics.bind(w.root_body) for w in self._walkers]
-        self._ball_binding = physics.bind(self._env.task.ball.root_body)
+        self._ball_binding = physics.bind(ball.root_body)
+        # The ball's freejoint qvel[:3] is its WORLD linear velocity — the same
+        # quantity `worm_env_base._ball_vel_xyz` reads. `cvel` is not: it is a
+        # spatial velocity about the subtree COM.
+        self._ball_joint = physics.bind(ball.root_body.freejoint)
         self._bind_key = key
+
+    def ball_state(self):
+        """(world position (3,), world linear velocity (3,)) of the ball."""
+        self._refresh_bindings()
+        return (np.array(self._ball_binding.xpos),
+                np.array(self._ball_joint.qvel)[:3])
 
     @property
     def n_players(self) -> int:
@@ -125,21 +137,23 @@ class SoccerFrameSource:
             raise ValueError(
                 f"timestep has {len(obs)} player observations but the env has "
                 f"{len(self._walkers)} players")
+        bp, bv = self.ball_state()
         out = []
         for i in range(len(self._walkers)):
             pos, mat = self._pose(i)
-            out.append(PlayerFrame(obs=obs[i], root_pos=pos, root_mat=mat))
+            out.append(PlayerFrame(obs=obs[i], root_pos=pos, root_mat=mat,
+                                   ball_pos=bp, ball_vel=bv))
         return out
 
     def frame(self, timestep, i: int) -> PlayerFrame:
         pos, mat = self._pose(i)
-        return PlayerFrame(obs=timestep.observation[i], root_pos=pos, root_mat=mat)
+        bp, bv = self.ball_state()
+        return PlayerFrame(obs=timestep.observation[i], root_pos=pos, root_mat=mat,
+                           ball_pos=bp, ball_vel=bv)
 
     def root_xy(self, i: int) -> np.ndarray:
         return self._pose(i)[0][:2]
 
     def ball_xy(self) -> np.ndarray:
-        """World XY of the ball, straight from physics (for scoreboards/HUDs;
-        the controller derives its own from the player's egocentric obs)."""
-        self._refresh_bindings()
-        return np.array(self._ball_binding.xpos)[:2]
+        """World XY of the ball (scoreboards, HUDs, and the demo's own metrics)."""
+        return self.ball_state()[0][:2]

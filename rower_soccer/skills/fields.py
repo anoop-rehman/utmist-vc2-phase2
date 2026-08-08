@@ -29,7 +29,7 @@ from typing import Callable, Dict, Optional, Tuple
 import numpy as np
 
 from rower_soccer.skills.api import (ObservationContractError, ravel_obs,
-                                     to_ego_xy, ego3_to_world)
+                                     to_ego_xy, vec_to_ego3, world_to_ego3)
 
 # Part of the obs contract; see module docstring.
 ACCEL_SCALE = 100.0
@@ -181,14 +181,36 @@ register_field(FieldSpec("target_ego", TASK, lambda c: 2, _target_ego))
 register_field(FieldSpec("target_ego_future", TASK, lambda c: 2, _target_ego))
 
 
+def _require_ball(frame, why):
+    if frame.ball_pos is None:
+        raise ObservationContractError(
+            f"{why} needs the ball's WORLD position, which a dm_soccer "
+            "observation does not contain in a usable frame. Build the frame "
+            "with PlayerFrame(..., ball_pos=..., ball_vel=...) — "
+            "skills.soccer.SoccerFrameSource does this for you. See "
+            "PlayerFrame's docstring for why obs['ball_ego_position'] is not a "
+            "substitute (it is expressed in MuJoCo's INERTIAL frame, the drills' "
+            "ball_ego in the BODY frame; for the ant those differ by an axis "
+            "permutation).")
+    return frame
+
+
 def _ball_ego(ctx):
     """`ball_ego` as `warp_port/dribble_env.py` emits it: ego position (3) then
-    ego linear velocity (3). dm_soccer supplies both directly and in the same
-    frame (MuJoCo `framepos`/`framelinvel` with the root body as reference)."""
-    obs = ctx.frame.obs
+    ego linear velocity (3), both in the root BODY frame (`_to_ego3` /
+    `_vec_to_ego3`).
+
+    Built from the ball's world state rather than copied from dm_soccer's
+    `ball_ego_position` / `ball_ego_linear_velocity`, which are expressed in the
+    inertial frame. `dribble_env.py`'s header asserts the two match; measured on
+    the ant, they do not. Recomputing costs one 3x3 multiply and removes the
+    dependence on MuJoCo's principal-axis ordering entirely.
+    """
+    f = _require_ball(ctx.frame, "the 'ball_ego' observation field")
+    vel = f.ball_vel if f.ball_vel is not None else np.zeros(3)
     return np.concatenate([
-        ravel_obs(obs, "ball_ego_position"),
-        ravel_obs(obs, "ball_ego_linear_velocity"),
+        world_to_ego3(f.root_pos, f.root_mat, f.ball_pos),
+        vec_to_ego3(f.root_mat, vel),
     ]).astype(np.float32)
 
 
@@ -198,12 +220,5 @@ register_field(FieldSpec("ball_ego", TASK, lambda c: 6, _ball_ego))
 # --- derived world quantities (used by scripted skills, not by any obs) ----
 
 def ball_world_xy(frame) -> np.ndarray:
-    """World XY of the ball, recovered from the player's egocentric ball obs.
-
-    dm_soccer gives every player the ball only egocentrically. Undoing the
-    egocentric transform with the player's own root pose is exact (it is the same
-    rotation), and it means a chase target can be computed without reaching into
-    physics.
-    """
-    ego = ravel_obs(frame.obs, "ball_ego_position")
-    return ego3_to_world(frame.root_pos, frame.root_mat, ego)[:2]
+    """World XY of the ball — the `scripted` chase's target."""
+    return _require_ball(frame, "the 'scripted' chase skill").ball_pos[:2]

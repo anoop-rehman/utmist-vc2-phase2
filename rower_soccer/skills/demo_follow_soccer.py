@@ -24,16 +24,25 @@ import time
 
 import numpy as np
 
-# The default command schedule: (skill, target_xy, seconds). Two follow targets
-# in different directions prove steering; the `idle` in between and the return to
-# `follow` prove that switching skills mid-episode neither glitches nor leaves
-# state behind; `scripted` proves the no-command-needed fallback chases the ball.
+# The default command schedule: (skill, offset, seconds).
+#
+# `offset` is RELATIVE to where the ant is when the command is issued, so every
+# leg is the same length no matter where the previous one left it — an absolute
+# schedule silently turns into "walk 14 m in 8 s" once the ant drifts, and then
+# measures the ant's top speed rather than whether it steers. The ant's trained
+# target speed range is 0.07-0.6 m/s (`follow_ant_v1`'s config), so a 4 m leg in
+# 15 s is inside what it was optimised for.
+#
+# Two follow legs in opposite directions prove steering; the `idle` between them
+# and the return to `follow` prove a mid-episode switch neither glitches nor
+# leaves state behind; `scripted` proves the fallback chases the ball without
+# being given a target.
 DEFAULT_PLAN = [
-    ("follow", (6.0, 6.0), 8.0),
+    ("follow", (4.0, 0.0), 15.0),
     ("idle", None, 1.0),
-    ("follow", (-6.0, 6.0), 8.0),
-    ("scripted", None, 8.0),
-    ("follow", (0.0, 0.0), 8.0),
+    ("follow", (-2.0, 4.0), 15.0),
+    ("scripted", None, 15.0),
+    ("follow", (0.0, -4.0), 15.0),
 ]
 
 
@@ -50,12 +59,21 @@ def main():
     p.add_argument("--match-physics-dt", action=argparse.BooleanOptionalAction,
                    default=True,
                    help="run soccer at the drill's 0.0025 physics dt (default on)")
+    p.add_argument("--verbose", action="store_true",
+                   help="print the trajectory once per simulated second")
     p.add_argument("--video", default=None, help="optional top-down mp4")
     p.add_argument("--fps", type=int, default=40)
     args = p.parse_args()
 
-    from rower_soccer.skills import (MODE_AUTO, SkillController, DEFAULT_TARGET_CLIP)
+    import torch
+
+    from rower_soccer.skills import SkillController, DEFAULT_TARGET_CLIP
     from rower_soccer.skills.soccer import SoccerFrameSource, make_skill_soccer_env
+
+    # A 69->8 MLP at 40 Hz is microseconds of arithmetic; torch's default
+    # intra-op thread pool spends more time synchronising than computing and
+    # fights the physics thread for cores. WS4's game loop should do the same.
+    torch.set_num_threads(1)
 
     env = make_skill_soccer_env(home=(args.creature,), time_limit=1e6,
                                 random_state=args.seed,
@@ -86,31 +104,44 @@ def main():
     t_wall = time.time()
     n_steps = 0
 
-    for skill, target, secs in DEFAULT_PLAN:
+    for skill, offset, secs in DEFAULT_PLAN:
+        here = src.root_xy(0).copy()
+        target = None if offset is None else tuple(here + np.asarray(offset))
         ctrl.set_command(skill, target_xy=target)
-        aim = np.asarray(target if target is not None else src.ball_xy(),
-                         dtype=np.float64)
-        d0 = float(np.linalg.norm(src.root_xy(0) - aim))
-        steps = int(round(secs * hz))
-        for _ in range(steps):
+
+        def aim():
+            if skill == "idle":
+                return here                       # "target" is: do not move
+            return np.asarray(target if target is not None else src.ball_xy(),
+                              dtype=np.float64)
+
+        d0 = float(np.linalg.norm(src.root_xy(0) - aim()))
+        for i in range(int(round(secs * hz))):
             out = ctrl.act(src.frame(ts, 0))
             if not np.isfinite(out.action).all():
                 raise SystemExit(f"[demo] non-finite action during '{skill}'")
             ts = env.step([out.action])
             n_steps += 1
+            if args.verbose and i % hz == 0:
+                f = src.frame(ts, 0)
+                print(f"[demo]   t={i // hz:3d}s xy={np.round(src.root_xy(0), 2)} "
+                      f"h={f.root_pos[2]:.3f} d={np.linalg.norm(src.root_xy(0) - aim()):5.2f} "
+                      f"|tgt_ego|={np.linalg.norm(out.obs_vector[-4:-2]):5.2f}", flush=True)
             if cam is not None:
                 frames.append(env.physics.render(camera_id=cam, width=640, height=480))
-        # For `scripted` the aim moves with the ball; re-read it.
-        aim = np.asarray(target if target is not None else src.ball_xy(),
-                         dtype=np.float64)
-        d1 = float(np.linalg.norm(src.root_xy(0) - aim))
+        d1 = float(np.linalg.norm(src.root_xy(0) - aim()))   # ball may have moved
         fit = float(np.exp(-0.5 * d1))
-        verdict = "closer" if d1 < d0 - 0.25 else ("held" if skill == "idle" else "NO")
-        if skill in ("follow", "scripted") and d1 >= d0 - 0.25:
-            ok = False
-        print(f"[demo] {skill:9s} target={_fmt(target):>16s} "
-              f"{secs:4.1f}s  dist {d0:6.2f} -> {d1:6.2f} m  "
-              f"fitness={fit:.3f}  [{verdict}]", flush=True)
+
+        if skill == "idle":
+            passed = d1 < 0.25                     # zero torque must mean stay put
+            verdict = "held" if passed else "DRIFTED"
+        else:
+            passed = d1 < d0 - 0.5
+            verdict = "closer" if passed else "NO"
+        ok = ok and passed
+        print(f"[demo] {skill:9s} aim={_fmt(offset):>14s} {secs:5.1f}s  "
+              f"dist {d0:6.2f} -> {d1:6.2f} m  fitness={fit:.3f}  [{verdict}]",
+              flush=True)
 
     wall = time.time() - t_wall
     print(f"[demo] {n_steps} control steps in {wall:.1f}s "
@@ -129,7 +160,7 @@ def main():
 
 
 def _fmt(t):
-    return "ball" if t is None else f"({t[0]:.1f}, {t[1]:.1f})"
+    return "ball" if t is None else f"+({t[0]:.1f}, {t[1]:.1f})"
 
 
 def _add_topdown_camera(env, height=42.0, view_half=26.0):

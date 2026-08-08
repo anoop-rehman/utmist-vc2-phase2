@@ -131,6 +131,11 @@ class SegmentedBallTask:
         # potential-based reward reads the sanitize teleport as free progress.
         self._pending_reset = b()
         self.credit_sum, self.credit_count, self.n_segments = z(), z(), z()
+        # Last episode's strike accumulators. PPOTrainer samples env.fitness()
+        # at whatever point in the episode its rollout happens to end, and a
+        # freshly reset episode has banked nothing -- without a fallback the
+        # monitor logs fitness=0.000 at random and best.pt selection reads noise.
+        self.prev_credit_sum, self.prev_credit_count = z(), z()
         # Column indices of the ball freejoint's 6 velocity dofs, cached: the
         # per-step spawn path would otherwise rebuild them on every restart.
         self._ball_vcols = torch.arange(self.bv, self.bv + 6,
@@ -158,6 +163,8 @@ class SegmentedBallTask:
     def _reset_episode_stats(self):
         self._pending_reset.fill_(False)
         self.credit.zero_()
+        self.prev_credit_sum = self.credit_sum.clone()
+        self.prev_credit_count = self.credit_count.clone()
         self.credit_sum.zero_()
         self.credit_count.zero_()
         self.n_segments.zero_()
@@ -316,16 +323,22 @@ class KickReward(_StrikeReward):
     which is exactly the brief: "ball speed toward a commanded direction,
     measured at contact-break".
 
-    fitness = mean banked strike speed (m/s) over this episode's completed
-    strikes, 0 before the first one. Unshaped: neither velocity-shaping term can
-    inflate it, because it only counts what the ball did after being struck.
+    fitness = mean banked strike speed (m/s) over this episode's strikes,
+    falling back to the previous episode's in any world that has not struck yet.
+    Unshaped: neither velocity-shaping term can inflate it, because it counts
+    only what the ball did after being struck. The fallback matters because
+    PPOTrainer reads fitness wherever its 64-step rollout happens to land -- a
+    third of the time that is inside a freshly reset episode, and without it the
+    monitor logs 0.000 at random and best.pt is selected on noise.
     """
 
     def __call__(self, env):
         return self.w_strike * env.credit + env.shaping_scale * self._shaping(env)
 
     def fitness(self, env):
-        return env.credit_sum / env.credit_count.clamp(min=1.0)
+        cur = env.credit_sum / env.credit_count.clamp(min=1.0)
+        prev = env.prev_credit_sum / env.prev_credit_count.clamp(min=1.0)
+        return torch.where(env.credit_count > 0, cur, prev)
 
 
 class ShootReward(_StrikeReward):

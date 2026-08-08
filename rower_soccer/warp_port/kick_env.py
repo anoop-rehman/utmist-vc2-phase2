@@ -127,6 +127,13 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         bdist = b0 + (b1 - b0) * self._rand(k)
         ball_xy = root_xy + torch.stack([bdist * torch.cos(bang),
                                          bdist * torch.sin(bang)], -1)
+        # Keep the ball inside the arena. Segments restart wherever the creature
+        # happens to be, so late in an episode it can be against a wall -- and a
+        # ball spawned 3 m past it lands on the far side of the barrier (MuJoCo
+        # planes collide as INFINITE planes regardless of their visual size, so
+        # it rests there quite happily) and the segment can only time out.
+        lim = max(1.0, self._floor_half - 1.0)
+        ball_xy = ball_xy.clamp(-lim, lim)
         self._write_ball(idx, ball_xy)
 
         if self.fixed_start:

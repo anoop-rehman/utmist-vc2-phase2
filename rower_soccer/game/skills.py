@@ -31,8 +31,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-IDLE = "idle"
-
 
 @dataclass
 class SkillTick:
@@ -50,12 +48,15 @@ class GameSkillLayer:
 
     `action_mode` is load-bearing, not a tuning knob.  `follow_ant_v1` trained with
     `ent_ceil = 0`, so its action std finished near 1.0 -- the full action range --
-    and PPO scored the SAMPLED policy.  Its distribution mean therefore does not
-    locomote; WS3's `MODE_AUTO` detects that and runs `MODE_NOISE`, where the noise
-    is a pure function of `(seed, player_index, controller tick)`.  That keeps
-    replay bit-exact, but only if the demo records all three -- hence `skill_seed`
-    and `player index` in the header and `ctrl_tick` per row.  The controller resets
-    its tick on a skill switch, so it cannot be derived from the match tick.
+    and PPO scored the SAMPLED policy, which means its distribution MEAN is not the
+    behaviour the 0.997 fitness measured.  WS3 offers `mean` and `noise` (noise being
+    `mean + std * eps` with eps a pure function of `(seed, player_index, controller
+    tick)`); both replay bit-exact, but only if the demo records all three inputs --
+    hence `skill_seed` in the header and `ctrl_tick` per row.  The controller resets
+    its tick on a skill switch, so `ctrl_tick` cannot be derived from the match tick.
+
+    `action_mode="auto"` is resolved here rather than assumed of WS3, whose API for
+    this is still moving.
     """
 
     backend = "ws3"

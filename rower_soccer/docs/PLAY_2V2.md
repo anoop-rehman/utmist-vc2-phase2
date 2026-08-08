@@ -247,22 +247,14 @@ browser  --POST /input {token, skill, u, v}-->  server (request thread)
   HTTP keeps serving the last frame, and four people stare at a still picture
   wondering whose wifi broke.
 
-## 8. Cross-workstream dependency: the accelerometer override
+## 8. What this depends on from the other workstreams
 
-The game requires `creature.py`'s `CreatureObservables.sensors_accelerometer` to
-apply the training-time transform (`raw / 100`, clipped to ±50). WS3 owns that
-edit and it is the right fix: `warp_port/follow_env.py` applies it before the
-accelerometer reaches the network ("any future body must apply the same scaling
-at deployment — it is part of the obs contract"), while dm_control's base walker
-returns the sensor raw, so without the override the CPU path feeds the same
-policy a different observation — an obs bug that reads as a sim2sim gap.
-
-Until it lands on this branch, the play server raises
-`ObservationContractError: sensors_accelerometer ... exceeds the contract's clip`
-on the first hard footfall. The server survives it (§ the tick guard below) and
-returns to the lobby rather than freezing, but no match completes. Verified: with
-WS3's pending `creature.py` in place, the full self test and a mixed
-human/scripted match both pass.
+| Needed | Owner | Status |
+|---|---|---|
+| `rower_soccer.skills` (SkillController, registry, checkpoint loading) | WS3 | **the one hard dependency** — the game imports it and does not reimplement any of it |
+| `creature.py`'s `sensors_accelerometer` override (`raw/100`, clip ±50) | WS5 | landed. Without it the server hits WS3's obs-contract check on the first hard footfall — the transform is part of the trained contract (`warp_port/follow_env.py` applies it; dm_control's base walker returns the sensor raw) |
+| ant in `envs/build.py`'s `CREATURE_XMLS` | WS5 | landed. `match.register_ant()` is now a no-op and can be deleted whenever |
+| dribble / kick / shoot checkpoints | WS1 (+WS2) | pending — see §9 |
 
 ## 9. Known gaps
 
@@ -274,9 +266,6 @@ human/scripted match both pass.
   consumes it — `follow` only needs a point. It exists so kick/shoot have a
   direction to use the day they arrive, and so the demos recorded before then
   still carry it.
-* **The ant is not in `envs/build.py`'s `CREATURE_XMLS`** on this branch; the
-  game registers it at runtime (`match.register_ant`), which becomes a no-op the
-  moment WS5's one-line entry lands.
 * **dm_control's EGL teardown** prints an `EGL_BAD_ACCESS` traceback from an
   `atexit` handler when the process exits with a renderer alive on a non-main
   thread. Cosmetic, after all work is done, upstream.

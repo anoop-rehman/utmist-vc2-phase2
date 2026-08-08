@@ -53,6 +53,9 @@ class GameServer:
         self.stop_flag = threading.Event()
         self.error = None       # fatal: the sim thread never started
         self.tick_error = None  # non-fatal: one tick blew up, the server stayed up
+        # Populated by _build on the sim thread, but a browser can hit /state during
+        # the ~10 s the scene takes to compile, so it must exist from the start.
+        self._skills: tuple = ()
 
         self._cmd_lock = threading.Lock()
         self._inbox: dict[str, dict] = {}         # slot -> pending {skill,target,aim}
@@ -349,6 +352,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, f.read(), ctype + "; charset=utf-8")
 
     # -- routes ------------------------------------------------------------
+    def handle_one_request(self):
+        """Never let one bad request take the connection (and its client) down.
+
+        BaseHTTPRequestHandler's default is to let the exception propagate, which
+        closes the socket; a browser polling /state every 200 ms would then look
+        like the server had died. Answer with a 500 and keep serving.
+        """
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+        except Exception:                       # noqa: BLE001
+            import traceback
+            traceback.print_exc()
+            try:
+                self._json({"ok": False, "error": "server error"}, 500)
+            except Exception:                   # noqa: BLE001 - socket already gone
+                self.close_connection = True
+
     def do_GET(self):
         gs = self.gs
         u = urlparse(self.path)

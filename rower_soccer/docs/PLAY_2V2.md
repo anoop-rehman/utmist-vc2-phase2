@@ -142,6 +142,7 @@ JPEG q75), everything below over the **public https URL**, not localhost.
 |---|---|
 | frame size | 44 KB → **7.06 Mbit/s per viewer** at 20 fps |
 | one viewer, 120 s | 2396 frames, 19.96 fps, longest gap 350 ms, stream never dropped |
+| two viewers, **7 minutes**, one unbroken response each | 8392 and 8395 frames, 19.98 fps, longest gap **181 ms**, neither cut |
 | four viewers, 150 s, *while four remote players played a 45 s match* | 19.6 fps each, 6.92 Mbit/s each = **27.7 Mbit/s aggregate**, longest gap 0.9 s, all four alive at the end |
 | that match, over the tunnel | 319 inputs from 4 clients, **0 errors**, played to full time |
 | MJPEG time-to-first-byte | 46–270 ms |

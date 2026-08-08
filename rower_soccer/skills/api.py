@@ -210,13 +210,17 @@ def uprightness(frame) -> float:
     """cos(tilt) of a player: +1 upright, 0 on its side, -1 on its back.
 
     `world_zaxis` is the world z axis expressed in the body frame, so its third
-    component is exactly this. Offered because WS4 needs it: measured over 45-s
-    episodes with `follow_ant_v1/final.pt`, the ant is upright ~62% of ticks
-    (100%/30%/56% across three seeds) and has no righting behaviour once it goes
-    over — the drills train in 15-s episodes, so nothing ever asked it to stay up
-    for a match. Treat `uprightness(frame) < 0.5` as "this player is down" and
-    decide in the game layer (respawn, HUD, skip) rather than expecting the
-    controller to recover.
+    component is exactly this.
+
+    Offered because the game layer needs it. The drills train in 15-s episodes,
+    so nothing ever asked a creature to stay upright for a 45-s match, and none
+    of them has a righting behaviour: once over, it stays over for the rest of
+    the match. How often that happens is a per-checkpoint property and worth
+    measuring for each new one — over six 45-s episodes retargeting 4 m every
+    10 s, `follow_ant_v1/final.pt` on the mean action stayed upright 99.9% of
+    ticks, while `best.pt` managed 77%. Treat `uprightness(frame) < 0.5` as
+    "this player is down" and handle it in the game (respawn, HUD, skip);
+    the controller cannot.
     """
     return float(ravel_obs(frame.obs, "world_zaxis")[2])
 

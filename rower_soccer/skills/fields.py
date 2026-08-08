@@ -124,6 +124,17 @@ def _target_ego(ctx) -> np.ndarray:
     arrives — pure pursuit. Once the real target is inside `target_clip` the clip
     stops applying and the expert gets the true, shrinking vector it needs in
     order to settle. `target_clip <= 0` disables it.
+
+    One caveat the clip does NOT fix, because it preserves bearing by design: a
+    target lying exactly on the body's forward axis is a left-right SYMMETRIC
+    input to a left-right symmetric body, and a deterministic policy can answer it
+    with a symmetric action and stand still forever. `follow_ant_v1/best.pt` does
+    exactly that — from the drill's canonical spawn it never moves (2.94 m of a
+    3 m target after 15 s), and rotating the spawn yaw by 0.3 rad fixes it (0.20
+    m). Perturbing the joints does not, because the target bearing is what has to
+    break. `final.pt` has no such fixed point. Real gameplay perturbs the heading
+    constantly so this is rare, but it is worth knowing when a creature freezes
+    while pointing straight at its target.
     """
     f = ctx.frame
     ego = to_ego_xy(f.root_pos, f.root_mat, _effective_target(ctx))

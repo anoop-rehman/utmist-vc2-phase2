@@ -6,11 +6,13 @@ Two jobs, both small:
     adding the root pose that dm_soccer's observation deliberately omits.
   * `match_drill_timesteps` puts the physics on the dt the drills trained at.
 
-Backend independence: nothing here assumes MuJoCo CPU. `SoccerFrameSource` needs
-only a per-player observation dict and a root pose, so a warp-backed 2v2 game
-(the escalation option in ANT_SPRINT_WORKSTREAMS' sim2sim section) supplies the
-same two things from its own state tensors and the controller is unchanged. The
-only CPU-specific call is `physics.bind(...)`, isolated in `_pose`.
+Backend independence: nothing here assumes MuJoCo CPU. A `PlayerFrame` is an
+observation dict, a root pose, and the ball's world state — a warp-backed 2v2
+game (the escalation option in ANT_SPRINT_WORKSTREAMS' sim2sim section) can
+supply all three from its own state tensors, and `SkillController` is unchanged.
+The only CPU-specific calls in this package are the `physics.bind(...)` lookups
+in `SoccerFrameSource._refresh_bindings`; port that one method and the rest
+follows.
 """
 
 import os

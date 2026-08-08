@@ -179,16 +179,28 @@ def available_skills(creature: str) -> Tuple[str, ...]:
 register_skill(SkillSpec(
     skill_id="follow",
     fields=_FOLLOW_FIELDS,
-    # final.pt, NOT best.pt. `best.pt` is whichever checkpoint scored highest on
-    # the deterministic WARP eval (train_follow_warp.py:414) — for this run the
-    # 55.8M-step one, ep_rew 570.1 / fitness 0.981. It does not survive the trip
-    # to MuJoCo CPU: measured in the drill scene, 15 s toward a point 3 m away,
-    # its mean action leaves the ant crouched at the spawn point (fitness 0.23)
-    # at every solref from 0.005 to 0.2. `final.pt` (147M steps, warp fitness
-    # 0.997) reaches 0.98 on CPU at the pitch's own solref. Same architecture,
-    # same std, same obs — the earlier checkpoint simply had not yet learned a
-    # gait that transfers. Sim2sim is a per-checkpoint property, not a
-    # per-run one; check it before trusting any new weights.
+    # final.pt, NOT best.pt — and the difference is large.
+    #
+    # `best.pt` is whichever checkpoint scored highest on the deterministic WARP
+    # eval (train_follow_warp.py:414): here the 55.8M-step weights, warp fitness
+    # 0.981. `final.pt` is the 147M-step ones, warp fitness 0.997. Measured in
+    # the CPU soccer env on the mean action, six 45-s episodes retargeting 4 m
+    # every 10 s:
+    #
+    #     final.pt   upright 99.9%   mean end-of-leg distance 0.56 m   1/6 episodes ended a leg > 1 m out
+    #     best.pt    upright 77.4%                            1.44 m   5/6
+    #
+    # `best.pt` also carries an outright pathology: from a left-right SYMMETRIC
+    # state — the drill's canonical spawn, target dead ahead on the body x-axis —
+    # its mean action is symmetric too, and the ant stands still forever (2.94 m
+    # of a 3 m target after 15 s). Rotating the spawn yaw by 0.3 rad breaks the
+    # symmetry and it walks (0.20 m); jittering the joints does not, because the
+    # target bearing is what has to break. `final.pt` shows no such fixed point
+    # at any perturbation tried.
+    #
+    # The lesson generalises: "best" means best on the metric the trainer
+    # happened to log, in the simulator it happened to run. Measure a new
+    # checkpoint in the env the game uses before pinning it here.
     checkpoints={"ant": "runs_v2/follow_ant_v1/final.pt"},
     doc="Walk to a commanded world point and hold there. The stage-1 skill, and "
         "the only trained expert as of the ant sprint's P1.",

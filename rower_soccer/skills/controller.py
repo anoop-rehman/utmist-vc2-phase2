@@ -25,11 +25,26 @@ Design notes that matter to the callers
   a pure function of `(seed, player_index, tick)`. It is therefore just as
   replayable — re-running the same ticks with the same seed gives the same
   torques — but it reproduces the exploration the policy was *trained* under.
-  Two uses: collecting BC data with the on-policy action distribution, and
-  rescuing a checkpoint whose mean has collapsed (these drills train with
-  `ent_ceil = 0`, so `log_std` sits at its ceiling and mean and sample can be
-  very different policies). It is never the default, because a controller that
-  silently injects noise is a controller whose replay you cannot reason about.
+  It is not the default, because a controller that injects noise you did not ask
+  for is a controller whose replay you cannot reason about. Two uses: collecting
+  BC data with the on-policy action distribution, and rescuing a checkpoint whose
+  mean has collapsed (these drills train with `ent_ceil = 0`, so `log_std` sits
+  at its ceiling and mean and sample can be very different policies).
+
+  Do NOT reach for it as a stability fix. Six 45-s episodes in the CPU soccer
+  env, retargeting 4 m every 10 s, ticks spent upright and mean end-of-leg
+  distance:
+
+      checkpoint   mode              upright   end distance
+      final.pt     mean               99.9%       0.56 m
+      final.pt     noise, scale 0.5   83.8%       1.61 m
+      best.pt      mean               77.4%       1.44 m
+      best.pt      noise, scale 0.5   58.1%       1.52 m
+
+  The mean wins on both axes for both checkpoints. (An earlier three-seed run
+  said the opposite; episode variance is large enough here to invert a
+  three-sample comparison, which is worth remembering before trusting any small
+  measurement in this env.)
 
 * **Clean skill switching.** `set_command` with a different `skill_id` clears
   every scrap of per-skill state before the next `act()`. Today the experts are
@@ -105,7 +120,8 @@ class SkillController:
           target_clip: metres; see `fields._target_ego`. 0 disables.
           noise_scale: multiplies the exploration noise in `MODE_NOISE` only
             (ignored in `MODE_MEAN`). 1.0 reproduces the training distribution;
-            lower trades exploration for stability.
+            0.5 measured markedly steadier over a match (see the module
+            docstring's table).
           preload: skills to load immediately rather than on first use — pass the
             slot's expected skills to keep the first tick off the disk.
           seed, player_index: seed the per-tick noise stream in `MODE_NOISE`.
@@ -304,8 +320,8 @@ class SkillController:
     def _resolve_target(self, spec, frame) -> Optional[np.ndarray]:
         if spec.target_source == R.TARGET_BALL:
             # The scripted chase: aim the locomotion expert at the ball, every
-            # tick. Recovered from the player's own egocentric ball observation,
-            # so it needs nothing from the simulator.
+            # tick, in world coordinates (see fields.ball_world_xy for why the
+            # game's own egocentric ball vector is not usable directly).
             return ball_world_xy(frame)
         if spec.target_source == R.TARGET_NONE:
             return None

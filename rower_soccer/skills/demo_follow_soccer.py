@@ -8,10 +8,11 @@ mouse in place of the schedule below.
     PYTHONPATH=<worktree> MUJOCO_GL=egl \
       python -m rower_soccer.skills.demo_follow_soccer --video /tmp/ws3.mp4
 
-Checkpoints: `runs_v2/follow_ant_v1/best.pt` resolves against
-`$VC2_CHECKPOINT_ROOT`, then the repo root, then the base checkout when running
-in a git worktree (training writes to the main checkout's gitignored `runs_v2/`).
-`--follow-model` overrides it, including with a `gs://` URI.
+Checkpoints come from the registry (`rower_soccer/skills/registry.py`) and
+resolve against `$VC2_CHECKPOINT_ROOT`, then the repo root, then the base
+checkout when running in a git worktree — training writes to the main checkout's
+gitignored `runs_v2/`, which a worktree does not have. `--follow-model` overrides
+the registry, including with a `gs://` URI.
 
 What "arrived" means: fitness `exp(-0.5 * dist)` is the drills' own metric
 (Table S3), so the numbers printed here are directly comparable to the training

@@ -376,10 +376,10 @@ def test_default_mode_is_the_mean():
 
 
 def test_follow_default_checkpoint_is_final_not_best():
-    """`best.pt` is whichever checkpoint scored highest on the WARP eval; for
-    follow_ant_v1 that is the 55.8M-step one, whose mean action does not walk in
-    MuJoCo CPU at all (fitness 0.23 vs final.pt's 0.98). Sim2sim is a property of
-    the individual checkpoint, so the registry pins the one that was measured."""
+    """`best.pt` is whichever checkpoint scored highest on the WARP eval — for
+    follow_ant_v1 the 55.8M-step one. Measured in the CPU soccer env it is much
+    worse than `final.pt` (77% upright / 1.44 m vs 99.9% / 0.56 m over six 45-s
+    episodes) and has a symmetric-input fixed point. See registry.py."""
     assert get_spec("follow").checkpoint_for("ant").endswith("final.pt")
 
 

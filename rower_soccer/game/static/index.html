@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>2v2 creature soccer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div id="score">0 &ndash; 0</div>
+    <div id="clock">--</div>
+    <div id="phase">connecting</div>
+    <div id="who">spectator</div>
+  </header>
+
+  <div id="stage">
+    <img id="view" src="/stream" alt="pitch">
+    <canvas id="overlay"></canvas>
+    <div id="banner"></div>
+  </div>
+
+  <div id="skills"></div>
+
+  <div id="panel">
+    <div class="row">
+      <input id="name" placeholder="your name" maxlength="24" autocomplete="off">
+      <button id="joinbtn">join</button>
+      <button id="startbtn">start 45s match</button>
+      <button id="stopbtn">stop</button>
+    </div>
+    <div id="seats"></div>
+    <p id="hint">Claim a seat, then <b>drag on the pitch</b> to send your creature
+      (drag direction = aim). Keys <b>1&ndash;5</b> pick a skill, <b>Esc</b> = idle.</p>
+    <div id="log"></div>
+  </div>
+</div>
+<script src="/static/client.js"></script>
+</body>
+</html>

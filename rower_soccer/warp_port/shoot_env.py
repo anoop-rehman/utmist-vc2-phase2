@@ -59,7 +59,7 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
                  use_graph=True, ball: BallSpec = None, nconmax=64, njmax=512,
                  energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0),
                  fixed_start=False, reward=None, use_gpu=True,
-                 backend_cls=None, arena="fenced"):
+                 backend_cls=None, arena="fenced", w_upright=1.0):
         self._ball = ball
         self.shoot_dist_range = shoot_dist_range
         self.ball_spawn_range = ball_spawn_range
@@ -71,7 +71,7 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self._reward_coef = reward_coef
         self.shaping_scale = 1.0
         self.fixed_start = fixed_start
-        reward = reward or ShootReward(
+        reward = reward or ShootReward(w_upright=w_upright, 
             mode=reward_mode, w_strike=w_strike, goal_bonus=goal_bonus,
             reward_coef=reward_coef, w_player_to_ball=w_player_to_ball,
             w_ball_to_cmd=w_ball_to_cmd, approach_scale=approach_scale)

@@ -39,7 +39,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
         speed_clip=args.speed_clip, w_strike=args.w_strike,
         w_player_to_ball=args.w_player_to_ball, w_ball_to_cmd=args.w_ball_to_cmd,
         approach_scale=args.approach_scale, reward_mode=args.reward_mode,
-        reward_kind=args.reward_kind, w_arrive=args.w_arrive,
+        reward_kind=args.reward_kind, w_upright=args.w_upright, w_arrive=args.w_arrive,
         segment_seconds_range=tuple(args.segment_secs_range),
         target_dist_range=tuple(args.target_dist_range),
         time_coef=args.time_coef,
@@ -199,6 +199,13 @@ def main():
                         "Use 'pitch' so the fence stops being part of the task: "
                         "23.5%% of mid-episode kick targets land outside a 10 m "
                         "wall, asking the ant to arc the ball over it.")
+    p.add_argument("--w-upright", type=float, default=1.0,
+                   help="exponent on the uprightness factor the whole reward is "
+                        "MULTIPLIED by, as dm_control's fetch reward does. 0 "
+                        "disables it, which is what runs before 2026-08-09 "
+                        "effectively used -- and with posture unpriced the ant "
+                        "learned to splay flat and shove the ball with its "
+                        "torso instead of its legs.")
     p.add_argument("--creature-xml", default="creature_configs/ant.xml")
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)

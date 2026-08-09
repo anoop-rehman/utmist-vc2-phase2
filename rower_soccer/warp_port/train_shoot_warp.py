@@ -29,7 +29,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
     from rower_soccer.warp_port.shoot_env import WarpShootEnv
     return WarpShootEnv(
         num_worlds=num_worlds, seed=seed, use_graph=use_graph,
-        creature_xml=args.creature_xml, arena=args.arena,
+        creature_xml=args.creature_xml, w_upright=args.w_upright, arena=args.arena,
         episode_seconds=args.episode_secs, segment_seconds=args.segment_secs,
         shoot_dist_range=tuple(args.shoot_dist),
         ball_spawn_range=tuple(args.ball_spawn),
@@ -138,6 +138,13 @@ def main():
                         "Use 'pitch' so the fence stops being part of the task: "
                         "23.5%% of mid-episode kick targets land outside a 10 m "
                         "wall, asking the ant to arc the ball over it.")
+    p.add_argument("--w-upright", type=float, default=1.0,
+                   help="exponent on the uprightness factor the whole reward is "
+                        "MULTIPLIED by, as dm_control's fetch reward does. 0 "
+                        "disables it, which is what runs before 2026-08-09 "
+                        "effectively used -- and with posture unpriced the ant "
+                        "learned to splay flat and shove the ball with its "
+                        "torso instead of its legs.")
     p.add_argument("--creature-xml", default="creature_configs/ant.xml")
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)

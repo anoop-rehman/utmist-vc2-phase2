@@ -52,7 +52,7 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                  reward_coef=0.5, out_of_play_dist=12.0,
                  reward_kind="direction", w_arrive=3.0,
                  segment_seconds_range=(2.0, 6.0), target_dist_range=(4.0, 8.0),
-                 target_z=None, time_coef=0.0, arena="fenced"):
+                 target_z=None, time_coef=0.0, arena="fenced", w_upright=1.0):
         self._ball = ball
         self.ball_spawn_range = ball_spawn_range
         self.target_dist = target_dist
@@ -93,7 +93,7 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                           w_player_to_ball=w_player_to_ball,
                           w_ball_to_cmd=w_ball_to_cmd,
                           approach_scale=approach_scale)
-            reward = (KickToPointReward(w_arrive=w_arrive,
+            reward = (KickToPointReward(w_upright=w_upright, w_arrive=w_arrive,
                                         reward_coef=reward_coef, **common)
                       if reward_kind == "point" else KickReward(**common))
         super().__init__(num_worlds=num_worlds, creature_xml=creature_xml,

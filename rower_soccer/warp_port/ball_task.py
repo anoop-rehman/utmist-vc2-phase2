@@ -344,6 +344,31 @@ class KickReward(_StrikeReward):
         return torch.where(env.credit_count > 0, cur, prev)
 
 
+def upright(env):
+    """+1 torso z-axis up, 0 inverted -- dm_control's _upright_reward, mapped to
+    [0,1] the same way fetch_env does ((1 + cos)/2).
+
+    Every ball drill here multiplies by this, because DeepMind's fetch reward
+    does and ours did not. Without it nothing prices posture: a creature lying
+    flat scores exactly as well as one standing, and the ant duly learned to
+    operate at 0.489 m against a 0.612 m passive stand -- splayed out, shoving
+    the ball with its body. Multiplying (not adding) is the point: no amount of
+    ball progress compensates for being on your side.
+    """
+    _, rot = env._root_frames()
+    return ((1.0 + rot[:, 2, 2]) / 2.0).clamp(0.0, 1.0)
+
+
+def linear_tolerance(d, bound, margin):
+    """dm_control rewards.tolerance(sigmoid='linear', value_at_margin=0).
+
+    1 inside `bound`, falling linearly to 0 at `bound + margin`. Bounded in
+    [0,1] with a defined zero, unlike exp(-c*d) which has a long tail and whose
+    scale (2 m at c=0.5) is easy to misjudge.
+    """
+    return (1.0 - (d - bound).clamp(min=0.0) / margin).clamp(0.0, 1.0)
+
+
 class KickToPointReward(_StrikeReward):
     """Kick graded on WHERE THE BALL ARRIVED, not how fast it left.
 
@@ -370,10 +395,14 @@ class KickToPointReward(_StrikeReward):
     The env's release gate does the structural work; this term just prices it.
     """
 
-    def __init__(self, w_arrive=3.0, reward_coef=0.5, **kw):
+    def __init__(self, w_arrive=3.0, reward_coef=0.5, w_upright=1.0, **kw):
         super().__init__(**kw)
         self.w_arrive = w_arrive
         self.reward_coef = reward_coef
+        # Exponent on the uprightness factor. 1.0 = dm_control's fetch weighting;
+        # 0.0 disables it, which is what every run before 2026-08-09 effectively
+        # used.
+        self.w_upright = w_upright
 
     def __call__(self, env):
         # env.last_arrival, NOT env.arrival(): the env has already respawned the
@@ -383,8 +412,12 @@ class KickToPointReward(_StrikeReward):
         # on every step except the one a segment closes -- so it needs no
         # further gating.
         pay = self.w_arrive * env.last_arrival
-        return (pay + self.w_strike * env.credit
-                + env.shaping_scale * self._shaping(env))
+        r = (pay + self.w_strike * env.credit
+             + env.shaping_scale * self._shaping(env))
+        # Multiplied by uprightness, as dm_control's fetch reward is. See
+        # upright()'s docstring: without it, posture is unpriced and the ant
+        # learns to splay flat and shove the ball with its torso.
+        return r * upright(env) ** self.w_upright
 
     def fitness(self, env):
         """Mean arrival over this episode's completed segments, plus the one in
@@ -412,15 +445,17 @@ class ShootReward(_StrikeReward):
     Measuring to the mouth centre instead would score a 10 m-wide goal as a miss.
     """
 
-    def __init__(self, goal_bonus=5.0, reward_coef=0.5, **kw):
+    def __init__(self, goal_bonus=5.0, reward_coef=0.5, w_upright=1.0, **kw):
         super().__init__(**kw)
         self.goal_bonus = goal_bonus
         self.reward_coef = reward_coef
+        self.w_upright = w_upright
 
     def __call__(self, env):
-        return (self.w_strike * env.credit
-                + self.goal_bonus * env.scored_now.float()
-                + env.shaping_scale * self._shaping(env))
+        r = (self.w_strike * env.credit
+             + self.goal_bonus * env.scored_now.float()
+             + env.shaping_scale * self._shaping(env))
+        return r * upright(env) ** self.w_upright
 
     def fitness(self, env):
         cur = torch.exp(-self.reward_coef * env.seg_goal_best)

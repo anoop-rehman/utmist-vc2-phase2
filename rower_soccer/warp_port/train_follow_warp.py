@@ -20,6 +20,8 @@ import imageio
 import numpy as np
 import torch
 
+from rower_soccer.warp_port import curriculum
+
 
 def make_eval(args, has_ball=False):
     """One-world Warp env + renderer, built once and reused.
@@ -183,21 +185,7 @@ def main():
     p.add_argument("--z-ar-alpha", type=float, default=0.95)
     p.add_argument("--z-smooth-coef", type=float, default=0.0,
                    help="static ||z||^2 prior; NOT the same object as --z-ar-coef")
-    p.add_argument("--speed-curriculum", action="store_true",
-                   help="raise the target-speed band whenever fitness has held "
-                        "above --speed-gate for --speed-patience monitor ticks. "
-                        "The fixed band was calibrated for the worm; the ant "
-                        "solves it on arrival (measured 0.03 m from target) and "
-                        "then vibrates. Lets the curriculum find the ceiling.")
-    p.add_argument("--speed-gate", type=float, default=0.90)
-    p.add_argument("--speed-mult", type=float, default=1.25)
-    p.add_argument("--speed-max", type=float, default=2.5,
-                   help="cap on the fast end (m/s). The ant peaks at 1.34 and "
-                        "has reserve; 2.5 is deliberately above what we expect "
-                        "it to reach, so the CURRICULUM stalls rather than the "
-                        "cap binding.")
-    p.add_argument("--speed-patience", type=int, default=8,
-                   help="monitor ticks the gate must hold before a bump")
+    curriculum.add_args(p)
     p.add_argument("--freeze-log-std", action="store_true",
                    help="with --freeze-decoder, also hold the inherited "
                         "per-joint exploration noise. The prior learns std "
@@ -381,7 +369,7 @@ def main():
     # Back-date the video timer so the first one lands at --first-video-secs.
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
     last_ckpt = t0
-    speed_hist = []
+    speed_curr = curriculum.from_args(args)
     it = 0
     deadline = t0 + args.max_hours * 3600.0
     while trainer.total_steps < args.steps and time.perf_counter() < deadline:
@@ -392,35 +380,9 @@ def main():
         # ETA is now the wall-clock deadline, not the step target.
         eta_min = max(0.0, (deadline - now) / 60)
         if it % 5 == 0:
-            # Performance-gated target-speed curriculum.
-            #
-            # The 0.07-0.6 m/s band was calibrated for the WORM, a body that
-            # topples and tops out around 1.0-1.6 m/s. The ant is statically
-            # stable and peaks at 1.34 m/s with reserve, so it catches the
-            # target in ~2 s and then sits a MEASURED 0.03 m from it for the
-            # rest of the episode -- fitness 0.97 for a task solved on arrival,
-            # which on video reads as the ant vibrating in place. Since the
-            # ant's sustainable speed is unknown (it has never been asked to
-            # sustain), a fixed band would be another guess. This raises the
-            # band whenever the policy is comfortably solving the current one,
-            # so the curriculum finds the ceiling instead of us picking it.
-            if args.speed_curriculum:
-                fit = float(env.fitness().mean())
-                speed_hist.append(fit)
-                if (len(speed_hist) >= args.speed_patience
-                        and sum(speed_hist[-args.speed_patience:])
-                        / args.speed_patience >= args.speed_gate):
-                    lo, hi = env.speed_range
-                    nhi = min(hi * args.speed_mult, args.speed_max)
-                    if nhi > hi + 1e-6:
-                        nlo = min(lo * args.speed_mult, nhi * 0.5)
-                        env.speed_range = (nlo, nhi)
-                        eval_env.speed_range = (nlo, nhi)
-                        speed_hist.clear()
-                        print(f"[curriculum] fitness {fit:.3f} >= "
-                              f"{args.speed_gate} -> target speed "
-                              f"{lo:.2f}-{hi:.2f} => {nlo:.2f}-{nhi:.2f} m/s",
-                              flush=True)
+            line = speed_curr.update(env, eval_env)
+            if line:
+                print(line, flush=True)
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "

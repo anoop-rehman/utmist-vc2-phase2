@@ -28,6 +28,8 @@ import imageio
 import numpy as np
 import torch
 
+from rower_soccer.warp_port import curriculum
+
 
 def make_eval(args):
     """One-world Warp env + renderer, built once and reused. Warp is ground truth."""
@@ -120,6 +122,7 @@ def main():
     # prior at the flat spawn floor with no gradient to steering; a slow anneal
     # keeps the reward signal alive the whole way. 0 = off (use --target-cone as
     # a constant). --cone-max defaults to pi (full 360 deg steering).
+    curriculum.add_args(p)
     p.add_argument("--cone-anneal-steps", type=int, default=0)
     p.add_argument("--cone-start", type=float, default=0.0)
     p.add_argument("--cone-max", type=float, default=np.pi)
@@ -298,6 +301,7 @@ def main():
     eval_env, eval_ren = make_eval(args)
     t0 = time.perf_counter()
     last_ckpt = t0
+    speed_curr = curriculum.from_args(args)
     # Back-date the video timer so the first one lands at --first-video-secs.
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
     it = 0
@@ -329,12 +333,16 @@ def main():
             # diverged: world-steps whose physics went non-finite (see ppo.collect).
             # Expected to be 0 or a trickle. If it climbs, the contact model is wrong
             # and the run is training on garbage -- do not ignore it.
+            line = speed_curr.update(env, eval_env)
+            if line:
+                print(line, flush=True)
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
                   f"fitness={fit:.3f} std={stats['std']:.3f} "
                   f"ball_disp={b_disp:.2f}m moved={100*b_frac:.0f}% "
                   f"cone={np.rad2deg(env.target_cone):.0f}deg "
+                  f"tgt_spd={env.speed_range[1]:.2f} "
                   f"diverged={trainer.n_diverged:,}", flush=True)
             if use_wandb:
                 import wandb

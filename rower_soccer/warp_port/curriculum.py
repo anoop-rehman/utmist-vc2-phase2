@@ -49,7 +49,7 @@ class SpeedCurriculum:
     """
 
     def __init__(self, enabled=False, mult=1.4, speed_max=8.0, patience=4,
-                 grow_tol=0.25):
+                 grow_tol=0.25, near_frac=0.5):
         self.enabled = enabled
         self.mult = mult
         self.speed_max = speed_max
@@ -59,6 +59,9 @@ class SpeedCurriculum:
         # non-increasing distance would stall the curriculum on noise -- the
         # marginal-gate failure again, in a different coordinate.
         self.grow_tol = grow_tol
+        # Tracking error must be within this fraction of the SPAWN distance for
+        # a bump. A fraction, not metres, so it transfers across creature sizes.
+        self.near_frac = near_frac
         self._hist = []
 
     def update(self, env, eval_env=None):
@@ -72,9 +75,21 @@ class SpeedCurriculum:
         if len(self._hist) < self.patience + 1:
             return None
         window = self._hist[-(self.patience + 1):]
-        # Keeping up == distance not trending upward across the window.
+        # Keeping up needs BOTH conditions, and the second is not optional.
+        #
+        # "Distance not growing" alone is satisfied by a policy that ignores the
+        # target completely: creature and target are both confined to the same
+        # bounded arena, so the gap between them oscillates rather than diverges.
+        # Measured: this gate fired twice inside the first 0.3% of a fresh run
+        # (drift -0.90 m, -0.10 m) and drove the band straight to its cap while
+        # ep_rew was still 136 -- i.e. it read "not diverging" as "tracking".
+        #
+        # `near` is the sufficiency half: the creature has to actually BE near
+        # the target. Expressed as a fraction of the spawn distance so it stays
+        # body-size independent, which was the whole reason for leaving fitness.
         drift = window[-1] - window[0]
-        if drift > self.grow_tol:
+        near = d <= self.near_frac * self._spawn_scale(env)
+        if drift > self.grow_tol or not near:
             self._hist = self._hist[-(self.patience + 1):]
             return None
         lo, hi = env.speed_range
@@ -89,9 +104,18 @@ class SpeedCurriculum:
         if eval_env is not None:
             eval_env.speed_range = (nlo, nhi)
         self._hist.clear()
-        return (f"[curriculum] tracking held (drift {drift:+.2f} m over "
-                f"{self.patience} ticks) -> target speed "
+        return (f"[curriculum] tracking held (err {d:.2f} m, drift {drift:+.2f} m "
+                f"over {self.patience} ticks) -> target speed "
                 f"{lo:.2f}-{hi:.2f} => {nlo:.2f}-{nhi:.2f} m/s")
+
+    @staticmethod
+    def _spawn_scale(env):
+        """Far end of the spawn band -- the distance the task starts at."""
+        rng = getattr(env, "spawn_dist_range", None)
+        if rng:
+            return float(rng[1])
+        rng = getattr(env, "ball_spawn_range", None)
+        return float(rng[1]) if rng else 3.0
 
     @staticmethod
     def _error(env):
@@ -113,6 +137,12 @@ def add_args(p):
                         "where you have one (ant_v2: ~2.15 m/s).")
     p.add_argument("--speed-patience", type=int, default=4,
                    help="monitor ticks the distance must hold before a bump")
+    p.add_argument("--speed-near-frac", type=float, default=0.5,
+                   help="tracking error must be within this fraction of the "
+                        "spawn distance before a bump. Without it, 'distance "
+                        "not growing' is satisfied by a policy that ignores the "
+                        "target entirely -- both are stuck in the same box, so "
+                        "the gap oscillates instead of diverging.")
     p.add_argument("--speed-grow-tol", type=float, default=0.25,
                    help="metres of drift across the window still counted as "
                         "keeping up")
@@ -122,4 +152,5 @@ def from_args(args):
     return SpeedCurriculum(enabled=getattr(args, "speed_curriculum", False),
                            mult=args.speed_mult, speed_max=args.speed_max,
                            patience=args.speed_patience,
-                           grow_tol=getattr(args, "speed_grow_tol", 0.25))
+                           grow_tol=getattr(args, "speed_grow_tol", 0.25),
+                           near_frac=getattr(args, "speed_near_frac", 0.5))

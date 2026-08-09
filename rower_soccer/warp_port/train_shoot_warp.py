@@ -48,16 +48,27 @@ def make_env(args, num_worlds, seed, use_graph=True):
 
 
 def make_eval(args):
-    """One-world Warp env + renderer. base_xml=None so the render scene is the
-    PITCH -- the same scene shoot's physics runs in. Passing the arena here (as
-    the other drills do) would draw a goal-less world and hide the whole task.
+    """One-world Warp env + renderer, both built from the env's OWN scene.
+
+    base_xml=env._base_xml() -- not None. None falls through to scene._BASE_XML,
+    which is base_xml(1.0): the UNSCALED 96x72 m pitch with its goals at x=42.7.
+    At --pitch-scale 0.3125 the physics runs on a 30x22.5 m pitch with goals at
+    x=13.3, so the video drew a world 3.2x too large around a correctly-sized
+    ant -- the ant and ball looked tiny and the goal it was aiming at was not
+    the goal on screen. This was written when the pitch was always full size;
+    the moment pitch_scale arrived, None stopped meaning "shoot's pitch".
 
     use_graph=True for the reason measured in train_kick_warp.make_eval: without
     it one eval episode on this scene costs ~13 minutes of blocked training."""
     from rower_soccer.warp_port.render import WarpRenderer
     env = make_env(args, num_worlds=1, seed=7, use_graph=True)
-    return env, WarpRenderer(args.creature_xml, has_ball=True, base_xml=None,
-                             distance=14.0, elevation=-25.0,
+    # 10 m (14 was framed for the full 96 m pitch and leaves the ant a few pixels
+    # tall on the scaled one), and azimuth 180 so the camera looks DOWN +x at the
+    # goal being shot at. The 110 default looks away from it, which for shoot
+    # hides the only thing the video exists to show.
+    return env, WarpRenderer(args.creature_xml, has_ball=True,
+                             base_xml=env._base_xml(), distance=10.0,
+                             elevation=-22.0, azimuth=180.0,
                              ball=env._ball_spec())
 
 

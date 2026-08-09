@@ -24,7 +24,7 @@ class WarpFollowEnv(MovingTargetMixin, WormEnv):
                  arrival_bonus=0.5, spawn_dist_range=(1.76, 5.28),
                  nconmax=64, njmax=512, energy_coef=0.0, smooth_coef=0.0,
                  rew_clip=(-10.0, 10.0), reward=None, floor_half=5.0,
-                 use_gpu=True, backend_cls=None, arena="fenced"):
+                 use_gpu=True, backend_cls=None, arena="fenced", pitch_scale=0.3125):
         self._lookahead = lookahead
         self._bounds = bounds
         self._speed_range = target_speed_range
@@ -39,7 +39,7 @@ class WarpFollowEnv(MovingTargetMixin, WormEnv):
                          nconmax=nconmax, njmax=njmax, reward=reward,
                          floor_half=floor_half, energy_coef=energy_coef,
                          smooth_coef=smooth_coef, rew_clip=rew_clip,
-                         backend_cls=backend_cls, arena=arena)
+                         backend_cls=backend_cls, arena=arena, pitch_scale=pitch_scale)
 
     def _task_dim(self):
         return 6  # target_ego3 (3) + target_ego_future3 (3)

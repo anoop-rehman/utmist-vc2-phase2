@@ -34,7 +34,7 @@ def make_eval(args, has_ball=False):
     from rower_soccer.warp_port.render import WarpRenderer
     from rower_soccer.warp_port.worm_env_base import _arena_xml
     env = WarpFollowEnv(
-        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml, arena=args.arena,
+        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml, arena=args.arena, pitch_scale=args.pitch_scale,
         target_speed_range=tuple(args.target_speed),
         spawn_dist_range=tuple(args.spawn_dist),
         bounds=args.bounds, reward_coef=args.reward_coef,
@@ -151,6 +151,11 @@ def main():
     # is really an unpredictable time target. --steps stays as a backstop.
     p.add_argument("--max-hours", type=float, default=48.0,
                    help="stop after this much wallclock, whatever step count that is")
+    p.add_argument("--pitch-scale", type=float, default=0.3125,
+                   help="uniform scale on dm_soccer's pitch (ground, walls and "
+                        "both goals together). 1.0 = its 96x72 m 2v2 pitch, "
+                        "sized for BoxHead; 0.3125 = 30x22.5 m with a 7.4 m "
+                        "goal, which our ant can actually cross in a match.")
     p.add_argument("--arena", default="fenced", choices=["fenced", "pitch"],
                    help="'fenced' is the small walled arena (wall at "
                         "--floor-half); 'pitch' is the real 2v2 soccer pitch. "

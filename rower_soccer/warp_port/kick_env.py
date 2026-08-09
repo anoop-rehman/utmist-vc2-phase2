@@ -52,7 +52,7 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                  reward_coef=0.5, out_of_play_dist=12.0,
                  reward_kind="direction", w_arrive=3.0,
                  segment_seconds_range=(2.0, 6.0), target_dist_range=(4.0, 8.0),
-                 target_z=None, time_coef=0.0, arena="fenced", w_upright=1.0):
+                 target_z=None, time_coef=0.0, arena="fenced", pitch_scale=0.3125, w_upright=1.0):
         self._ball = ball
         self.ball_spawn_range = ball_spawn_range
         self.target_dist = target_dist
@@ -102,7 +102,7 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                          nconmax=nconmax, njmax=njmax, reward=reward,
                          floor_half=floor_half, energy_coef=energy_coef,
                          smooth_coef=smooth_coef, rew_clip=rew_clip,
-                         backend_cls=backend_cls, arena=arena)
+                         backend_cls=backend_cls, arena=arena, pitch_scale=pitch_scale)
 
     # -- scene --------------------------------------------------------------
     def _ball_spec(self):

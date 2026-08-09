@@ -25,11 +25,15 @@ import torch
 from rower_soccer.warp_port.train_kick_warp import run
 
 
+from rower_soccer.warp_port.scene import BallSpec
+
+
 def make_env(args, num_worlds, seed, use_graph=True):
     from rower_soccer.warp_port.shoot_env import WarpShootEnv
     return WarpShootEnv(
         num_worlds=num_worlds, seed=seed, use_graph=use_graph,
-        creature_xml=args.creature_xml, w_upright=args.w_upright, arena=args.arena,
+        creature_xml=args.creature_xml,
+        ball=BallSpec(radius=args.ball_radius, mass=args.ball_mass), w_upright=args.w_upright, arena=args.arena, pitch_scale=args.pitch_scale,
         episode_seconds=args.episode_secs, segment_seconds=args.segment_secs,
         shoot_dist_range=tuple(args.shoot_dist),
         ball_spawn_range=tuple(args.ball_spawn),
@@ -130,6 +134,23 @@ def main():
 
     # -- run plumbing -------------------------------------------------------
     p.add_argument("--max-hours", type=float, default=48.0)
+    p.add_argument("--ball-radius", type=float, default=0.15,
+                   help="dm_control's SoccerBall takes radius/mass as ARGUMENTS "
+                        "(0.35/0.045 are defaults, not a spec) -- what makes it "
+                        "a soccer ball is condim 6 + rolling friction + "
+                        "priority 1, which are size-independent. 0.35 m put the "
+                        "ball at the ant's torso height (ratio 1.43) so it could "
+                        "only be shoved with the body; 0.15 puts it at leg "
+                        "height, matching dm_control fetch's 0.53.")
+    p.add_argument("--ball-mass", type=float, default=0.045,
+                   help="rolling deceleration is mass-independent (measured: "
+                        "1.81 m from 4 m/s at every mass tried), so this only "
+                        "affects how much the ball squirts on contact")
+    p.add_argument("--pitch-scale", type=float, default=0.3125,
+                   help="uniform scale on dm_soccer's pitch (ground, walls and "
+                        "both goals together). 1.0 = its 96x72 m 2v2 pitch, "
+                        "sized for BoxHead; 0.3125 = 30x22.5 m with a 7.4 m "
+                        "goal, which our ant can actually cross in a match.")
     p.add_argument("--arena", default="fenced", choices=["fenced", "pitch"],
                    help="'fenced' is the small walled arena (wall at "
                         "--floor-half); 'pitch' is the real 2v2 soccer pitch. "

@@ -11,7 +11,7 @@ See ball_task.SegmentedBallTask.
 THE GOAL IS THE PITCH'S OWN. `scene.py` compiles dm_soccer's 2v2 pitch into every
 drill scene already -- 20 goal capsules, posts at x = +/-42.6667, y = +/-11.88,
 crossbar at z = 5.3333 -- and this env reuses those coordinates verbatim
-(`GOAL_X`, `GOAL_HALF_WIDTH`, `GOAL_HEIGHT`) rather than inventing a toy goal.
+(`self.goal_x`, `self.goal_half_width`, `self.goal_height`) rather than inventing a toy goal.
 The scene comment says exactly why they were put there: "so `shoot` has a real
 goal to aim at". Consequence: this env does NOT use the small walled arena the
 other drills default to; `_base_xml` returns None so `build_creature_scene` falls
@@ -42,8 +42,7 @@ import numpy as np
 import torch
 
 from rower_soccer.warp_port.ball_task import SegmentedBallTask, ShootReward
-from rower_soccer.warp_port.scene import (GOAL_HALF_WIDTH, GOAL_HEIGHT, GOAL_X,
-                                          BallSpec)
+from rower_soccer.warp_port.scene import BallSpec, base_xml, goal_geometry
 from rower_soccer.warp_port.worm_env_base import WormEnv
 
 
@@ -59,16 +58,23 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
                  use_graph=True, ball: BallSpec = None, nconmax=64, njmax=512,
                  energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0),
                  fixed_start=False, reward=None, use_gpu=True,
-                 backend_cls=None, arena="fenced", w_upright=1.0):
+                 backend_cls=None, arena="fenced", pitch_scale=0.3125, w_upright=1.0):
         self._ball = ball
         self.shoot_dist_range = shoot_dist_range
         self.ball_spawn_range = ball_spawn_range
-        self.shoot_y_half = shoot_y_frac * GOAL_HALF_WIDTH
+        self.shoot_y_half = shoot_y_frac * goal_geometry(pitch_scale)[1]
         self.spawn_cone = spawn_cone
         self.out_of_play_dist = out_of_play_dist
         self._segment_seconds = segment_seconds
         self._speed_clip = speed_clip
         self._reward_coef = reward_coef
+        # Goal geometry must follow the PITCH SCALE. These were module constants
+        # (42.6667 / 11.88 / 5.3333), which are the goal's position on the
+        # unscaled 96x72 m pitch. At pitch_scale 0.3125 the real goal sits at
+        # x=13.33, so a shoot env using the constants would aim 29 m past it and
+        # score nothing -- with everything else looking perfectly healthy.
+        self.goal_x, self.goal_half_width, self.goal_height = \
+            goal_geometry(pitch_scale)
         self.shaping_scale = 1.0
         self.fixed_start = fixed_start
         reward = reward or ShootReward(w_upright=w_upright, 
@@ -80,17 +86,18 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
                          device=device, seed=seed, use_graph=use_graph,
                          nconmax=nconmax, njmax=njmax, reward=reward,
                          energy_coef=energy_coef, smooth_coef=smooth_coef,
-                         rew_clip=rew_clip, backend_cls=backend_cls, arena=arena)
+                         rew_clip=rew_clip, backend_cls=backend_cls, arena=arena, pitch_scale=pitch_scale)
 
     # -- scene --------------------------------------------------------------
     def _ball_spec(self):
         return self._ball or BallSpec()
 
     def _base_xml(self):
-        # None => scene.py's _BASE_XML, the full dm_soccer pitch WITH the goals.
+        # The scaled pitch WITH the goals -- shoot cannot use the fenced arena,
+        # because the thing it aims at only exists on the pitch.
         # The other drills override this with the small walled arena; shoot
         # cannot, because the thing it aims at only exists on the pitch.
-        return None
+        return base_xml(self._pitch_scale)
 
     # -- task ---------------------------------------------------------------
     def _task_dim(self):
@@ -105,15 +112,15 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         # and mirroring at deployment is exact; carrying both would only halve
         # the data per configuration.
         self.goal_mid = torch.tensor(
-            [GOAL_X, 0.0, GOAL_HEIGHT / 2.0], device=dev).expand(n, 3)
+            [self.goal_x, 0.0, self.goal_height / 2.0], device=dev).expand(n, 3)
         self.post_left = torch.tensor(
-            [GOAL_X, GOAL_HALF_WIDTH], device=dev).expand(n, 2)
+            [self.goal_x, self.goal_half_width], device=dev).expand(n, 2)
         self.post_right = torch.tensor(
-            [GOAL_X, -GOAL_HALF_WIDTH], device=dev).expand(n, 2)
+            [self.goal_x, -self.goal_half_width], device=dev).expand(n, 2)
         self.scored_now = torch.zeros(n, dtype=torch.bool, device=dev)
         self.goals = torch.zeros(n, device=dev)
         self.goal_fit_sum = torch.zeros(n, device=dev)
-        self.seg_goal_best = torch.full((n,), float(GOAL_X), device=dev)
+        self.seg_goal_best = torch.full((n,), float(self.goal_x), device=dev)
 
     def _task_obs(self):
         return torch.cat([self._ball_ego6(),
@@ -129,15 +136,15 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         the mouth is 23.8 m across and 5.3 m tall, and any part of it scores.
         """
         b = self._ball_xyz()
-        dx = (GOAL_X - b[:, 0]).clamp(min=0.0)
-        dy = (b[:, 1].abs() - GOAL_HALF_WIDTH).clamp(min=0.0)
-        dz = (b[:, 2] - GOAL_HEIGHT).clamp(min=0.0)
+        dx = (self.goal_x - b[:, 0]).clamp(min=0.0)
+        dy = (b[:, 1].abs() - self.goal_half_width).clamp(min=0.0)
+        dz = (b[:, 2] - self.goal_height).clamp(min=0.0)
         return torch.sqrt(dx * dx + dy * dy + dz * dz + 1e-12)
 
     def _scored(self):
         b = self._ball_xyz()
-        return ((b[:, 0] > GOAL_X) & (b[:, 1].abs() < GOAL_HALF_WIDTH)
-                & (b[:, 2] < GOAL_HEIGHT))
+        return ((b[:, 0] > self.goal_x) & (b[:, 1].abs() < self.goal_half_width)
+                & (b[:, 2] < self.goal_height))
 
     def _update_task(self):
         _, released = self._strike_update()
@@ -155,7 +162,7 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         timeout = self.seg_t >= self.segment_steps
         # Out of play: past the goal line (scored or wide), off the touchline, or
         # rolled so far the segment cannot be rescued.
-        out = ((self._ball_xyz()[:, 0] > GOAL_X)
+        out = ((self._ball_xyz()[:, 0] > self.goal_x)
                | (self._ball_xyz()[:, 1].abs() > 34.0)
                | (d_goal > self.out_of_play_dist))
         end = timeout | out
@@ -182,9 +189,9 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         d0, d1 = self.shoot_dist_range
         dist = d0 + (d1 - d0) * self._rand(k)
         y = (self._rand(k) * 2.0 - 1.0) * self.shoot_y_half
-        ball_xy = torch.stack([GOAL_X - dist, y], -1)
+        ball_xy = torch.stack([self.goal_x - dist, y], -1)
 
-        goal_xy = torch.stack([torch.full_like(y, GOAL_X),
+        goal_xy = torch.stack([torch.full_like(y, self.goal_x),
                                torch.zeros_like(y)], -1)
         goal_dir = self._unit(goal_xy - ball_xy)
         self.cmd_dir[idx] = goal_dir
@@ -208,8 +215,8 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self._write_root(idx, root, root_yaw)
         self._write_ball(idx, ball_xy)
         self.seg_goal_best[idx] = torch.linalg.norm(
-            torch.stack([(GOAL_X - ball_xy[:, 0]).clamp(min=0.0),
-                         (ball_xy[:, 1].abs() - GOAL_HALF_WIDTH).clamp(min=0.0)],
+            torch.stack([(self.goal_x - ball_xy[:, 0]).clamp(min=0.0),
+                         (ball_xy[:, 1].abs() - self.goal_half_width).clamp(min=0.0)],
                         -1), dim=-1)
 
     def _reset_state(self):

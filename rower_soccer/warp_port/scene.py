@@ -23,6 +23,7 @@ and the pitch, and matching it is the creature's job (see
 """
 
 import os
+import re
 from dataclasses import dataclass
 
 import mujoco
@@ -51,7 +52,7 @@ WARP_BALL_SOLREF_TIMECONST = 0.010
 # element-wise MAX against the creature's (1, 0.5, 0.5), so the creature-ground
 # contact is identical either way, and the ball wins its own contact outright via
 # priority=1.
-_PITCH_XML = """
+_PITCH_XML_UNSCALED = """
     <geom name="ground" type="plane" size="48 36 0.48" friction="1 0.005 0.0001" material="pitch_mat"/>
     <geom name="wall_nx" type="plane" pos="-48 0 0" zaxis="1 0 0"  size="0 0 .48"/>
     <geom name="wall_px" type="plane" pos="48 0 0"  zaxis="-1 0 0" size="0 0 .48"/>
@@ -79,6 +80,31 @@ _PITCH_XML = """
     <geom name="away_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 -11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
 """
 
+def pitch_xml(scale=1.0):
+    """The dm_soccer pitch, scaled uniformly by `scale`.
+
+    Every number in the fragment is a length, and the pitch's own proportions
+    are ratios of its half-extents -- GOAL_HALF_WIDTH / half_y = 0.330, which is
+    exactly dm_control's _DEFAULT_GOAL_LENGTH_RATIO -- so one multiply scales
+    ground, walls and both goals together and keeps the geometry self-consistent.
+
+    scale=1.0 is dm_control's 2v2 pitch (96 x 72 m), which is sized for its
+    BoxHead walker and is far too large for our ant: at ~1-2 m/s the ant cannot
+    cross it inside a 45 s match. The play server already worked around this with
+    --pitch-half 15 11; scale=0.3125 is that same 30 x 22 m pitch, reached by
+    scaling the WHOLE thing rather than resizing the ground and leaving 96 m-pitch
+    goals stranded on it.
+    """
+    def mul(m):
+        return f'{m.group(1)}="{" ".join(f"{float(v)*scale:.6g}" for v in m.group(2).split())}"'
+    return re.sub(r'\b(size|pos|fromto)="([-0-9. ]+)"', mul, _PITCH_XML_UNSCALED)
+
+
+def goal_geometry(scale=1.0):
+    """(goal_x, half_width, height) at `scale` -- the shoot task's constants."""
+    return (42.6667 * scale, 11.88 * scale, 5.3333 * scale)
+
+
 # Goal mouth centres, for the `shoot` task obs. Home goal is at -x, away at +x.
 GOAL_X = 42.6667
 GOAL_HALF_WIDTH = 11.88
@@ -100,7 +126,9 @@ _PITCH_TEXTURE = os.path.join(
 # read: you cannot see the ant moving relative to the ground, or tell where the
 # goal is. `pitch_mat` is assigned to the ground by name below; the goal geoms
 # pick up `goal_mat` the same way.
-_BASE_XML = f"""
+def base_xml(scale=1.0):
+    """The full drill scene -- dm_soccer's pitch at `scale`, lit and textured."""
+    return f"""
 <mujoco model="warp_drill">
   <option cone="elliptic" timestep="0.0025"/>
   <visual><global offwidth="1024" offheight="1024"/></visual>
@@ -110,10 +138,13 @@ _BASE_XML = f"""
     <material name="goal_mat" rgba="0.93 0.93 0.95 1"/>
   </asset>
   <worldbody>
-    <light name="sun" pos="0 0 30" dir="0 0 -1" diffuse="0.9 0.9 0.9"
-           directional="true" castshadow="false"/>{_PITCH_XML}  </worldbody>
+    <light name="sun" pos="0 0 {30 * scale:g}" dir="0 0 -1" diffuse="0.9 0.9 0.9"
+           directional="true" castshadow="false"/>{pitch_xml(scale)}  </worldbody>
 </mujoco>
 """
+
+
+_BASE_XML = base_xml(1.0)
 
 
 @dataclass

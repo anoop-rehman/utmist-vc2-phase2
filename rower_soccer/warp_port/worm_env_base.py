@@ -229,12 +229,18 @@ class WormEnv:
                  episode_seconds=15.0, use_gpu=True, device=None, seed=0,
                  use_graph=True, nconmax=64, njmax=512, reward=None,
                  backend_cls=None, floor_half=5.0, energy_coef=0.0,
-                 smooth_coef=0.0, rew_clip=(-10.0, 10.0), arena="fenced"):
+                 smooth_coef=0.0, rew_clip=(-10.0, 10.0), arena="fenced", pitch_scale=0.3125):
         self.n = num_worlds
         self._floor_half = floor_half
         # "fenced" = the small walled arena (wall at floor_half); "pitch" = the
         # real 2v2 soccer pitch. See _base_xml for why this is geometry-only.
         self._arena = arena
+        # dm_soccer's pitch is 96 x 72 m, sized for its BoxHead walker. Our ant
+        # does 1-2 m/s and cannot cross that inside a 45 s match, so the drills
+        # scale the WHOLE pitch -- ground, walls and both goals together, since
+        # the goal is a fixed 0.33 ratio of pitch width. 0.3125 gives 30 x 22.5 m
+        # with a 7.4 m goal, the size the play server already chose by hand.
+        self._pitch_scale = pitch_scale
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
         self.n_diverged = 0
         self.energy_coef = energy_coef
@@ -339,7 +345,8 @@ class WormEnv:
         ant cannot reach, so the fence stops being part of the task.
         """
         if self._arena == "pitch":
-            return None
+            from rower_soccer.warp_port.scene import base_xml
+            return base_xml(self._pitch_scale)
         return _arena_xml(self._floor_half)
 
     def _post_build_model(self, model):

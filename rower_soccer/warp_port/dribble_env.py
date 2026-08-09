@@ -62,6 +62,16 @@ class WarpDribbleEnv(MovingTargetMixin, WormEnv):
     def _task_init(self):
         self._init_moving_target(self._lookahead, self._bounds, self._speed_range)
 
+    def tracking_error(self):
+        """Distance from the BALL to the target -- what dribble tracks.
+
+        Deliberately not the creature's distance: dribble's job is keeping the
+        BALL near the target, so that is what "keeping up" has to mean here.
+        Using the creature's distance would let the curriculum speed the target
+        up while the ball was being left behind.
+        """
+        return torch.linalg.norm(self.target_xy - self._ball_xy(), dim=-1)
+
     def _task_obs(self):
         ball_ego = torch.cat([self._to_ego3(self._ball_xyz()),
                               self._vec_to_ego3(self._ball_vel_xyz())], -1)

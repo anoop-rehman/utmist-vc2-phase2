@@ -22,10 +22,12 @@ and the pitch, and matching it is the creature's job (see
 `tools/unity2mujoco.py --length-scale`).
 """
 
+import os
 from dataclasses import dataclass
 
 import mujoco
 import numpy as np
+from dm_control.locomotion.soccer import pitch as dm_soccer_pitch
 
 # Contact time constants used for the Warp backend only; see build_creature_scene.
 # CPU (arena.xml) stays at MuJoCo's 0.02. These differ ON PURPOSE.
@@ -82,6 +84,16 @@ GOAL_X = 42.6667
 GOAL_HALF_WIDTH = 11.88
 GOAL_HEIGHT = 5.3333
 
+# The REAL dm_control soccer pitch texture -- the same 3200x2400 PNG
+# dm_control.locomotion.soccer.pitch loads for its field plane, with the actual
+# line markings, centre circle and penalty boxes. Applied exactly as dm_control
+# does (type="2d", no texrepeat, so the image spans the plane once) rather than
+# a checkerboard of my own invention, so the Warp drills and the CPU soccer env
+# render the same world they already share collision geometry with.
+_PITCH_TEXTURE = os.path.join(
+    os.path.dirname(dm_soccer_pitch.__file__), "assets", "pitch",
+    "pitch_nologo_l.png")
+
 # Materials are VISUAL ONLY -- rgba/texture never enter contact dynamics, so
 # adding them cannot change a trained policy's behaviour. The pitch previously
 # rendered as undifferentiated MuJoCo grey, which makes an eval video hard to
@@ -93,10 +105,8 @@ _BASE_XML = f"""
   <option cone="elliptic" timestep="0.0025"/>
   <visual><global offwidth="1024" offheight="1024"/></visual>
   <asset>
-    <texture name="pitch_tex" type="2d" builtin="checker" width="512" height="512"
-             rgb1="0.16 0.42 0.18" rgb2="0.13 0.36 0.15"/>
-    <material name="pitch_mat" texture="pitch_tex" texrepeat="24 18"
-              reflectance="0.05"/>
+    <texture name="pitch_tex" type="2d" file="{_PITCH_TEXTURE}"/>
+    <material name="pitch_mat" texture="pitch_tex" reflectance="0.05"/>
     <material name="goal_mat" rgba="0.93 0.93 0.95 1"/>
   </asset>
   <worldbody>

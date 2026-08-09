@@ -50,31 +50,31 @@ WARP_BALL_SOLREF_TIMECONST = 0.010
 # contact is identical either way, and the ball wins its own contact outright via
 # priority=1.
 _PITCH_XML = """
-    <geom name="ground" type="plane" size="48 36 0.48" friction="1 0.005 0.0001"/>
+    <geom name="ground" type="plane" size="48 36 0.48" friction="1 0.005 0.0001" material="pitch_mat"/>
     <geom name="wall_nx" type="plane" pos="-48 0 0" zaxis="1 0 0"  size="0 0 .48"/>
     <geom name="wall_px" type="plane" pos="48 0 0"  zaxis="-1 0 0" size="0 0 .48"/>
     <geom name="wall_ny" type="plane" pos="0 -36 0" zaxis="0 1 0"  size="0 0 .48"/>
     <geom name="wall_py" type="plane" pos="0 36 0"  zaxis="0 -1 0" size="0 0 .48"/>
-    <geom name="home_goal_right_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="home_goal_left_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="home_goal_top_post" type="capsule" size="0.4057 11.8800" pos="-42.6667 0.0000 5.3333" quat="0.70711 0.70711 0.00000 -0.00000"/>
-    <geom name="home_goal_right_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 -11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000"/>
-    <geom name="home_goal_left_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000"/>
-    <geom name="home_goal_back_base" type="capsule" size="0.4016 11.8800" pos="-48.0000 0.0000 0.0000" quat="0.70711 0.70711 0.00000 -0.00000"/>
-    <geom name="home_goal_right_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000"/>
-    <geom name="home_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 -11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="home_goal_left_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000"/>
-    <geom name="home_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="away_goal_right_post" type="capsule" size="0.4016 2.6667" pos="42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="away_goal_left_post" type="capsule" size="0.4016 2.6667" pos="42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="away_goal_top_post" type="capsule" size="0.4057 11.8800" pos="42.6667 0.0000 5.3333" quat="0.70711 -0.70711 0.00000 0.00000"/>
-    <geom name="away_goal_right_base" type="capsule" size="0.4016 2.6667" pos="45.3333 11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="away_goal_left_base" type="capsule" size="0.4016 2.6667" pos="45.3333 -11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="away_goal_back_base" type="capsule" size="0.4016 11.8800" pos="48.0000 0.0000 0.0000" quat="0.70711 -0.70711 0.00000 0.00000"/>
-    <geom name="away_goal_right_support" type="capsule" size="0.3012 3.1098" pos="46.4000 11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000"/>
-    <geom name="away_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000"/>
-    <geom name="away_goal_left_support" type="capsule" size="0.3012 3.1098" pos="46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000"/>
-    <geom name="away_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 -11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000"/>
+    <geom name="home_goal_right_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="home_goal_top_post" type="capsule" size="0.4057 11.8800" pos="-42.6667 0.0000 5.3333" quat="0.70711 0.70711 0.00000 -0.00000" material="goal_mat"/>
+    <geom name="home_goal_right_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 -11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
+    <geom name="home_goal_back_base" type="capsule" size="0.4016 11.8800" pos="-48.0000 0.0000 0.0000" quat="0.70711 0.70711 0.00000 -0.00000" material="goal_mat"/>
+    <geom name="home_goal_right_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000" material="goal_mat"/>
+    <geom name="home_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 -11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_post" type="capsule" size="0.4016 2.6667" pos="42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_post" type="capsule" size="0.4016 2.6667" pos="42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_top_post" type="capsule" size="0.4057 11.8800" pos="42.6667 0.0000 5.3333" quat="0.70711 -0.70711 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_base" type="capsule" size="0.4016 2.6667" pos="45.3333 11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_base" type="capsule" size="0.4016 2.6667" pos="45.3333 -11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_back_base" type="capsule" size="0.4016 11.8800" pos="48.0000 0.0000 0.0000" quat="0.70711 -0.70711 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_support" type="capsule" size="0.3012 3.1098" pos="46.4000 11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_support" type="capsule" size="0.3012 3.1098" pos="46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 -11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
 """
 
 # Goal mouth centres, for the `shoot` task obs. Home goal is at -x, away at +x.
@@ -82,11 +82,26 @@ GOAL_X = 42.6667
 GOAL_HALF_WIDTH = 11.88
 GOAL_HEIGHT = 5.3333
 
+# Materials are VISUAL ONLY -- rgba/texture never enter contact dynamics, so
+# adding them cannot change a trained policy's behaviour. The pitch previously
+# rendered as undifferentiated MuJoCo grey, which makes an eval video hard to
+# read: you cannot see the ant moving relative to the ground, or tell where the
+# goal is. `pitch_mat` is assigned to the ground by name below; the goal geoms
+# pick up `goal_mat` the same way.
 _BASE_XML = f"""
 <mujoco model="warp_drill">
   <option cone="elliptic" timestep="0.0025"/>
   <visual><global offwidth="1024" offheight="1024"/></visual>
-  <worldbody>{_PITCH_XML}  </worldbody>
+  <asset>
+    <texture name="pitch_tex" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.16 0.42 0.18" rgb2="0.13 0.36 0.15"/>
+    <material name="pitch_mat" texture="pitch_tex" texrepeat="24 18"
+              reflectance="0.05"/>
+    <material name="goal_mat" rgba="0.93 0.93 0.95 1"/>
+  </asset>
+  <worldbody>
+    <light name="sun" pos="0 0 30" dir="0 0 -1" diffuse="0.9 0.9 0.9"
+           directional="true" castshadow="false"/>{_PITCH_XML}  </worldbody>
 </mujoco>
 """
 

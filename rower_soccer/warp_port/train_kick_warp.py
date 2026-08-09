@@ -68,7 +68,7 @@ def make_eval(args):
     env = make_env(args, num_worlds=1, seed=7, use_graph=True)
     # Render the arena the physics actually runs in, not the default pitch.
     return env, WarpRenderer(args.creature_xml, has_ball=True,
-                             base_xml=_arena_xml(env._floor_half), distance=8.0)
+                             base_xml=env._base_xml(), distance=8.0)
 
 
 def main():

@@ -43,7 +43,7 @@ def make_eval(args, has_ball=False):
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
     # Render the arena (the physics scene), not the default pitch background.
     return env, WarpRenderer(args.creature_xml, has_ball=False,
-                             base_xml=_arena_xml(env._floor_half))
+                             base_xml=env._base_xml())
 
 
 _STYLE_REF_DEFAULT = os.path.join(

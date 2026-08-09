@@ -51,7 +51,7 @@ def make_eval(args):
         target_cone=getattr(args, "target_cone", 0.0))
     # Render the arena (the physics scene), not the default pitch background.
     return env, WarpRenderer(args.creature_xml, has_ball=True,
-                             base_xml=_arena_xml(env._floor_half))
+                             base_xml=env._base_xml())
 
 
 def main():

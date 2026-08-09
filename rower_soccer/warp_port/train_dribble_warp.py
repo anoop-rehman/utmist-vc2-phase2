@@ -35,7 +35,7 @@ def make_eval(args):
     """One-world Warp env + renderer, built once and reused. Warp is ground truth."""
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
     from rower_soccer.warp_port.render import WarpRenderer
-    from rower_soccer.warp_port.worm_env_base import _arena_xml
+    from rower_soccer.warp_port.scene import BallSpec
     env = WarpDribbleEnv(
         num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
         ball=BallSpec(radius=args.ball_radius, mass=args.ball_mass), arena=args.arena, pitch_scale=args.pitch_scale,

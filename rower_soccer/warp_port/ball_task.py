@@ -376,9 +376,13 @@ class KickToPointReward(_StrikeReward):
         self.reward_coef = reward_coef
 
     def __call__(self, env):
-        # Paid once, on the step the segment closes -- env.seg_reset is exactly
-        # that set (it is assigned in _close_segments for the worlds that ended).
-        pay = self.w_arrive * env.arrival() * env.seg_reset.float()
+        # env.last_arrival, NOT env.arrival(): the env has already respawned the
+        # ball by the time the reward is computed, so arrival() would price the
+        # NEW segment's spawn distance instead of the kick that just happened.
+        # last_arrival is the value snapshotted before the respawn, and is zero
+        # on every step except the one a segment closes -- so it needs no
+        # further gating.
+        pay = self.w_arrive * env.last_arrival
         return (pay + self.w_strike * env.credit
                 + env.shaping_scale * self._shaping(env))
 

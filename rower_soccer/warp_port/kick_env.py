@@ -133,6 +133,17 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         self.seg_target_best = torch.full((self.n,), float(self.target_dist),
                                           device=dev)
         self.seg_best_t = torch.zeros(self.n, device=dev)   # when that happened
+        # Arrival achieved by the segment that closed ON THIS STEP, zero on every
+        # other step. The reward MUST read this and not call arrival() itself:
+        # env.step() runs _update_task (which closes segments, which respawns the
+        # ball and overwrites seg_target_best with the NEW spawn distance) BEFORE
+        # it computes the reward. Reading arrival() at reward time therefore
+        # prices the fresh spawn, not the kick that just happened -- measured at
+        # 0.057 mean against the 0.223 actually achieved, i.e. no signal at all.
+        # Fitness was unaffected because it accumulates before the close, which
+        # is exactly why the training curve looked fine while the objective was
+        # empty.
+        self.last_arrival = torch.zeros(self.n, device=dev)
         self.target_fit_sum = torch.zeros(self.n, device=dev)
         self.prev_target_fit_sum = torch.zeros(self.n, device=dev)
         self.prev_n_segments = torch.zeros(self.n, device=dev)
@@ -176,9 +187,15 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         # A segment that ends without release ever firing (creature still
         # standing over the ball) still banks whatever strike it made.
         self._bank(end)
+        # Snapshot arrival BEFORE _close_segments respawns and overwrites
+        # seg_target_best. Both the fitness accumulator and the reward read this
+        # same value, so they can never disagree again.
+        arrived = self.arrival()
+        self.last_arrival = torch.where(end, arrived,
+                                        torch.zeros_like(self.last_arrival))
         if bool(end.any()):
             idx = end.nonzero(as_tuple=True)[0]
-            self.target_fit_sum[idx] += self.arrival()[idx]
+            self.target_fit_sum[idx] += arrived[idx]
         self._close_segments(end)
 
     def arrival(self):

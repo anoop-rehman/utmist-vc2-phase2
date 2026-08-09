@@ -31,15 +31,38 @@ this exact ball (~1100:1), so density is reduced to hold mass near the original
 25 kg and keep the soccer-like ratio we already have (557:1). (fetch's 8:1 is
 the outlier: its ball is a 14 kg medicine ball, not a football.)
 
-GEAR scales with length. Holding mass fixed while lengthening the limbs
-multiplies the lever arm the legs work against, so the torque needed to support
-and swing the body grows ~linearly in L; leaving gear alone would produce a
-creature that cannot stand -- the exact failure mode the rower's gear_scale bug
-caused, and which cost a 448M-step run.
+GEAR DOES NOT SCALE (armature and damping do -- they are a separate knob, see
+below). The first version of this file scaled gear by L too, reasoning that
+longer levers need more torque. That is true only when
+mass grows with volume -- and mass is held constant here, so the weight the legs
+support never increased and the scaling multiplied STRENGTH-TO-WEIGHT by 2.7.
+The result was an ant that flung itself 3.45 m up, nearly 2.8x its own standing
+height, which read on video as low gravity. Measured under identical excitation:
 
-ARMATURE and DAMPING scale with gear, per the invariance rule recorded in
-three_seg_worm.xml's header: scaling them together leaves the joint dynamics
-consistent rather than making the joints feel stiff or floppy at the new size.
+    gear x1.0  ratio 16.8  max height 2.12 m  airborne 0.0%  upright 0.995
+    gear x1.5  ratio 25.2  max height 2.53 m  airborne 0.0%  upright 0.989
+    gear x2.0  ratio 33.6  max height 3.00 m  airborne 0.1%  upright 0.971
+    gear x2.7  ratio 45.3  max height 3.45 m  airborne 0.7%  upright 0.804
+
+x1.0 restores ant_v1's 16.8 strength-to-weight, which is the invariant that
+matters. The lesson generalises past this file: a scaling rule is only valid
+under the assumption it was derived from, and this one was applied to a model
+built on the opposite assumption. The rower's gear_scale bug was the same class
+of error pointing the other way (too little torque, 448M wasted steps), which is
+why the first version cited it as justification -- and then reproduced it.
+
+ARMATURE and DAMPING scale with L. They are a SEPARATE knob from gear, and
+conflating the two is what made the first version wrong: gear sets
+strength-to-weight (whether the ant launches itself), armature and damping set
+joint compliance (whether it settles). With gear held at 1.0:
+
+    arm/damp x1.0   max height 2.67 m   upright 0.967
+    arm/damp x2.7   max height 1.91 m   upright 0.995
+    arm/damp x5.0   max height 1.73 m   upright 0.996
+
+Note the stability gate (random torque, no divergence) does NOT catch any of
+this: the 2.7x-gear ant never diverged, it just launched. Check
+strength-to-weight and uprightness explicitly.
 """
 
 import argparse
@@ -60,14 +83,43 @@ def _scale_triplet(text, attr, k, n=None):
     return re.sub(rf'({attr})="([^"]+)"', repl, text)
 
 
-def scale(src, length_scale, hold_mass=True):
+def scale(src, length_scale, hold_mass=True, gear_scale=1.0):
     s = src
     # geometry
     s = _scale_triplet(s, "size", length_scale)
     s = _scale_triplet(s, "fromto", length_scale)
     s = _scale_triplet(s, "pos", length_scale)
-    # actuation: torque must grow with the lever arm (see module docstring)
-    s = _scale_triplet(s, "gear", length_scale)
+    # ACTUATION IS NOT SCALED, and getting this wrong is what produced a
+    # "low gravity" ant that flung itself 3.45 m into the air.
+    #
+    # The tempting argument is "longer levers need more torque". That is only
+    # true when mass grows with volume. Here mass is HELD CONSTANT (see below),
+    # so the weight the legs support never increased, and multiplying gear by L
+    # multiplies strength-to-weight by L. Measured under identical excitation:
+    #
+    #     gear x1.0  ratio 16.8  max height 2.12 m  airborne 0.0%  upright 0.995
+    #     gear x1.5  ratio 25.2  max height 2.53 m  airborne 0.0%  upright 0.989
+    #     gear x2.0  ratio 33.6  max height 3.00 m  airborne 0.1%  upright 0.971
+    #     gear x2.7  ratio 45.3  max height 3.45 m  airborne 0.7%  upright 0.804
+    #
+    # x1.0 restores ant_v1's 16.8 strength-to-weight, which is the invariant that
+    # actually matters. Armature and damping stay with it: they are joint-space
+    # quantities paired to gear by the invariance rule in three_seg_worm.xml's
+    # header, and scaling them alone would just make the joints feel wrong.
+    if gear_scale != 1.0:
+        s = _scale_triplet(s, "gear", gear_scale)
+    # ARMATURE and DAMPING *do* scale with length, and they are a SEPARATE knob
+    # from gear -- conflating the two is what made the first version wrong.
+    # gear sets strength-to-weight (whether the ant launches itself); armature
+    # and damping set joint compliance (whether it settles). Measured with gear
+    # held at 1.0:
+    #
+    #     arm/damp x1.0   max height 2.67 m   upright 0.967
+    #     arm/damp x2.7   max height 1.91 m   upright 0.995
+    #     arm/damp x5.0   max height 1.73 m   upright 0.996
+    #
+    # x2.7 (= length) already reaches 0.995; x5.0 buys almost nothing and
+    # over-damped joints cost the agility the ball drills need.
     s = _scale_triplet(s, "armature", length_scale)
     s = _scale_triplet(s, "damping", length_scale)
     if hold_mass:
@@ -85,12 +137,18 @@ def main():
     p.add_argument("--in", dest="src", default=DEFAULT_IN)
     p.add_argument("--out", required=True)
     p.add_argument("--length-scale", type=float, default=2.7)
+    p.add_argument("--gear-scale", type=float, default=1.0,
+                   help="multiplier on gear/armature/damping. LEAVE AT 1.0: "
+                        "mass is held constant, so scaling torque with length "
+                        "raises strength-to-weight and the ant launches itself "
+                        "(measured: 3.45 m at 2.7x, uprightness 0.804).")
     p.add_argument("--grow-mass", action="store_true",
                    help="let mass follow L^3 (do not: see the module docstring)")
     a = p.parse_args()
 
     src = open(a.src).read()
-    out = scale(src, a.length_scale, hold_mass=not a.grow_mass)
+    out = scale(src, a.length_scale, hold_mass=not a.grow_mass,
+                gear_scale=a.gear_scale)
     note = (f"\n    <!-- GENERATED by rower_soccer.tools.scale_ant from "
             f"{os.path.basename(a.src)} at length_scale={a.length_scale:g}, "
             f"mass {'grown as L^3' if a.grow_mass else 'HELD constant'}. "

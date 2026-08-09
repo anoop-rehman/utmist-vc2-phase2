@@ -32,7 +32,7 @@
               seg3/7  (y neg)  seg4/8       -->
     <compiler angle="degree" />
     <default>
-        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="11137.5" />
+        <motor ctrlrange="-1.0 1.0" ctrllimited="true" gear="4125" />
         <geom friction="1 0.5 0.5" solref=".02 1" solimp="0 .8 .01" material="self" density="6.98572" />
         <joint limited="true" armature="74.25" damping="74.25" solreflimit=".04 1" solimplimit="0 .8 .03" />
     </default>

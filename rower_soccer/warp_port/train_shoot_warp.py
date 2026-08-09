@@ -29,7 +29,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
     from rower_soccer.warp_port.shoot_env import WarpShootEnv
     return WarpShootEnv(
         num_worlds=num_worlds, seed=seed, use_graph=use_graph,
-        creature_xml=args.creature_xml,
+        creature_xml=args.creature_xml, arena=args.arena,
         episode_seconds=args.episode_secs, segment_seconds=args.segment_secs,
         shoot_dist_range=tuple(args.shoot_dist),
         ball_spawn_range=tuple(args.ball_spawn),
@@ -130,6 +130,14 @@ def main():
 
     # -- run plumbing -------------------------------------------------------
     p.add_argument("--max-hours", type=float, default=48.0)
+    p.add_argument("--arena", default="fenced", choices=["fenced", "pitch"],
+                   help="'fenced' is the small walled arena (wall at "
+                        "--floor-half); 'pitch' is the real 2v2 soccer pitch. "
+                        "Geometry only -- timestep, cone, floor friction and "
+                        "solref are identical, verified on the compiled models. "
+                        "Use 'pitch' so the fence stops being part of the task: "
+                        "23.5%% of mid-episode kick targets land outside a 10 m "
+                        "wall, asking the ant to arc the ball over it.")
     p.add_argument("--creature-xml", default="creature_configs/ant.xml")
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)

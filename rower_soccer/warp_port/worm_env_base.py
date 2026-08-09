@@ -229,9 +229,12 @@ class WormEnv:
                  episode_seconds=15.0, use_gpu=True, device=None, seed=0,
                  use_graph=True, nconmax=64, njmax=512, reward=None,
                  backend_cls=None, floor_half=5.0, energy_coef=0.0,
-                 smooth_coef=0.0, rew_clip=(-10.0, 10.0)):
+                 smooth_coef=0.0, rew_clip=(-10.0, 10.0), arena="fenced"):
         self.n = num_worlds
         self._floor_half = floor_half
+        # "fenced" = the small walled arena (wall at floor_half); "pitch" = the
+        # real 2v2 soccer pitch. See _base_xml for why this is geometry-only.
+        self._arena = arena
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
         self.n_diverged = 0
         self.energy_coef = energy_coef
@@ -315,6 +318,28 @@ class WormEnv:
         return BallSpec()
 
     def _base_xml(self):
+        """The scene the drill trains in: the small fenced arena, or the pitch.
+
+        `arena="pitch"` returns None, which makes build_creature_scene fall back
+        to scene._BASE_XML -- the actual 2v2 soccer pitch. This is not a physics
+        change: measured on the compiled models, arena and pitch agree on
+        timestep (0.0025), cone (elliptic), floor friction (1, 0.005, 0.0001)
+        and floor solref (0.005, 1). The arena simply omits the friction
+        attribute and inherits MuJoCo's default, which is the value the pitch
+        states explicitly. Only geometry differs, and every extra geom (goals,
+        walls) sits at 42 m or beyond.
+
+        Why it matters: the fenced arena's wall is at 10 m, but kick spawns its
+        target 4-8 m past a ball that is 1.5-3 m from a creature which has
+        drifted a measured ~6 m from the origin by mid-episode. 23.5% of
+        mid-episode kick targets therefore land OUTSIDE the wall (furthest
+        measured 16.5 m), asking the ant to arc the ball over a fence -- a
+        quarter of training spent on attempts whose reward is capped by
+        geometry. The pitch bounds the same drill at x=+/-48, y=+/-36, which the
+        ant cannot reach, so the fence stops being part of the task.
+        """
+        if self._arena == "pitch":
+            return None
         return _arena_xml(self._floor_half)
 
     def _post_build_model(self, model):

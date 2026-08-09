@@ -37,7 +37,7 @@ def make_eval(args):
     from rower_soccer.warp_port.render import WarpRenderer
     from rower_soccer.warp_port.worm_env_base import _arena_xml
     env = WarpDribbleEnv(
-        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
+        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml, arena=args.arena,
         target_speed_range=tuple(args.target_speed),
         ball_spawn_range=tuple(args.ball_spawn),
         target_dist_range=tuple(args.target_dist),
@@ -157,6 +157,14 @@ def main():
     # is really an unpredictable time target. --steps stays as a backstop.
     p.add_argument("--max-hours", type=float, default=48.0,
                    help="stop after this much wallclock, whatever step count that is")
+    p.add_argument("--arena", default="fenced", choices=["fenced", "pitch"],
+                   help="'fenced' is the small walled arena (wall at "
+                        "--floor-half); 'pitch' is the real 2v2 soccer pitch. "
+                        "Geometry only -- timestep, cone, floor friction and "
+                        "solref are identical, verified on the compiled models. "
+                        "Use 'pitch' so the fence stops being part of the task: "
+                        "23.5%% of mid-episode kick targets land outside a 10 m "
+                        "wall, asking the ant to arc the ball over it.")
     p.add_argument("--creature-xml",
                    default="creature_configs/three_seg_worm.xml")
     p.add_argument("--run-name", required=True)

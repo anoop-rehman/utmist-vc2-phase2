@@ -30,7 +30,7 @@ class WarpDribbleEnv(MovingTargetMixin, WormEnv):
                  approach_scale=0.5, ball: BallSpec = None, nconmax=64, njmax=512,
                  energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0),
                  fixed_start=False, target_cone=0.0, reward=None, floor_half=5.0,
-                 use_gpu=True, backend_cls=None):
+                 use_gpu=True, backend_cls=None, arena="fenced"):
         self._lookahead = lookahead
         self._bounds = bounds
         self._speed_range = target_speed_range
@@ -51,7 +51,7 @@ class WarpDribbleEnv(MovingTargetMixin, WormEnv):
                          nconmax=nconmax, njmax=njmax, reward=reward,
                          floor_half=floor_half, energy_coef=energy_coef,
                          smooth_coef=smooth_coef, rew_clip=rew_clip,
-                         backend_cls=backend_cls)
+                         backend_cls=backend_cls, arena=arena)
 
     def _ball_spec(self):
         return self._ball or BallSpec()

@@ -69,7 +69,8 @@ def sim_thread(follow_path, dribble_path, creature_xml, ready, use_gpu=True):
     # default pitch), so the walls the worm actually collides with are drawn.
     ren = WarpRenderer(creature_xml, has_ball=True, width=PX, height=PX,
                        topdown=True, view_half=VIEW_HALF, cam_height=CAM_HEIGHT,
-                       base_xml=_arena_xml(env._floor_half))
+                       base_xml=_arena_xml(env._floor_half),
+                       ball=env._ball_spec())
 
     dribble_ac = ActorCritic(env.obs_dim, env.act_dim,
                              proprio_indices=env.proprio_indices.tolist(),

@@ -29,13 +29,13 @@ import numpy as np
 import torch
 
 from rower_soccer.warp_port import curriculum
+from rower_soccer.warp_port.scene import BallSpec
 
 
 def make_eval(args):
     """One-world Warp env + renderer, built once and reused. Warp is ground truth."""
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
     from rower_soccer.warp_port.render import WarpRenderer
-    from rower_soccer.warp_port.scene import BallSpec
     env = WarpDribbleEnv(
         num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
         ball=BallSpec(radius=args.ball_radius, mass=args.ball_mass), arena=args.arena, pitch_scale=args.pitch_scale,
@@ -51,8 +51,13 @@ def make_eval(args):
         fixed_start=getattr(args, "fixed_start", False),
         target_cone=getattr(args, "target_cone", 0.0))
     # Render the arena (the physics scene), not the default pitch background.
+    # ball=env._ball_spec() is the SAME object the physics scene was built from.
+    # Omitting it fell back to BallSpec()'s r=0.35 default while the physics ran
+    # r=0.15, so every eval video drew a ball 2.3x too big and the creature
+    # appeared to walk through it -- a scene that looks broken while the numbers
+    # are fine.
     return env, WarpRenderer(args.creature_xml, has_ball=True,
-                             base_xml=env._base_xml())
+                             base_xml=env._base_xml(), ball=env._ball_spec())
 
 
 def main():
@@ -233,8 +238,15 @@ def main():
                                             load_checkpoint, load_pretrained,
                                             save_checkpoint)
 
+    # ball / arena / pitch_scale MUST be threaded here too. They were only on the
+    # eval env, so --ball-radius 0.15 --arena pitch trained a 0.35 ball inside the
+    # small fenced arena and then evaluated a 0.15 ball on the pitch: a different
+    # task in a different world, with no error anywhere to say so.
     env = WarpDribbleEnv(num_worlds=args.worlds, seed=args.seed,
                          creature_xml=args.creature_xml,
+                         ball=BallSpec(radius=args.ball_radius,
+                                       mass=args.ball_mass),
+                         arena=args.arena, pitch_scale=args.pitch_scale,
                          target_speed_range=tuple(args.target_speed),
                          reward_coef=args.reward_coef,
                          episode_seconds=args.episode_secs,

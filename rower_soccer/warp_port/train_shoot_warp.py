@@ -57,7 +57,8 @@ def make_eval(args):
     from rower_soccer.warp_port.render import WarpRenderer
     env = make_env(args, num_worlds=1, seed=7, use_graph=True)
     return env, WarpRenderer(args.creature_xml, has_ball=True, base_xml=None,
-                             distance=14.0, elevation=-25.0)
+                             distance=14.0, elevation=-25.0,
+                             ball=env._ball_spec())
 
 
 def main():

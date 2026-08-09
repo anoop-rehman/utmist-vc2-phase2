@@ -57,7 +57,7 @@ class WarpRenderer:
         self.cam.elevation = elevation
         self.cam.azimuth = azimuth
 
-    def frame(self, env, w=0, target_height=0.5):
+    def frame(self, env, w=0, target_height=None):
         """Copy world `w` of `env` into the render model and return an RGB frame."""
         q = self.data.qpos
         q[:self.n_phys_qpos] = env.qpos[w, :self.n_phys_qpos].detach().cpu().numpy()
@@ -68,7 +68,17 @@ class WarpRenderer:
         # invent a target_xy just to be renderable.
         if getattr(env, "target_xy", None) is not None:
             tx, ty = env.target_xy[w].detach().cpu().numpy()
-            q[self.tgt_qpos:self.tgt_qpos + 3] = [tx, ty, target_height]
+            # Draw the marker at the height the REWARD actually scores against,
+            # not a fixed 0.5. kick grades a 3-D ball-to-target distance with the
+            # target at ball-resting height (0.35 m for our ball), so a marker
+            # floating 15 cm above it means anyone judging "did it hit the
+            # target" from the video is calibrated against the wrong point --
+            # and "it flies over the target" is exactly the call that mismatch
+            # would corrupt. Envs without a scored z fall back to 0.5.
+            tz = getattr(env, "_target_z", None)
+            if tz is None:
+                tz = 0.5 if target_height is None else target_height
+            q[self.tgt_qpos:self.tgt_qpos + 3] = [tx, ty, float(tz)]
         else:
             q[self.tgt_qpos:self.tgt_qpos + 3] = [0.0, 0.0, -100.0]
         q[self.tgt_qpos + 3:self.tgt_qpos + 7] = [1.0, 0.0, 0.0, 0.0]

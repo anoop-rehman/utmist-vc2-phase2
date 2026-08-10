@@ -65,6 +65,12 @@ def make_skill_soccer_env(home=("ant",), away=(), *, time_limit=45.0,
         if kind not in B.CREATURE_XMLS:
             B.CREATURE_XMLS[kind] = creature_xml_path(kind)
 
+    # The drill ball (r=0.15) unless the caller says otherwise: every current
+    # skill checkpoint trained on it, and evaluating one against the stock
+    # 0.35 m ball measures a task the policy never saw. Measured on
+    # dribble_ant_v3: 5/9 legs moved the ball, median final distance 3.35 m on
+    # the wrong ball.
+    kwargs.setdefault("ball", B.drill_ball())
     env = B.make_soccer_env(home_team=tuple(home), away_team=tuple(away),
                             n_away=0 if not away else None,
                             time_limit=time_limit, random_state=random_state,

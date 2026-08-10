@@ -72,7 +72,10 @@ class MatchSim:
         # this class makes, not side effects of composer truncation.
         self.env = B.make_soccer_env(home_team=team, away_team=team,
                                      time_limit=1e6, random_state=self.seed,
-                                     terminate_on_goal=False)
+                                     terminate_on_goal=False,
+                                     # The ball the skills trained on (r=0.15) —
+                                     # the stock 0.35 ball is a different task.
+                                     ball=B.drill_ball())
         self.task = self.env.task
         self.arena = self.task.arena
         # RandomizedPitch samples its size from [_min_size, _max_size] every episode;

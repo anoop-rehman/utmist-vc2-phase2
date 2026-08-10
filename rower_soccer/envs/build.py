@@ -59,9 +59,21 @@ def make_creature(kind="rower", team="home", expose_root_pose=False):
     return creature
 
 
+def drill_ball():
+    """The ball every v3 ant drill trained on: dm_soccer's SoccerBall at radius
+    0.15 m (mass/friction stock). This is `warp_port/scene.BallSpec(radius=0.15,
+    mass=0.045)` expressed as the CPU env's own ball class — the proportion that
+    matches dm_control fetch (ball/torso 0.52). Pass it to `make_soccer_env`
+    whenever a drill-trained policy plays; the 0.35 default is 2.3x the ball
+    those checkpoints ever touched."""
+    from dm_control.locomotion.soccer.soccer_ball import SoccerBall
+    return SoccerBall(radius=0.15, mass=0.045)
+
+
 def make_soccer_env(home_team=DEFAULT_TEAM, away_team=DEFAULT_TEAM,
                     n_home=None, n_away=None, time_limit=45.0, random_state=None,
-                    disable_walker_contacts=False, terminate_on_goal=True):
+                    disable_walker_contacts=False, terminate_on_goal=True,
+                    ball=None):
     """Creature soccer env. Teams are tuples of creature kinds, e.g.
     ("rower", "worm"). n_home/n_away (int) are a homogeneous-rower shorthand.
     Actions/observations are per-player lists, home players first."""
@@ -78,4 +90,5 @@ def make_soccer_env(home_team=DEFAULT_TEAM, away_team=DEFAULT_TEAM,
         random_state=random_state,
         disable_walker_contacts=disable_walker_contacts,
         terminate_on_goal=terminate_on_goal,
+        ball=ball,
     )

@@ -44,7 +44,7 @@ from rower_soccer.skills import (CheckpointMismatch, PROPRIO_V1, SkillController
 from rower_soccer.skills.api import ObservationContractError, PlayerFrame
 from rower_soccer.skills.fields import ACCEL_CLIP, ACCEL_SCALE
 
-ANT_FOLLOW = "runs_v2/follow_ant_v1/best.pt"
+ANT_FOLLOW = "runs_v2/follow_ant_final_frozen/best.pt"
 
 
 # --- tiny harness ----------------------------------------------------------
@@ -124,21 +124,26 @@ def test_worm_contract_widths():
 
 
 def test_follow_layout_is_proprio_then_task():
+    # v3 contract: 3-D target + future = task 6, on 65 proprio.
     obs_dim, p_idx, t_idx = get_spec("follow").layout(contract_for("ant"))
-    assert obs_dim == 69
+    assert obs_dim == 71
     assert p_idx == list(range(65))
-    assert t_idx == list(range(65, 69))
+    assert t_idx == list(range(65, 71))
 
 
-def test_dribble_layout_puts_ball_ego_first():
-    """dribble_env replicates dm_control's SORTED-key order, where "ball_ego"
-    sorts ahead of "creature/*". The registry must encode that rather than assume
-    proprio-first — this is the case a naive design gets wrong."""
-    obs_dim, p_idx, t_idx = get_spec("dribble").layout(contract_for("ant"))
-    assert obs_dim == 75
-    assert t_idx[:6] == [0, 1, 2, 3, 4, 5]
-    assert p_idx == list(range(6, 71))
-    assert t_idx[6:] == [71, 72, 73, 74]
+def test_drill_layouts_are_proprio_first_v3():
+    """The v3 drills all emit worm_env_base's proprio-FIRST layout (v1's dribble
+    was ball-first, replicating dm_control's sorted-key order — that contract is
+    retired with its checkpoints). The registry must encode the layout each
+    delivered checkpoint actually trained on; `load_policy` compares these
+    indices against the checkpoint's own p_idx/t_idx buffers, so a drift here
+    fails the load rather than permuting the decoder's input."""
+    c = contract_for("ant")
+    for sid, task_w in (("dribble", 12), ("kick", 12), ("shoot", 13)):
+        obs_dim, p_idx, t_idx = get_spec(sid).layout(c)
+        assert obs_dim == 65 + task_w, sid
+        assert p_idx == list(range(65)), sid
+        assert t_idx == list(range(65, 65 + task_w)), sid
 
 
 def test_proprio_block_is_the_decoder_contract():
@@ -149,18 +154,22 @@ def test_proprio_block_is_the_decoder_contract():
 
 
 def test_adding_a_skill_is_configuration_not_code():
+    # The worm has no v3 checkpoints, so it plays the "not yet trained" role the
+    # ant played before all four ant skills landed.
     from dataclasses import replace
     from rower_soccer.skills import SKILLS, register_skill
 
-    assert not SKILLS["dribble"].is_available("ant")
-    spec = replace(SKILLS["dribble"], checkpoints={"ant": "/nowhere/best.pt"})
+    assert not SKILLS["dribble"].is_available("worm")
+    orig = SKILLS["dribble"]
+    spec = replace(orig, checkpoints={**orig.checkpoints,
+                                      "worm": "/nowhere/best.pt"})
     try:
         register_skill(spec, replace_existing=True)
-        assert SKILLS["dribble"].is_available("ant")
-        assert SKILLS["dribble"].checkpoint_for("ant") == "/nowhere/best.pt"
+        assert SKILLS["dribble"].is_available("worm")
+        assert SKILLS["dribble"].checkpoint_for("worm") == "/nowhere/best.pt"
     finally:
-        register_skill(replace(spec, checkpoints={}), replace_existing=True)
-    assert not SKILLS["dribble"].is_available("ant")
+        register_skill(orig, replace_existing=True)
+    assert not SKILLS["dribble"].is_available("worm")
 
 
 def test_scripted_inherits_follows_weights():
@@ -173,8 +182,9 @@ def test_unknown_and_unavailable_skills_raise():
     ctrl = SkillController("ant", quiet=True)
     with raises(UnknownSkill, "teleport"):
         ctrl.set_command("teleport", (0.0, 0.0))
-    with raises(SkillUnavailable, "not trained yet"):
-        ctrl.set_command("shoot", (0.0, 0.0))      # registered, never trained
+    with raises(SkillUnavailable, "no checkpoint for creature"):
+        # every ant skill is trained now; the worm still has none
+        SkillController("worm", quiet=True).set_command("shoot", (0.0, 0.0))
     with raises(SkillUnavailable, "needs a target_xy"):
         ctrl.set_command("follow")
 
@@ -404,17 +414,22 @@ def test_default_mode_is_the_mean():
     ctrl = SkillController("ant", quiet=True, preload=("follow",))
     assert ctrl.action_mode == MODE_MEAN
     expert = ctrl._expert("follow")
-    assert expert.info.action_std > 0.9      # ent_ceil=0 pinned log_std at 0
+    # ent_ceil=0 lets log_std ride high: v1 finished at ~1.0, the frozen-decoder
+    # follow at ~0.72. Anything past wide_std's threshold makes the same point —
+    # the mean and sampled policies differ a lot, and we must run the mean.
     assert expert.wide_std                   # noticed...
     assert ctrl.action_mode == MODE_MEAN     # ...and not acted on
 
 
-def test_follow_default_checkpoint_is_final_not_best():
-    """`best.pt` is whichever checkpoint scored highest on the WARP eval — for
-    follow_ant_v1 the 55.8M-step one. Measured in the CPU soccer env it is much
-    worse than `final.pt` (77% upright / 1.44 m vs 99.9% / 0.56 m over six 45-s
-    episodes) and has a symmetric-input fixed point. See registry.py."""
-    assert get_spec("follow").checkpoint_for("ant").endswith("final.pt")
+def test_follow_checkpoint_is_the_pinned_v3_artifact():
+    """Which artifact of a run to pin is a MEASURED decision, not a convention —
+    follow_ant_v1's best.pt had a symmetric-input fixed point its final.pt did
+    not (see registry.py's v1 history). This pin asserts the registry points at
+    the v3 artifact so a silent revert fails a test, and its docstring is the
+    reminder to re-measure (symmetric-spawn probe + CPU soccer eval) whenever
+    the pin moves."""
+    assert get_spec("follow").checkpoint_for("ant").endswith(
+        "follow_ant_final_frozen/best.pt")
 
 
 # --- soccer env ------------------------------------------------------------
@@ -441,8 +456,11 @@ def _warp_formula_obs(env, walker, target_xy):
     touch = np.array(ph.bind(walker.touch_sensors).sensordata).ravel() / 10000.0
     world_zaxis = rot.reshape(9)[6:9]
 
-    d = np.asarray(target_xy, dtype=np.float64) - pos[:2]
-    tgt = np.array([d @ rot[:2, 0], d @ rot[:2, 1]])
+    # v3 target: _target_obs3 lifts the ground point to [x, y, 0] and applies
+    # the FULL 3-D ego transform R^T (t - p) — the z component is how far below
+    # the (tilted) body frame the ground target sits, not zero.
+    t3 = np.array([target_xy[0], target_xy[1], 0.0], dtype=np.float64)
+    tgt = rot.T @ (t3 - pos)
     return np.concatenate([bodies_ego, pos[2:3], jq, jv, sa, sg, sv, touch,
                            world_zaxis, tgt, tgt]).astype(np.float32)
 
@@ -456,7 +474,7 @@ def test_obs_matches_warp_formula():
 
     mine = ctrl.build_obs(get_spec("follow"), frame, target)
     theirs = _warp_formula_obs(env, src.walkers[0], target)
-    assert mine.shape == theirs.shape == (69,)
+    assert mine.shape == theirs.shape == (71,)
     assert np.abs(mine - theirs).max() < 1e-6, np.abs(mine - theirs).max()
 
 

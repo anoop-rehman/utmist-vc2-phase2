@@ -145,6 +145,12 @@ class SkillSpec:
 
 _FOLLOW_FIELDS = PROPRIO_V1 + ("target_ego", "target_ego_future")
 
+# The v3 contract: worm_env_base's proprio-FIRST layout with 3-D task vectors
+# (`_target_obs3` / `_ball_ego6`). Every *_ant_v3 checkpoint and the
+# follow_ant_final line trained on it; p_idx is [0..64] for all of them, which
+# `load_policy` verifies against each checkpoint's own buffers.
+_FOLLOW_FIELDS_V3 = PROPRIO_V1 + ("target_ego3", "target_ego3_future")
+
 SKILLS: Dict[str, SkillSpec] = {}
 
 
@@ -178,8 +184,18 @@ def available_skills(creature: str) -> Tuple[str, ...]:
 
 register_skill(SkillSpec(
     skill_id="follow",
-    fields=_FOLLOW_FIELDS,
-    # final.pt, NOT best.pt — and the difference is large.
+    fields=_FOLLOW_FIELDS_V3,
+    # follow_ant_final_frozen: the follow policy retrained ON the published
+    # frozen decoder (runs_v2/_decoder_ant_final.pt) — the same decoder every
+    # v3 drill checkpoint holds, so all four skills in this registry now share
+    # one motor controller byte-for-byte. best.pt scored 589.9 on the warp eval
+    # at the 3.0 m/s curriculum cap.
+    #
+    # The v1 lesson below still applies VERBATIM to any new checkpoint: probe
+    # the symmetric-spawn fixed point and measure in the CPU soccer env before
+    # trusting it in a match. The historical v1 analysis follows.
+    #
+    # v1: final.pt, NOT best.pt — and the difference is large.
     #
     # `best.pt` is whichever checkpoint scored highest on the deterministic WARP
     # eval (train_follow_warp.py:414): here the 55.8M-step weights, warp fitness
@@ -201,14 +217,18 @@ register_skill(SkillSpec(
     # The lesson generalises: "best" means best on the metric the trainer
     # happened to log, in the simulator it happened to run. Measure a new
     # checkpoint in the env the game uses before pinning it here.
-    checkpoints={"ant": "runs_v2/follow_ant_v1/final.pt"},
-    doc="Walk to a commanded world point and hold there. The stage-1 skill, and "
-        "the only trained expert as of the ant sprint's P1.",
+    checkpoints={"ant": "runs_v2/follow_ant_final_frozen/best.pt"},
+    doc="Walk to a commanded world point and hold there. Trained on the shared "
+        "frozen decoder, like every other skill here.",
 ))
 
 register_skill(SkillSpec(
     skill_id="scripted",
-    fields=_FOLLOW_FIELDS,
+    # Same fields as follow, ALWAYS: weights_from="follow" means this runs the
+    # follow checkpoint, and the loader rejects a fields tuple the checkpoint
+    # was not trained on (task 4-wide vs 6-wide, caught by the test suite when
+    # follow moved to the v3 contract and this line initially did not).
+    fields=_FOLLOW_FIELDS_V3,
     weights_from="follow",
     target_source=TARGET_BALL,
     doc="Naive chase-the-ball baseline for filling an unclaimed player slot: the "
@@ -241,40 +261,43 @@ register_skill(SkillSpec(
 
 register_skill(SkillSpec(
     skill_id="dribble",
-    # Field order CONFIRMED against the delivered checkpoint, not assumed:
-    # dribble_ant_v1's own t_idx is [0..5, 71..74] and p_idx [6..70], i.e.
-    # ball_ego(6) | proprio(65) | target_ego(2) target_ego_future(2) = 75. That
-    # is exactly this tuple, so the provisional guess was right and `load_policy`
-    # accepts it.
-    fields=("ball_ego",) + PROPRIO_V1 + ("target_ego", "target_ego_future"),
-    # best.pt, and unlike `follow` the choice barely matters — which is itself
-    # worth recording. Scored in the CPU soccer env (the env the GAME runs), 6
-    # ball-relative legs each, mean action, via `eval_dribble_soccer.py`:
-    #
-    #     best.pt    ball moved 6/6   median 0.47 m   mean 0.59 m   worst 1.77 m
-    #     final.pt   ball moved 6/6   median 0.36 m   mean 0.65 m   worst 1.83 m
-    #
-    # Each wins one statistic; at n=6 that is a wash, and neither shows anything
-    # like the symmetric-state fixed point that made follow's best.pt unusable.
-    # best.pt also won the warp eval outright (fitness 0.991 vs the run's noisy
-    # tail, which dipped to 0.014 on one eval before recovering), so it is the
-    # better-understood artifact. Re-measure if a v2 lands.
-    checkpoints={"ant": "runs_v2/dribble_ant_v1/best.pt"},
+    # v3 contract: proprio-FIRST (worm_env_base), unlike v1's ball-first
+    # sorted-key order. Confirmed against the checkpoint: dribble_ant_v3's
+    # p_idx is [0..64], t_idx [65..76] = ball_ego(6) | target_ego3(3) |
+    # target_ego3_future(3). dribble_env._task_obs concatenates exactly
+    # [ball_ego, _target_obs3()].
+    fields=PROPRIO_V1 + ("ball_ego", "target_ego3", "target_ego3_future"),
+    # Trained post ball-fix (985cff7): every earlier dribble run that passed
+    # --ball-radius trained on the WRONG (0.35 m) ball in the wrong arena, so
+    # v1's checkpoints and its best-vs-final measurements are void. best.pt =
+    # warp fitness 0.965, ball moved 7.0 m/ep with the target moving 98% of the
+    # episode.
+    checkpoints={"ant": "runs_v2/dribble_ant_v3/best.pt"},
     doc="Drive the ball to a commanded world point. Trained on the FROZEN "
-        "follow decoder (154,632 params held) — the shared-decoder skill chain "
-        "working end to end, which was the ant sprint's critical-path risk.",
+        "shared decoder against the r=0.15 dm_control-proportioned ball.",
 ))
 
 register_skill(SkillSpec(
     skill_id="kick",
-    fields=("ball_ego",) + PROPRIO_V1 + ("target_ego", "target_ego_future"),
-    doc="Strike the ball toward a commanded direction. Env: WS2, training: WS1. "
-        "PROVISIONAL field order.",
+    # kick_env._task_obs: ball_ego6 | _xy_ego3(target) | _dir_ego3(cmd_dir);
+    # t_idx [65..76] confirmed against kick_ant_v3/best.pt. The target field is
+    # the UNSHRUNK strike variant — kick trained targets out to 6 m.
+    fields=PROPRIO_V1 + ("ball_ego", "strike_target_ego3", "cmd_dir_ego3"),
+    checkpoints={"ant": "runs_v2/kick_ant_v3/best.pt"},
+    doc="Strike the ball so it comes to rest at the commanded point (reward-"
+        "kind 'point', w_arrive 3.0). Warp best fitness 0.544, 0.9 strikes/ep.",
 ))
 
 register_skill(SkillSpec(
     skill_id="shoot",
-    fields=("ball_ego",) + PROPRIO_V1 + ("target_ego", "target_ego_future"),
-    doc="Kick with goal geometry and scoring termination. Env: WS2, training: "
-        "WS1. PROVISIONAL field order.",
+    # shoot_env._task_obs: ball_ego6 | goal_mid_ego3 | post_left(2) | post_right(2);
+    # t_idx [65..77] confirmed against shoot_ant_v3/best.pt. The commanded
+    # target IS the goal mouth's ground centre; the goal fields derive mouth
+    # height and post offsets from it (fields.SHOOT_GOAL_*). Trained on the +x
+    # goal only — mirror before building obs for a -x shot (see _post_ego).
+    fields=PROPRIO_V1 + ("ball_ego", "goal_mid_ego3",
+                         "post_left_ego", "post_right_ego"),
+    checkpoints={"ant": "runs_v2/shoot_ant_v3/best.pt"},
+    doc="Kick at the goal mouth. Warp best fitness 0.944, ~1 goal/episode at "
+        "the end of training.",
 ))

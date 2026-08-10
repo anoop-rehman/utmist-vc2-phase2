@@ -62,8 +62,12 @@ def sim_thread(follow_path, dribble_path, creature_xml, ready, use_gpu=True):
 
     # use_gpu=False -> CpuBackend + cpu tensors (no CUDA). The base forces
     # use_graph off on CPU, so the value passed here is honored only on GPU.
+    from rower_soccer.warp_port.scene import BallSpec
     env = WarpDribbleEnv(num_worlds=1, use_gpu=use_gpu, use_graph=use_gpu, seed=0,
-                         creature_xml=creature_xml, episode_seconds=1e6)
+                         creature_xml=creature_xml, episode_seconds=1e6,
+                         # The v3 training ball — the BallSpec default is the
+                         # 0.35 m ball no current checkpoint ever touched.
+                         ball=BallSpec(radius=0.15, mass=0.045))
     dev = env.device   # single source of truth: policy follows the env's device
     # Match the render background to the physics scene (now the arena, not the
     # default pitch), so the walls the worm actually collides with are drawn.

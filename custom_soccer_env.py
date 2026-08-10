@@ -21,6 +21,7 @@ def create_soccer_env(
     enable_field_box=False,
     keep_aspect_ratio=False,
     terminate_on_goal=True,
+    ball=None,
 ):
     """Construct a soccer environment with custom agents.
 
@@ -44,7 +45,9 @@ def create_soccer_env(
     """
     goal_size = None
     field_size = (40, 30)  # Fixed field size
-    ball = SoccerBall()
+    # Default stays dm_soccer's stock 0.35 m ball; pass one explicitly to match
+    # a policy's training ball (the ant drills train on radius 0.15).
+    ball = ball if ball is not None else SoccerBall()
 
     task_factory = Task
     if not terminate_on_goal:

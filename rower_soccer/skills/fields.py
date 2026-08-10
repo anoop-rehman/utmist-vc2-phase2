@@ -215,6 +215,123 @@ register_field(FieldSpec("target_ego", TASK, lambda c: 2, _target_ego))
 register_field(FieldSpec("target_ego_future", TASK, lambda c: 2, _target_ego))
 
 
+def _target_ego3(ctx, clip=None) -> np.ndarray:
+    """3-D egocentric target, as `worm_env_base._target_obs3` emits it.
+
+    The v3 drills observe the target through `_to_ego3` on `[x, y, 0]` — a full
+    root-frame rotation of the ground point, not the 2-D forward/left projection
+    `_target_ego` computes. The third component is NOT zero in general: it is
+    how far below the (tilted) body frame the ground target sits, and the expert
+    trained on that signal. Length-clipping (pure pursuit) applies to the whole
+    3-vector so the bearing — including its pitch — is preserved.
+    """
+    f = ctx.frame
+    t = _effective_target(ctx)
+    ego = world_to_ego3(f.root_pos, f.root_mat,
+                        np.array([t[0], t[1], 0.0], dtype=np.float64))
+    clip = ctx.target_clip if clip is None else clip
+    if clip and clip > 0:
+        n = float(np.linalg.norm(ego))
+        if n > clip:
+            ego = ego * (clip / n)
+    return ego.astype(np.float32)
+
+
+register_field(FieldSpec("target_ego3", TASK, lambda c: 3, _target_ego3))
+# Static command => now and future coincide, as with target_ego_future above.
+register_field(FieldSpec("target_ego3_future", TASK, lambda c: 3, _target_ego3))
+
+# kick_ant_v3 trained on target_dist_range (3, 6) m, so its in-distribution
+# target band tops out at 6 m, not follow's 3.2. Clipping a 5 m kick command to
+# 3.2 m would misstate the commanded distance to an expert that genuinely uses
+# it (segment budget and strike power both scale with it).
+STRIKE_TARGET_CLIP = 6.0
+
+register_field(FieldSpec(
+    "strike_target_ego3", TASK, lambda c: 3,
+    lambda ctx: _target_ego3(ctx, clip=STRIKE_TARGET_CLIP)))
+
+
+def _cmd_dir_ego3(ctx) -> np.ndarray:
+    """kick's command direction: the unit ball->target ground direction, rotated
+    into the root frame (`_dir_ego3`).
+
+    Training draws `cmd_dir` once per segment as unit(target - ball_at_spawn)
+    and freezes it. Here it is recomputed each tick from the CURRENT ball
+    position: identical while the creature lines the kick up (the ball is not
+    moving), and after the strike it keeps pointing ball->target, where a
+    training segment would already have closed. Degenerate case: ball within
+    1 cm of the target has no direction; emit zeros rather than a random
+    bearing.
+    """
+    f = _require_ball(ctx.frame, "the 'cmd_dir_ego3' observation field")
+    t = _effective_target(ctx)
+    d = np.array([t[0] - f.ball_pos[0], t[1] - f.ball_pos[1]], dtype=np.float64)
+    n = float(np.linalg.norm(d))
+    if n < 1e-2:
+        return np.zeros(3, dtype=np.float32)
+    d3 = np.array([d[0] / n, d[1] / n, 0.0], dtype=np.float64)
+    return vec_to_ego3(f.root_mat, d3).astype(np.float32)
+
+
+register_field(FieldSpec("cmd_dir_ego3", TASK, lambda c: 3, _cmd_dir_ego3))
+
+
+# shoot_ant_v3's goal geometry, from scene.goal_geometry(pitch_scale=0.3125):
+# the dm_soccer goal constants (x 42.6667, half-width 11.88, height 5.3333)
+# times the pitch scale every v3 drill trained at. Hardcoded with provenance
+# rather than imported, so building a game obs never imports the warp scene
+# stack. If a future shoot trains at another scale, these change with it.
+SHOOT_GOAL_HALF_WIDTH = 11.88 * 0.3125     # 3.7125 m
+SHOOT_GOAL_HEIGHT = 5.3333 * 0.3125        # 1.6667 m
+
+
+def _goal_mid_ego3(ctx) -> np.ndarray:
+    """shoot's `goal_mid_ego`: the mouth centre at half crossbar height,
+    egocentric, UNCLIPPED — the goal is where it is, and shrinking the vector
+    would tell the expert the goal line is nearer than it is. shoot trained with
+    the mouth 3.5-8 m out; commanding it from much further is extrapolation,
+    which is the game's problem to avoid (press shoot near the box), not this
+    field's to hide.
+
+    The target_xy in force IS the goal mouth's ground centre: the game commands
+    shoot with the opponent goal as the target, which also lets a human aim a
+    shot anywhere (a "fake goal") with the same machinery.
+    """
+    f = ctx.frame
+    t = _effective_target(ctx)
+    return world_to_ego3(
+        f.root_pos, f.root_mat,
+        np.array([t[0], t[1], SHOOT_GOAL_HEIGHT / 2.0],
+                 dtype=np.float64)).astype(np.float32)
+
+
+register_field(FieldSpec("goal_mid_ego3", TASK, lambda c: 3, _goal_mid_ego3))
+
+
+def _post_ego(sign):
+    """The goal posts, as shoot's env emits them: the mouth endpoints at
+    target_y +/- half_width, 2-D egocentric (`_to_ego`). Posts run along world
+    y — both dm_soccer goals face along x, and so do the game's. NOTE: shoot
+    trained only on the +x goal; when the game points a home player at the -x
+    goal it must mirror the world before building obs (shoot_env.py: "training
+    on one goal and mirroring at deployment is exact"). Until that lands, -x
+    shots hand the expert a left/right-swapped goal frame.
+    """
+    def build(ctx):
+        f = ctx.frame
+        t = _effective_target(ctx)
+        return to_ego_xy(
+            f.root_pos, f.root_mat,
+            np.array([t[0], t[1] + sign * SHOOT_GOAL_HALF_WIDTH],
+                     dtype=np.float64)).astype(np.float32)
+    return build
+
+
+register_field(FieldSpec("post_left_ego", TASK, lambda c: 2, _post_ego(+1.0)))
+register_field(FieldSpec("post_right_ego", TASK, lambda c: 2, _post_ego(-1.0)))
+
+
 def _require_ball(frame, why):
     if frame.ball_pos is None:
         raise ObservationContractError(

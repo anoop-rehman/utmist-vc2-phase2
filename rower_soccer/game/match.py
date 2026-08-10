@@ -134,6 +134,39 @@ class MatchSim:
         wb = self.arena.mjcf_model.worldbody
         wb.add("camera", name="topdown", pos=[0.0, 0.0, self.cam_height],
                xyaxes=[1, 0, 0, 0, 1, 0], fovy=fovy)
+
+        # Broadcast camera: the TV main-camera position — halfway line, behind
+        # the -y touchline, elevated, looking slightly above the centre spot
+        # (~28 deg downtilt). Fixed, not ball-tracking: a static camera keeps
+        # click->world a pure function of (u, v), so drag input keeps working in
+        # this view via the ray-ground intersection in uv_to_world.
+        bpos = np.array([0.0, -2.0 * py, 1.1 * py])
+        blook = np.array([0.0, 0.0, 0.4])
+        fwd = blook - bpos; fwd /= np.linalg.norm(fwd)
+        right = np.cross(fwd, [0.0, 0.0, 1.0]); right /= np.linalg.norm(right)
+        bup = np.cross(right, fwd)
+        # Fit by construction: project every pitch corner into the camera frame
+        # and take the fovy that keeps them all inside, with 6% margin. Fitting
+        # a guessed margin at the centre-spot distance instead kept clipping the
+        # NEAR corners, which subtend the widest angles in this view.
+        Rb = np.stack([right, bup, -fwd], axis=1)
+        need = 0.0
+        for cx in (-px, px):
+            for cy in (-py, py):
+                pc = Rb.T @ (np.array([cx, cy, 0.0]) - bpos)
+                need = max(need, abs(pc[0]) / -pc[2] / aspect,
+                           abs(pc[1]) / -pc[2])
+        bfovy = 2.0 * math.atan(1.06 * need)
+        wb.add("camera", name="broadcast", pos=bpos.tolist(),
+               xyaxes=[*right.tolist(), *bup.tolist()],
+               fovy=math.degrees(bfovy))
+        # Everything uv<->world needs for the perspective camera, precomputed.
+        # Columns of R are the camera's world-frame x/y/z axes (z looks BACKWARD,
+        # MuJoCo convention), so R @ d_cam is camera->world.
+        self._bcast = dict(pos=bpos,
+                           R=np.stack([right, bup, -fwd], axis=1),
+                           tanf=math.tan(bfovy / 2.0), aspect=aspect)
+        self.camera = "topdown"
         if not shadows:
             # The pitch ships 4 lights each rendering an 8192x8192 shadowmap: ~90 ms
             # a frame, a fixed cost that dwarfs the physics step and would cap the
@@ -157,6 +190,8 @@ class MatchSim:
         self.physics = ph
         self.cam_id = next(i for i in range(ph.model.ncam)
                            if (ph.model.camera(i).name or "").endswith("topdown"))
+        self.bcast_cam_id = next(i for i in range(ph.model.ncam)
+                                 if (ph.model.camera(i).name or "").endswith("broadcast"))
         self._markers = [ph.bind(g) for g in self._marker_specs]
         self._roots = [ph.bind(p.walker.root_body) for p in self.task.players]
         if self.controller is not None:
@@ -168,15 +203,42 @@ class MatchSim:
         self._goal_latch = False
 
     # -- geometry ----------------------------------------------------------
+    def set_camera(self, name):
+        if name not in ("topdown", "broadcast"):
+            raise ValueError(f"unknown camera {name!r}")
+        self.camera = name
+
     def uv_to_world(self, u, v):
         """Normalized click (u, v in [0, 1], origin top-left of the frame) -> world xy.
 
-        Straight-down camera: image-right -> world +x, image-UP -> world +y.
+        topdown: image-right -> world +x, image-UP -> world +y, a pure affine.
+        broadcast: cast the pixel ray from the perspective camera onto the z=0
+        ground plane. A click at or above the horizon has no ground intersection;
+        it is clamped just below so the ray still lands, far, and the result is
+        then clamped to the pitch (a sky click means "way over there", not NaN).
         """
+        if self.camera == "broadcast":
+            c = self._bcast
+            d_cam = np.array([(u * 2.0 - 1.0) * c["tanf"] * c["aspect"],
+                              (1.0 - v * 2.0) * c["tanf"], -1.0])
+            d = c["R"] @ d_cam
+            d2 = min(d[2], -1e-3)                 # keep the ray pointing down
+            t = -c["pos"][2] / d2
+            w = c["pos"] + t * np.array([d[0], d[1], d2])
+            px, py = self.pitch_half
+            return (float(np.clip(w[0], -1.05 * px, 1.05 * px)),
+                    float(np.clip(w[1], -1.05 * py, 1.05 * py)))
         return (float((u * 2.0 - 1.0) * self.half_x),
                 float((1.0 - v * 2.0) * self.half_y))
 
-    def world_to_uv(self, x, y):
+    def world_to_uv(self, x, y, z=0.0):
+        if self.camera == "broadcast":
+            c = self._bcast
+            p = c["R"].T @ (np.array([x, y, z]) - c["pos"])
+            if p[2] > -1e-6:                       # behind the camera
+                return (-1.0, -1.0)
+            return (float((p[0] / -p[2] / (c["tanf"] * c["aspect"]) + 1.0) * 0.5),
+                    float((1.0 - p[1] / -p[2] / c["tanf"]) * 0.5))
         return (float((x / self.half_x + 1.0) * 0.5), float((1.0 - y / self.half_y) * 0.5))
 
     # -- match lifecycle ---------------------------------------------------
@@ -479,7 +541,8 @@ class MatchSim:
 
     # -- rendering ---------------------------------------------------------
     def render(self):
-        return self.physics.render(camera_id=self.cam_id,
+        cam = self.bcast_cam_id if self.camera == "broadcast" else self.cam_id
+        return self.physics.render(camera_id=cam,
                                    width=self.render_w, height=self.render_h)
 
     def snapshot(self):
@@ -487,17 +550,20 @@ class MatchSim:
         browser can draw an overlay on top of the stream without knowing the affine)."""
         players = []
         for p in range(self.n_players):
-            xy = self._roots[p].xpos[:2]
-            u, v = self.world_to_uv(xy[0], xy[1])
+            # Project at the body's real height: in the broadcast view a
+            # ground-plane projection would draw the overlay at the creature's
+            # shadow, not the creature. Topdown ignores z.
+            xyz = self._roots[p].xpos
+            u, v = self.world_to_uv(xyz[0], xyz[1], xyz[2])
             c = self.commands[p]
             tu, tv = self.world_to_uv(c.target[0], c.target[1])
             players.append(dict(slot=SLOTS[p], u=u, v=v, tu=tu, tv=tv,
                                 skill=c.skill, controller=c.controller, name=c.name))
         bpos, _ = self.task.ball.get_pose(self.physics)
-        bu, bv = self.world_to_uv(bpos[0], bpos[1])
+        bu, bv = self.world_to_uv(bpos[0], bpos[1], bpos[2])
         return dict(phase=self.phase, tick=self.tick, t=round(self.match_time, 2),
                     time_left=round(self.time_left, 1), score=list(self.score),
-                    match_id=self.match_id, players=players,
+                    match_id=self.match_id, players=players, camera=self.camera,
                     ball=dict(u=bu, v=bv),
                     countdown=round(max(0.0, getattr(self, "_countdown_left", 0.0)), 1))
 

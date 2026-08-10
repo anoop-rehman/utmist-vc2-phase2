@@ -237,6 +237,13 @@ class GameServer:
                 p = sim.end_match("stopped")
                 if p:
                     self.demos.append(p)
+            elif c["action"] == "camera":
+                # Explicit value, or toggle. Render-only: no physics, no demo row.
+                sim.set_camera(c.get("value") or (
+                    "broadcast" if sim.camera == "topdown" else "topdown"))
+                sim._pending_events.append(dict(
+                    tick=int(sim.tick), t=float(sim.match_time),
+                    type="camera", camera=sim.camera))
         # auto: start when the seats are ready, restart after the whistle
         if sim.phase == M.PHASE_ENDED:
             if sim.last_demo and (not self.demos or self.demos[-1] != sim.last_demo):
@@ -526,9 +533,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(*_handle_input(gs, c, d))
 
         if u.path == "/control":
-            if d.get("action") not in ("start", "stop"):
-                return self._json(dict(ok=False, error="action must be start|stop"), 400)
-            gs.push_control(d["action"])
+            if d.get("action") not in ("start", "stop", "camera"):
+                return self._json(dict(ok=False,
+                                       error="action must be start|stop|camera"), 400)
+            gs.push_control(d["action"], value=d.get("value"))
             return self._json(dict(ok=True))
 
         return self._send(404, b"not found", "text/plain")
@@ -558,9 +566,18 @@ def _handle_input(gs, client, d):
         # desync input from picture.
         u = min(max(float(d["u"]), 0.0), 1.0)
         v = min(max(float(d["v"]), 0.0), 1.0)
-        fields["target"] = gs.sim.uv_to_world(u, v)
-        ax = float(d.get("aim_u", 0.0)) * gs.sim.half_x * 2.0
-        ay = -float(d.get("aim_v", 0.0)) * gs.sim.half_y * 2.0
+        tgt = gs.sim.uv_to_world(u, v)
+        fields["target"] = tgt
+        # Aim = world vector from the drag's START to its END, both mapped
+        # through the ACTIVE camera. For the topdown affine this reduces to the
+        # old per-axis scaling exactly; for the broadcast perspective the pixel
+        # deltas are not proportional to world deltas (they shrink with depth),
+        # so both endpoints must be projected.
+        au = float(d.get("aim_u", 0.0))
+        av = float(d.get("aim_v", 0.0))
+        start = gs.sim.uv_to_world(min(max(u - au, 0.0), 1.0),
+                                   min(max(v - av, 0.0), 1.0))
+        ax, ay = tgt[0] - start[0], tgt[1] - start[1]
         n = float(np.hypot(ax, ay))
         fields["aim"] = (ax / n, ay / n) if n > 1e-6 else (0.0, 0.0)
     elif "x" in d and "y" in d:                  # world coords, for scripted clients

@@ -265,6 +265,7 @@ async function poll() {
     whoEl.classList.toggle("seated", !!S.slot);
     const me = (st.players || []).find((p) => p.slot === S.slot);
     if (me && me.skill !== S.skill) { S.skill = me.skill; }
+    $("cambtn").textContent = "cam: " + (st.camera === "broadcast" ? "tv" : "top");
     paintSkills(); paintSeats(st); paintOverlay(st); checkFrozen(st);
     (st.events || []).forEach((e) => {
       const key = e.tick + e.type + (e.slot || "") + (e.team || "");
@@ -305,6 +306,7 @@ document.addEventListener("keydown", (e) => {
 
 $("joinbtn").onclick = join;
 $("unflipbtn").onclick = unflip;
+$("cambtn").onclick = () => post("/control", { action: "camera" });
 $("startbtn").onclick = () => post("/control", { action: "start" });
 $("stopbtn").onclick = () => post("/control", { action: "stop" });
 $("name").value = S.name;

@@ -25,6 +25,14 @@ from rower_soccer.game import recording as rec
 from rower_soccer.game.recording import DemoMeta, DemoWriter, PlayerMeta
 
 SLOTS = ("home_1", "home_2", "away_1", "away_2")   # index == dm_soccer player index
+
+# Seconds between unflips of the same player. Long enough that righting yourself
+# is a recovery, not a physics exploit (an uncooled unflip is a free "stand
+# perfectly still" button, since it also zeroes your velocity).
+UNFLIP_COOLDOWN = 5.0
+# Same drop height the warp drills spawn at (SceneMeta.spawn_z): high enough
+# that the righted creature settles onto its feet instead of clipping the floor.
+UNFLIP_DROP_Z = 0.75
 CONTROL_DT = 0.025          # 40 Hz, the rate every drill trained at
 PHYSICS_DT = 0.0025         # 10 substeps, matching the drills (soccer's native is 0.005)
 
@@ -90,6 +98,8 @@ class MatchSim:
 
         self.controller = controller
         self.commands = [PlayerCommand() for _ in range(self.n_players)]
+        # Wall-clock stamps for the unflip cooldown; -inf so the first one is free.
+        self._unflip_at = [float("-inf")] * self.n_players
 
         self.phase = PHASE_LOBBY
         self.tick = 0
@@ -220,6 +230,45 @@ class MatchSim:
         if self.phase == PHASE_COUNTDOWN:
             return self.match_seconds
         return max(0.0, self.match_seconds - self.match_time)
+
+    # -- unflip ------------------------------------------------------------
+    def unflip(self, p, force=False):
+        """Stand player p's creature upright where it is.
+
+        Keeps the ground position and the heading (yaw extracted from the root
+        frame), sets the root upright at the drill spawn height, and zeroes the
+        root velocity — then physics takes over and the creature drops onto its
+        feet. There is no trained get-up policy; this is a game action, the
+        digital equivalent of a referee standing your beetle back up.
+
+        Deterministic given the current state, which is what lets a demo replay
+        reproduce it: replay_actions re-applies the recorded `unflip` events at
+        their recorded ticks and gets bit-identical state back. `force=True` is
+        for that replay path — it skips the anti-spam cooldown, which is wall
+        clock and therefore meaningless in a resimulation.
+
+        Returns (ok, reason)."""
+        if not 0 <= p < self.n_players:
+            return False, f"no player {p}"
+        now = time.monotonic()
+        if not force and now - self._unflip_at[p] < UNFLIP_COOLDOWN:
+            wait = UNFLIP_COOLDOWN - (now - self._unflip_at[p])
+            return False, f"unflip cooling down ({wait:.1f}s)"
+        self._unflip_at[p] = now
+
+        root = self._roots[p]
+        m = np.asarray(root.xmat, np.float64).reshape(3, 3)
+        yaw = math.atan2(m[1, 0], m[0, 0])
+        quat = np.array([math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)])
+        pos = np.array([root.xpos[0], root.xpos[1], UNFLIP_DROP_Z])
+        walker = self.task.players[p].walker
+        walker.set_pose(self.physics, position=pos, quaternion=quat)
+        walker.set_velocity(self.physics, velocity=np.zeros(3),
+                            angular_velocity=np.zeros(3))
+        self.physics.forward()
+        self._emit("unflip", player=p, slot=SLOTS[p],
+                   pos=[float(pos[0]), float(pos[1])], yaw=float(yaw))
+        return True, "up"
 
     def _emit(self, type_, **payload):
         ev = {"tick": int(self.tick), "t": float(self.match_time), "type": type_}

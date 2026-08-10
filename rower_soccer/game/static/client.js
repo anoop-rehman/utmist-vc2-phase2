@@ -290,14 +290,21 @@ view.addEventListener("touchmove", dragMove, { passive: false });
 view.addEventListener("touchend", dragEnd, { passive: false });
 view.addEventListener("dragstart", (e) => e.preventDefault());
 
+async function unflip() {
+  const r = await post("/input", { action: "unflip" });
+  if (!r.ok) log("! " + (r.error || "unflip failed"));
+}
+
 document.addEventListener("keydown", (e) => {
   if (document.activeElement === $("name")) return;
   const i = "12345".indexOf(e.key);
   if (i >= 0) setSkill(KEYS[i]);
   else if (e.key === "Escape") setSkill("idle");
+  else if (e.key === "r" || e.key === "R") unflip();
 });
 
 $("joinbtn").onclick = join;
+$("unflipbtn").onclick = unflip;
 $("startbtn").onclick = () => post("/control", { action: "start" });
 $("stopbtn").onclick = () => post("/control", { action: "stop" });
 $("name").value = S.name;

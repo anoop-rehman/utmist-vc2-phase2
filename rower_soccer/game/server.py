@@ -270,6 +270,15 @@ class GameServer:
                 cmd.skill = d["skill"]
                 sim._emit("skill_change", player=p, slot=slot, skill=cmd.skill,
                           target=[float(x) for x in cmd.target])
+            if d.get("unflip"):
+                ok, why = sim.unflip(p)
+                if not ok:
+                    # Cooldown refusals go to the event feed so the player sees
+                    # WHY nothing happened; they are not recorded (EVENT_TYPES
+                    # gates the demo, and a refusal changes no state).
+                    sim._pending_events.append(dict(
+                        tick=int(sim.tick), t=float(sim.match_time),
+                        type="unflip_denied", slot=slot, why=why))
 
     def _autofill(self, sim):
         """Seats with no live client are driven by the built-in baseline, so a match
@@ -443,7 +452,13 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type",
                          "multipart/x-mixed-replace; boundary=frame")
-        self.send_header("Cache-Control", "no-store")
+        # no-transform is load-bearing over the tunnel: without it Cloudflare
+        # may compress the multipart stream for browsers that advertise
+        # gzip/brotli, and Chrome's MJPEG decoder errors on the result — the
+        # picture breaks in the browser while a plain curl (which asks for no
+        # compression, so gets none) sees a healthy stream. no-store alone does
+        # not forbid transformation; no-transform is the directive CDNs honor.
+        self.send_header("Cache-Control", "no-store, no-transform")
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
@@ -550,6 +565,8 @@ def _handle_input(gs, client, d):
         fields["aim"] = (ax / n, ay / n) if n > 1e-6 else (0.0, 0.0)
     elif "x" in d and "y" in d:                  # world coords, for scripted clients
         fields["target"] = (float(d["x"]), float(d["y"]))
+    if d.get("action") == "unflip":
+        fields["unflip"] = True
     if not fields:
         return dict(ok=False, error="nothing to do"), 400
     gs.push_input(client.slot, **fields)

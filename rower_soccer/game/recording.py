@@ -75,6 +75,10 @@ SKILL_INDEX = {s: i for i, s in enumerate(SKILL_VOCAB)}
 EVENT_TYPES = (
     "match_start", "match_end", "goal", "ball_touch",
     "skill_change", "target_set", "slot_claim", "slot_release",
+    # A state write, not an input: MatchSim.unflip stood this player upright.
+    # replay_actions re-applies these at their recorded ticks, or the
+    # resimulation would diverge from the recorded qpos the moment anyone flips.
+    "unflip",
 )
 
 DEMO_SUFFIX = ".demo.npz"

@@ -94,9 +94,19 @@ def replay_actions(demo, video=None, stride=1, render_size=None, tol=1e-4):
     if video:
         import imageio
         writer = imageio.get_writer(video, fps=int(round(1 / demo.meta.control_dt)))
+    # Unflips are state WRITES the recorded actions do not contain; re-apply each
+    # at its recorded tick or the resim diverges the moment anyone flipped.
+    # unflip() is a pure function of the current state (yaw comes from the live
+    # root frame), so replaying it from a bit-identical state is bit-identical.
+    unflips = {}
+    for ev in demo.events:
+        if ev.get("type") == "unflip":
+            unflips.setdefault(int(ev["tick"]), []).append(int(ev["player"]))
     errs = np.zeros(len(q), np.float64)
     try:
         for t in range(len(q) - 1):
+            for p in unflips.get(t, ()):
+                sim.unflip(p, force=True)
             # env.step, not a hand-rolled substep loop: the task's before/after
             # substep hooks drive the goal and off-court detectors and the ball's
             # possession trackers, and MultiturnTask re-spawns on a goal. Replaying

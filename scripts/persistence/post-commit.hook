@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Lazily push Claude Code chat state to GCS after every commit.
+#
+# Backgrounded: the commit returns immediately; the ~50 s rsync runs detached.
+# flock single-flights it so a burst of commits produces one sync, not a pile.
+# Failures are silent by design (a backup hook must never block a commit) —
+# check /workspace/claude-persistence/sync.log if you suspect it is not running.
+SYNC=/workspace/claude-persistence/sync.sh
+[ -x "$SYNC" ] || exit 0
+setsid bash -c '
+  exec 9>/tmp/claude-chat-sync.lock
+  flock -n 9 || exit 0
+  bash '"$SYNC"' >> /workspace/claude-persistence/sync.log 2>&1
+' < /dev/null > /dev/null 2>&1 &
+exit 0

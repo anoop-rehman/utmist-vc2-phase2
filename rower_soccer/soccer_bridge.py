@@ -128,6 +128,14 @@ def main():
     policy = load_latent_policy(args.model, obs_dim, act_dim, prop_idx, task_idx, args.device)
 
     frames = []
+    # dm_soccer's Pitch names its overhead camera 'top_down' (and composer
+    # prefixes it with the arena's model name); 'top_camera' never existed, so
+    # --video always raised.
+    cam_id = None
+    if args.video is not None:
+        m = env.physics.model
+        cam_id = next(i for i in range(m.ncam)
+                      if (m.camera(i).name or "").endswith("top_down"))
     root_xy0 = np.asarray(obs0["absolute_root_pos"], dtype=np.float64).ravel()[:2]
     d0 = float(np.linalg.norm(root_xy0 - target))
     for _ in range(args.steps):
@@ -135,7 +143,7 @@ def main():
         action, _ = policy.predict(vec, deterministic=True)
         ts = env.step([action])  # soccer expects a per-player list
         if args.video is not None:
-            frames.append(env.physics.render(camera_id="top_camera", width=640, height=480))
+            frames.append(env.physics.render(camera_id=cam_id, width=640, height=480))
 
     root_xyf = np.asarray(ts.observation[0]["absolute_root_pos"], dtype=np.float64).ravel()[:2]
     df = float(np.linalg.norm(root_xyf - target))

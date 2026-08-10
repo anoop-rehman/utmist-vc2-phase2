@@ -24,7 +24,7 @@ class WarpFollowEnv(MovingTargetMixin, WormEnv):
                  arrival_bonus=0.5, spawn_dist_range=(1.76, 5.28),
                  nconmax=64, njmax=512, energy_coef=0.0, smooth_coef=0.0,
                  rew_clip=(-10.0, 10.0), reward=None, floor_half=5.0,
-                 use_gpu=True, backend_cls=None):
+                 use_gpu=True, backend_cls=None, arena="fenced", pitch_scale=0.3125):
         self._lookahead = lookahead
         self._bounds = bounds
         self._speed_range = target_speed_range
@@ -39,7 +39,7 @@ class WarpFollowEnv(MovingTargetMixin, WormEnv):
                          nconmax=nconmax, njmax=njmax, reward=reward,
                          floor_half=floor_half, energy_coef=energy_coef,
                          smooth_coef=smooth_coef, rew_clip=rew_clip,
-                         backend_cls=backend_cls)
+                         backend_cls=backend_cls, arena=arena, pitch_scale=pitch_scale)
 
     def _task_dim(self):
         return 6  # target_ego3 (3) + target_ego_future3 (3)
@@ -49,6 +49,20 @@ class WarpFollowEnv(MovingTargetMixin, WormEnv):
 
     def _task_obs(self):
         return self._target_obs3()
+
+    def tracking_error(self):
+        """Distance from the CREATURE to the target -- what follow tracks.
+
+        The speed curriculum gates on this, not on fitness. fitness is
+        exp(-c*d), whose ceiling is set by how precisely THIS BODY can park on
+        the target: ant v1 settles 0.03 m out (fitness 0.985), the 2.7x ant_v2
+        settles 0.56 m out (0.756). So any fitness threshold is either
+        unreachable or marginal for some body, while "is the distance growing"
+        answers the actual question -- is the creature keeping up -- and is
+        body-size independent. See curriculum.py.
+        """
+        pos, _ = self._root_frames()
+        return torch.linalg.norm(self.target_xy - pos[:, :2], dim=-1)
 
     def _reset_state(self):
         n = self.n

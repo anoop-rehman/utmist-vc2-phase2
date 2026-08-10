@@ -57,7 +57,7 @@ class WarpRenderer:
         self.cam.elevation = elevation
         self.cam.azimuth = azimuth
 
-    def frame(self, env, w=0, target_height=0.5):
+    def frame(self, env, w=0, target_height=None):
         """Copy world `w` of `env` into the render model and return an RGB frame."""
         q = self.data.qpos
         q[:self.n_phys_qpos] = env.qpos[w, :self.n_phys_qpos].detach().cpu().numpy()
@@ -68,7 +68,17 @@ class WarpRenderer:
         # invent a target_xy just to be renderable.
         if getattr(env, "target_xy", None) is not None:
             tx, ty = env.target_xy[w].detach().cpu().numpy()
-            q[self.tgt_qpos:self.tgt_qpos + 3] = [tx, ty, target_height]
+            # Draw the marker at the height the REWARD actually scores against,
+            # not a fixed 0.5. kick grades a 3-D ball-to-target distance with the
+            # target at ball-resting height (0.35 m for our ball), so a marker
+            # floating 15 cm above it means anyone judging "did it hit the
+            # target" from the video is calibrated against the wrong point --
+            # and "it flies over the target" is exactly the call that mismatch
+            # would corrupt. Envs without a scored z fall back to 0.5.
+            tz = getattr(env, "_target_z", None)
+            if tz is None:
+                tz = 0.5 if target_height is None else target_height
+            q[self.tgt_qpos:self.tgt_qpos + 3] = [tx, ty, float(tz)]
         else:
             q[self.tgt_qpos:self.tgt_qpos + 3] = [0.0, 0.0, -100.0]
         q[self.tgt_qpos + 3:self.tgt_qpos + 7] = [1.0, 0.0, 0.0, 0.0]
@@ -87,7 +97,8 @@ class WarpRenderer:
         return self.renderer.render()
 
 
-def eval_video(env, ac, path, renderer, fps=40, deterministic=True):
+def eval_video(env, ac, path, renderer, fps=40, deterministic=True,
+               record_joints=False):
     """Run ONE deterministic episode in the Warp env `env`, render it, and return
     (ep_reward, final_fitness). Both come from Warp -- the sim being trained in.
 
@@ -95,12 +106,18 @@ def eval_video(env, ac, path, renderer, fps=40, deterministic=True):
     action head's log_std is exploration noise, and at our entropy floor it is 0.30
     on a +/-1 action, which would swamp exactly the fine control an eval is meant to
     measure.
+
+    record_joints additionally returns the world-0 joint trajectory [T, nu], which
+    is what rower_soccer.tools.style grades. It is taken from THIS rollout rather
+    than a second one so the style number costs no extra simulation and describes
+    exactly the episode in the video.
     """
     import imageio
+    import numpy as np
     import torch
 
     obs = env.reset()
-    ep_rew, done, frames = 0.0, False, []
+    ep_rew, done, frames, q = 0.0, False, [], []
     while not done:
         with torch.no_grad():
             d = ac.dist(obs.float())
@@ -108,9 +125,13 @@ def eval_video(env, ac, path, renderer, fps=40, deterministic=True):
         obs, r, done = env.step(a)
         ep_rew += float(r[0])
         frames.append(renderer.frame(env, w=0))
+        if record_joints:
+            q.append(env.qpos[0, env.jq].detach().float().cpu().numpy().copy())
 
     fitness = float(env.fitness()[0]) if hasattr(env, "fitness") else float("nan")
     with imageio.get_writer(path, fps=fps, quality=7) as wr:
         for f in frames:
             wr.append_data(f)
+    if record_joints:
+        return ep_rew, fitness, np.stack(q)
     return ep_rew, fitness

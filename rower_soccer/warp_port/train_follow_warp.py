@@ -20,6 +20,8 @@ import imageio
 import numpy as np
 import torch
 
+from rower_soccer.warp_port import curriculum
+
 
 def make_eval(args, has_ball=False):
     """One-world Warp env + renderer, built once and reused.
@@ -32,7 +34,7 @@ def make_eval(args, has_ball=False):
     from rower_soccer.warp_port.render import WarpRenderer
     from rower_soccer.warp_port.worm_env_base import _arena_xml
     env = WarpFollowEnv(
-        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
+        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml, arena=args.arena, pitch_scale=args.pitch_scale,
         target_speed_range=tuple(args.target_speed),
         spawn_dist_range=tuple(args.spawn_dist),
         bounds=args.bounds, reward_coef=args.reward_coef,
@@ -41,7 +43,26 @@ def make_eval(args, has_ball=False):
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
     # Render the arena (the physics scene), not the default pitch background.
     return env, WarpRenderer(args.creature_xml, has_ball=False,
-                             base_xml=_arena_xml(env._floor_half))
+                             base_xml=env._base_xml())
+
+
+_STYLE_REF_DEFAULT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "runs_v2", "rower_ref_gait.npz")
+
+
+def _style_of(q, ref, settle_s=2.0, control_dt=0.025):
+    """Style of one eval episode, or None if no reference applies to this body."""
+    if ref is None or q is None:
+        return None
+    try:
+        from rower_soccer.tools.style import style_score
+        r = style_score(q[int(settle_s / control_dt):], control_dt, ref)
+        return {k: float(r[k]) for k in ("style", "amp", "freq", "shape", "gait_hz")}
+    except Exception as e:                                  # noqa: BLE001
+        # Never let a diagnostic kill a training run.
+        print(f"[monitor] style failed: {e}", flush=True)
+        return None
 
 
 def main():
@@ -130,6 +151,19 @@ def main():
     # is really an unpredictable time target. --steps stays as a backstop.
     p.add_argument("--max-hours", type=float, default=48.0,
                    help="stop after this much wallclock, whatever step count that is")
+    p.add_argument("--pitch-scale", type=float, default=0.3125,
+                   help="uniform scale on dm_soccer's pitch (ground, walls and "
+                        "both goals together). 1.0 = its 96x72 m 2v2 pitch, "
+                        "sized for BoxHead; 0.3125 = 30x22.5 m with a 7.4 m "
+                        "goal, which our ant can actually cross in a match.")
+    p.add_argument("--arena", default="fenced", choices=["fenced", "pitch"],
+                   help="'fenced' is the small walled arena (wall at "
+                        "--floor-half); 'pitch' is the real 2v2 soccer pitch. "
+                        "Geometry only -- timestep, cone, floor friction and "
+                        "solref are identical, verified on the compiled models. "
+                        "Use 'pitch' so the fence stops being part of the task: "
+                        "23.5%% of mid-episode kick targets land outside a 10 m "
+                        "wall, asking the ant to arc the ball over it.")
     p.add_argument("--creature-xml",
                    default="creature_configs/three_seg_worm.xml")
     p.add_argument("--run-name", required=True)
@@ -149,6 +183,33 @@ def main():
     p.add_argument("--gcs-bucket", default=None,
                    help="upload each checkpoint to gs://<bucket>/<run_name>/ "
                         "(e.g. vc2-2026-checkpoints); best-effort, non-blocking")
+    # The AR(1) latent prior, ||z_t - alpha*z_{t-1}||^2. train_track_warp has
+    # carried this since PIPELINE_V2 and defaults it ON at 0.01 -- so the decoder
+    # is trained having only ever seen SMOOTH latents. This trainer never passed
+    # it, which left the task expert free to drive that decoder at any rate it
+    # liked, and it does: measured z on follow_rower_npmp_v2 runs at 12.67 Hz
+    # against tracking's 1.15 Hz, at 3.4x the amplitude. A frozen decoder driven
+    # an order of magnitude outside its training distribution is not a preserved
+    # motor skill, which is the likeliest reason that run reached fitness 0.972
+    # while scoring style 0.379. Default stays 0.0 so existing runs reproduce.
+    p.add_argument("--z-ar-coef", type=float, default=0.0,
+                   help="AR(1) latent smoothness ||z_t - alpha*z_{t-1}||^2; "
+                        "match the tracking run (0.01) when using --init-from")
+    p.add_argument("--z-ar-alpha", type=float, default=0.95)
+    p.add_argument("--z-smooth-coef", type=float, default=0.0,
+                   help="static ||z||^2 prior; NOT the same object as --z-ar-coef")
+    curriculum.add_args(p)
+    p.add_argument("--freeze-log-std", action="store_true",
+                   help="with --freeze-decoder, also hold the inherited "
+                        "per-joint exploration noise. The prior learns std "
+                        "0.07-0.14 on the gait-carrying arms; left trainable it "
+                        "floats up under ent_coef because fitness does not care "
+                        "about gait quality.")
+    p.add_argument("--style-ref", default=_STYLE_REF_DEFAULT,
+                   help="gait reference used to score HOW the policy moves; "
+                        "fitness cannot see this axis")
+    p.add_argument("--no-style", action="store_true",
+                   help="skip the style diagnostic entirely")
     p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--no-wandb", action="store_true")
     args = p.parse_args()
@@ -218,7 +279,9 @@ def main():
     trainer = PPOTrainer(env, ac, lr=args.lr, rollout_len=args.rollout,
                          ent_coef=args.ent_coef, ent_floor=args.ent_floor,
                          ent_ceil=args.ent_ceil,
-                         ent_anneal_steps=args.ent_anneal_steps)
+                         ent_anneal_steps=args.ent_anneal_steps,
+                         z_smooth_coef=args.z_smooth_coef,
+                         z_ar_coef=args.z_ar_coef, z_ar_alpha=args.z_ar_alpha)
 
     ckpt_path = os.path.join(run_dir, "checkpoint.pt")
     latest_path = os.path.join(run_dir, "latest.pt")
@@ -227,6 +290,54 @@ def main():
     best_score = float("-inf")
     mid_target = int(args.steps * args.mid_ckpt_frac) if args.mid_ckpt_frac else 0
     start_steps = 0
+    if args.freeze_decoder:
+        # log_std stays trainable by default. The original reasoning was that it
+        # is exploration noise, not motor skill, and that pinning it would deny
+        # the task policy any way to quiet down for fine control.
+        #
+        # Measurement disagrees with the premise. The noise is PER JOINT, and the
+        # tracking prior learns a very specific structure: std 0.07-0.14 on the
+        # four arm joints that carry the gait, ~1.0 on the rest. That is fine
+        # motor control, learned. In follow it does not quiet down further -- it
+        # floats UP (0.07 -> 0.11, 0.14 -> 0.58), because ent_coef rewards
+        # entropy and fitness is indifferent to gait quality. --freeze-log-std
+        # tests whether holding that structure preserves the gait.
+        frozen = 0
+        mods = [ac.mlp_extractor.decoder, ac.action_net]
+        for mod in mods:
+            for prm in mod.parameters():
+                prm.requires_grad_(False)
+                frozen += prm.numel()
+        if args.freeze_log_std:
+            if ac.state_dependent_std:
+                for prm in ac.log_std_net.parameters():
+                    prm.requires_grad_(False)
+                    frozen += prm.numel()
+            else:
+                ac.log_std.requires_grad_(False)
+                frozen += ac.log_std.numel()
+        trainable = sum(p.numel() for p in ac.parameters() if p.requires_grad)
+        print(f"[setup] decoder FROZEN: {frozen:,} params held, "
+              f"{trainable:,} trainable (expert + critic"
+              f"{'' if args.freeze_log_std else ' + log_std'})", flush=True)
+        if args.freeze_log_std:
+            import numpy as _np
+            _s = ac.log_std.detach().exp().cpu().numpy() if not ac.state_dependent_std else None
+            print(f"[setup] log_std FROZEN at inherited per-joint std "
+                  f"{_np.round(_s, 3) if _s is not None else '(state-dependent)'}",
+                  flush=True)
+        # Adam was built over every parameter; rebuild it over the live ones so
+        # frozen weights cannot drift via weight decay or stale moments.
+        trainer.opt = torch.optim.Adam(
+            [p for p in ac.parameters() if p.requires_grad], lr=args.lr)
+
+    # The --freeze-decoder block sits ABOVE this deliberately: it rebuilds
+    # trainer.opt over only the trainable parameters, and load_checkpoint
+    # restores a saved optimizer state into it. Freeze after loading and a
+    # frozen-decoder run can be checkpointed but never resumed -- the saved
+    # state's single reduced parameter group does not match a full-parameter
+    # Adam ("loaded state dict contains a parameter group that doesn't match
+    # the size of optimizer's group").
     if args.resume and os.path.exists(ckpt_path):
         start_steps = load_checkpoint(trainer, ckpt_path)
         print(f"[setup] resumed from {ckpt_path} at step {start_steps:,}", flush=True)
@@ -244,23 +355,25 @@ def main():
                 f"checkpoint's decoder expects something else.\nCheck "
                 f"--creature-xml matches the body the prior was trained on.")
 
-    if args.freeze_decoder:
-        # log_std stays trainable on purpose. It is exploration noise, not motor
-        # skill -- the decoder is the skill. Freezing it too would pin the task
-        # policy to whatever noise level the tracking run happened to end at
-        # (0.62 here, which is loud), with no way to quiet down for fine control.
-        frozen = 0
-        for mod in (ac.mlp_extractor.decoder, ac.action_net):
-            for prm in mod.parameters():
-                prm.requires_grad_(False)
-                frozen += prm.numel()
-        trainable = sum(p.numel() for p in ac.parameters() if p.requires_grad)
-        print(f"[setup] decoder FROZEN: {frozen:,} params held, "
-              f"{trainable:,} trainable (expert + critic + log_std)", flush=True)
-        # Adam was built over every parameter; rebuild it over the live ones so
-        # frozen weights cannot drift via weight decay or stale moments.
-        trainer.opt = torch.optim.Adam(
-            [p for p in ac.parameters() if p.requires_grad], lr=args.lr)
+    # Style reference. Optional and body-specific: it grades this creature's gait
+    # against the evolved gait the NPMP tracker was built from, so a worm run (2
+    # joints) must not be scored against the rower's 8-joint reference. Mismatch
+    # disables it loudly rather than silently reporting nonsense.
+    style_ref = None
+    if not args.no_style:
+        try:
+            from rower_soccer.tools.style import load_reference
+            style_ref = load_reference(args.style_ref)
+            if len(style_ref["names"]) != env.act_dim:
+                print(f"[setup] style DISABLED: reference has "
+                      f"{len(style_ref['names'])} joints, this body has "
+                      f"{env.act_dim}", flush=True)
+                style_ref = None
+            else:
+                print(f"[setup] style reference {args.style_ref} "
+                      f"({len(style_ref['names'])} joints)", flush=True)
+        except Exception as e:                              # noqa: BLE001
+            print(f"[setup] style DISABLED: {e}", flush=True)
 
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
@@ -269,6 +382,7 @@ def main():
     # Back-date the video timer so the first one lands at --first-video-secs.
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
     last_ckpt = t0
+    speed_curr = curriculum.from_args(args)
     it = 0
     deadline = t0 + args.max_hours * 3600.0
     while trainer.total_steps < args.steps and time.perf_counter() < deadline:
@@ -279,10 +393,14 @@ def main():
         # ETA is now the wall-clock deadline, not the step target.
         eta_min = max(0.0, (deadline - now) / 60)
         if it % 5 == 0:
+            line = speed_curr.update(env, eval_env)
+            if line:
+                print(line, flush=True)
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
-                  f"std={stats['std']:.3f}", flush=True)
+                  f"std={stats['std']:.3f} tgt_spd={env.speed_range[1]:.2f}",
+                  flush=True)
             if use_wandb:
                 import wandb
                 wandb.log({"env_step": trainer.total_steps,
@@ -295,9 +413,23 @@ def main():
             vpath = os.path.join(run_dir, "videos",
                                  f"eval_step_{trainer.total_steps:010d}.mp4")
             from rower_soccer.warp_port.render import eval_video
-            ep_rew, fit = eval_video(eval_env, ac, vpath, eval_ren)
+            ep_rew, fit, ev_q = eval_video(eval_env, ac, vpath, eval_ren,
+                                           record_joints=True)
+            # Fitness is exp(-c*||player - target||): it grades ARRIVING and is
+            # structurally blind to HOW. follow_rower_baseline reached 0.950 by
+            # vibrating at 0.46 Hz with its arms folded, and nothing in this loop
+            # could tell it apart from the NPMP-primed policy at 0.960 that
+            # actually rows. `style` is that missing axis. Logged from the eval
+            # episode itself, so n=1 and noisy (+/-0.1); the authoritative number
+            # is `python -m rower_soccer.tools.style score --checkpoint ...`,
+            # which averages worlds.
+            st = _style_of(ev_q, style_ref)
             print(f"[monitor] video: {vpath} (WARP eval "
-                  f"ep_rew={ep_rew:.1f} fitness={fit:.3f})", flush=True)
+                  f"ep_rew={ep_rew:.1f} fitness={fit:.3f}"
+                  + (f" style={st['style']:.3f}"
+                     f" [amp {st['amp']:.2f} freq {st['freq']:.2f}"
+                     f" shape {st['shape']:.2f}]" if st else "")
+                  + ")", flush=True)
             # Keep the BEST policy, not just the latest.
             #
             # follow_v5_velshape's transfer eval went 262 -> 351 -> 465 -> 476.5 and
@@ -319,9 +451,13 @@ def main():
                     sync_async(best_path, args.gcs_bucket, args.run_name)
             if use_wandb:
                 import wandb
-                wandb.log({"env_step": trainer.total_steps,
-                           "eval/video": wandb.Video(vpath, format="mp4"),
-                           "eval/ep_rew_warp": ep_rew, "eval/fitness_warp": fit})
+                logs = {"env_step": trainer.total_steps,
+                        "eval/video": wandb.Video(vpath, format="mp4"),
+                        "eval/ep_rew_warp": ep_rew, "eval/fitness_warp": fit}
+                if st:
+                    logs.update({f"eval/style_{k}" if k != "style" else "eval/style": v
+                                 for k, v in st.items()})
+                wandb.log(logs)
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now
             save_checkpoint(trainer, ckpt_path)

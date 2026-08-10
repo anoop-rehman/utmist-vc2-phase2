@@ -229,9 +229,18 @@ class WormEnv:
                  episode_seconds=15.0, use_gpu=True, device=None, seed=0,
                  use_graph=True, nconmax=64, njmax=512, reward=None,
                  backend_cls=None, floor_half=5.0, energy_coef=0.0,
-                 smooth_coef=0.0, rew_clip=(-10.0, 10.0)):
+                 smooth_coef=0.0, rew_clip=(-10.0, 10.0), arena="fenced", pitch_scale=0.3125):
         self.n = num_worlds
         self._floor_half = floor_half
+        # "fenced" = the small walled arena (wall at floor_half); "pitch" = the
+        # real 2v2 soccer pitch. See _base_xml for why this is geometry-only.
+        self._arena = arena
+        # dm_soccer's pitch is 96 x 72 m, sized for its BoxHead walker. Our ant
+        # does 1-2 m/s and cannot cross that inside a 45 s match, so the drills
+        # scale the WHOLE pitch -- ground, walls and both goals together, since
+        # the goal is a fixed 0.33 ratio of pitch width. 0.3125 gives 30 x 22.5 m
+        # with a 7.4 m goal, the size the play server already chose by hand.
+        self._pitch_scale = pitch_scale
         self.episode_steps = int(round(episode_seconds / CONTROL_DT))
         self.n_diverged = 0
         self.energy_coef = energy_coef
@@ -315,6 +324,29 @@ class WormEnv:
         return BallSpec()
 
     def _base_xml(self):
+        """The scene the drill trains in: the small fenced arena, or the pitch.
+
+        `arena="pitch"` returns None, which makes build_creature_scene fall back
+        to scene._BASE_XML -- the actual 2v2 soccer pitch. This is not a physics
+        change: measured on the compiled models, arena and pitch agree on
+        timestep (0.0025), cone (elliptic), floor friction (1, 0.005, 0.0001)
+        and floor solref (0.005, 1). The arena simply omits the friction
+        attribute and inherits MuJoCo's default, which is the value the pitch
+        states explicitly. Only geometry differs, and every extra geom (goals,
+        walls) sits at 42 m or beyond.
+
+        Why it matters: the fenced arena's wall is at 10 m, but kick spawns its
+        target 4-8 m past a ball that is 1.5-3 m from a creature which has
+        drifted a measured ~6 m from the origin by mid-episode. 23.5% of
+        mid-episode kick targets therefore land OUTSIDE the wall (furthest
+        measured 16.5 m), asking the ant to arc the ball over a fence -- a
+        quarter of training spent on attempts whose reward is capped by
+        geometry. The pitch bounds the same drill at x=+/-48, y=+/-36, which the
+        ant cannot reach, so the fence stops being part of the task.
+        """
+        if self._arena == "pitch":
+            from rower_soccer.warp_port.scene import base_xml
+            return base_xml(self._pitch_scale)
         return _arena_xml(self._floor_half)
 
     def _post_build_model(self, model):
@@ -389,6 +421,49 @@ class WormEnv:
     def _ball_vel_xyz(self):
         return self.qvel[:, self.bv:self.bv + 3]
 
+    # -- ball-contact diagnostic -------------------------------------------
+    # THE metric for every ball drill, and it is not optional. docs/
+    # STAGE2_MULTITASK.md 8 records that every failed dribble run reported
+    # plausible, near-identical fitness under three different reward functions
+    # -- because the creature never touched the ball, and what was actually
+    # being plotted was the target drifting away from a stationary ball.
+    # Fitness structurally cannot distinguish that from progress. Displacement
+    # from spawn can, and it is one cheap tensor op per step.
+    def _ball_track_reset(self):
+        """Call from _reset_state once the ball is placed."""
+        self.ball_spawn_xy = self._ball_xy().clone()
+        self.ball_max_disp = torch.zeros(self.n, device=self.device)
+
+    def _ball_track_respawn(self, idx):
+        """Re-baseline the tracked worlds after the ball is teleported. The
+        segmented strike drills (kick/shoot) re-place the ball mid-episode;
+        without this, displacement would be measured from a spawn point the
+        ball no longer has any relation to."""
+        if getattr(self, "ball_spawn_xy", None) is None:
+            return
+        self.ball_spawn_xy[idx] = self._ball_xy()[idx]
+        self.ball_max_disp[idx] = 0.0
+
+    def _ball_track_step(self, done):
+        if getattr(self, "ball_spawn_xy", None) is None:
+            return
+        d = torch.linalg.norm(self._ball_xy() - self.ball_spawn_xy, dim=-1)
+        self.ball_max_disp = torch.maximum(self.ball_max_disp, d)
+        if done:
+            # Latch at episode end. The instantaneous value is 0 just after
+            # every reset, so an unlatched curve swings with episode phase and
+            # is unreadable.
+            self.ep_ball_disp = self.ball_max_disp.clone()
+
+    def ball_stats(self):
+        """(mean max displacement from spawn, fraction of worlds that moved it
+        > 0.5 m, mean ball speed now), over the last COMPLETED episode."""
+        disp = getattr(self, "ep_ball_disp", None)
+        if disp is None:
+            return 0.0, 0.0, 0.0
+        return (float(disp.mean()), float((disp > 0.5).float().mean()),
+                float(torch.linalg.norm(self._ball_vel_xy(), dim=-1).mean()))
+
     # -- spawn helper -------------------------------------------------------
     def _spawn_root(self, xy=None, yaw=None, quat=None):
         """Write the creature root freejoint (qpos already zeroed by reset()).
@@ -450,6 +525,8 @@ class WormEnv:
         self.prev_ctrl = torch.zeros(self.n, self.act_dim, device=self.device)
         self._forward()
         self.reward.reset(self)   # after forward(): frames/ball positions valid
+        if self.meta.has_ball:
+            self._ball_track_reset()
         return self._obs()
 
     def _sanitize(self):
@@ -489,6 +566,8 @@ class WormEnv:
         self._update_task()
         self.t += 1
         done = self.t >= self.episode_steps
+        if self.meta.has_ball:
+            self._ball_track_step(done)
         rew = self._regularize(self.reward(self), a)
         return self._obs(), rew, done
 

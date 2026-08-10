@@ -22,10 +22,13 @@ and the pitch, and matching it is the creature's job (see
 `tools/unity2mujoco.py --length-scale`).
 """
 
+import os
+import re
 from dataclasses import dataclass
 
 import mujoco
 import numpy as np
+from dm_control.locomotion.soccer import pitch as dm_soccer_pitch
 
 # Contact time constants used for the Warp backend only; see build_creature_scene.
 # CPU (arena.xml) stays at MuJoCo's 0.02. These differ ON PURPOSE.
@@ -49,46 +52,99 @@ WARP_BALL_SOLREF_TIMECONST = 0.010
 # element-wise MAX against the creature's (1, 0.5, 0.5), so the creature-ground
 # contact is identical either way, and the ball wins its own contact outright via
 # priority=1.
-_PITCH_XML = """
-    <geom name="ground" type="plane" size="48 36 0.48" friction="1 0.005 0.0001"/>
+_PITCH_XML_UNSCALED = """
+    <geom name="ground" type="plane" size="48 36 0.48" friction="1 0.005 0.0001" material="pitch_mat"/>
     <geom name="wall_nx" type="plane" pos="-48 0 0" zaxis="1 0 0"  size="0 0 .48"/>
     <geom name="wall_px" type="plane" pos="48 0 0"  zaxis="-1 0 0" size="0 0 .48"/>
     <geom name="wall_ny" type="plane" pos="0 -36 0" zaxis="0 1 0"  size="0 0 .48"/>
     <geom name="wall_py" type="plane" pos="0 36 0"  zaxis="0 -1 0" size="0 0 .48"/>
-    <geom name="home_goal_right_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="home_goal_left_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="home_goal_top_post" type="capsule" size="0.4057 11.8800" pos="-42.6667 0.0000 5.3333" quat="0.70711 0.70711 0.00000 -0.00000"/>
-    <geom name="home_goal_right_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 -11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000"/>
-    <geom name="home_goal_left_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000"/>
-    <geom name="home_goal_back_base" type="capsule" size="0.4016 11.8800" pos="-48.0000 0.0000 0.0000" quat="0.70711 0.70711 0.00000 -0.00000"/>
-    <geom name="home_goal_right_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000"/>
-    <geom name="home_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 -11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="home_goal_left_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000"/>
-    <geom name="home_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="away_goal_right_post" type="capsule" size="0.4016 2.6667" pos="42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="away_goal_left_post" type="capsule" size="0.4016 2.6667" pos="42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000"/>
-    <geom name="away_goal_top_post" type="capsule" size="0.4057 11.8800" pos="42.6667 0.0000 5.3333" quat="0.70711 -0.70711 0.00000 0.00000"/>
-    <geom name="away_goal_right_base" type="capsule" size="0.4016 2.6667" pos="45.3333 11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="away_goal_left_base" type="capsule" size="0.4016 2.6667" pos="45.3333 -11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000"/>
-    <geom name="away_goal_back_base" type="capsule" size="0.4016 11.8800" pos="48.0000 0.0000 0.0000" quat="0.70711 -0.70711 0.00000 0.00000"/>
-    <geom name="away_goal_right_support" type="capsule" size="0.3012 3.1098" pos="46.4000 11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000"/>
-    <geom name="away_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000"/>
-    <geom name="away_goal_left_support" type="capsule" size="0.3012 3.1098" pos="46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000"/>
-    <geom name="away_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 -11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000"/>
+    <geom name="home_goal_right_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_post" type="capsule" size="0.4016 2.6667" pos="-42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="home_goal_top_post" type="capsule" size="0.4057 11.8800" pos="-42.6667 0.0000 5.3333" quat="0.70711 0.70711 0.00000 -0.00000" material="goal_mat"/>
+    <geom name="home_goal_right_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 -11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_base" type="capsule" size="0.4016 2.6667" pos="-45.3333 11.8800 0.0000" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
+    <geom name="home_goal_back_base" type="capsule" size="0.4016 11.8800" pos="-48.0000 0.0000 0.0000" quat="0.70711 0.70711 0.00000 -0.00000" material="goal_mat"/>
+    <geom name="home_goal_right_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000" material="goal_mat"/>
+    <geom name="home_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 -11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_support" type="capsule" size="0.3012 3.1098" pos="-46.4000 11.8800 2.6667" quat="0.26693 -0.00000 -0.96371 0.00000" material="goal_mat"/>
+    <geom name="home_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="-43.7333 11.8800 5.3333" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_post" type="capsule" size="0.4016 2.6667" pos="42.6667 11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_post" type="capsule" size="0.4016 2.6667" pos="42.6667 -11.8800 2.6667" quat="0.00000 1.00000 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_top_post" type="capsule" size="0.4057 11.8800" pos="42.6667 0.0000 5.3333" quat="0.70711 -0.70711 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_base" type="capsule" size="0.4016 2.6667" pos="45.3333 11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_base" type="capsule" size="0.4016 2.6667" pos="45.3333 -11.8800 0.0000" quat="0.70711 0.00000 -0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_back_base" type="capsule" size="0.4016 11.8800" pos="48.0000 0.0000 0.0000" quat="0.70711 -0.70711 0.00000 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_support" type="capsule" size="0.3012 3.1098" pos="46.4000 11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000" material="goal_mat"/>
+    <geom name="away_goal_right_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_support" type="capsule" size="0.3012 3.1098" pos="46.4000 -11.8800 2.6667" quat="0.26693 -0.00000 0.96371 0.00000" material="goal_mat"/>
+    <geom name="away_goal_left_top_support" type="capsule" size="0.3042 1.0667" pos="43.7333 -11.8800 5.3333" quat="0.70711 0.00000 0.70711 0.00000" material="goal_mat"/>
 """
+
+def pitch_xml(scale=1.0):
+    """The dm_soccer pitch, scaled uniformly by `scale`.
+
+    Every number in the fragment is a length, and the pitch's own proportions
+    are ratios of its half-extents -- GOAL_HALF_WIDTH / half_y = 0.330, which is
+    exactly dm_control's _DEFAULT_GOAL_LENGTH_RATIO -- so one multiply scales
+    ground, walls and both goals together and keeps the geometry self-consistent.
+
+    scale=1.0 is dm_control's 2v2 pitch (96 x 72 m), which is sized for its
+    BoxHead walker and is far too large for our ant: at ~1-2 m/s the ant cannot
+    cross it inside a 45 s match. The play server already worked around this with
+    --pitch-half 15 11; scale=0.3125 is that same 30 x 22 m pitch, reached by
+    scaling the WHOLE thing rather than resizing the ground and leaving 96 m-pitch
+    goals stranded on it.
+    """
+    def mul(m):
+        return f'{m.group(1)}="{" ".join(f"{float(v)*scale:.6g}" for v in m.group(2).split())}"'
+    return re.sub(r'\b(size|pos|fromto)="([-0-9. ]+)"', mul, _PITCH_XML_UNSCALED)
+
+
+def goal_geometry(scale=1.0):
+    """(goal_x, half_width, height) at `scale` -- the shoot task's constants."""
+    return (42.6667 * scale, 11.88 * scale, 5.3333 * scale)
+
 
 # Goal mouth centres, for the `shoot` task obs. Home goal is at -x, away at +x.
 GOAL_X = 42.6667
 GOAL_HALF_WIDTH = 11.88
 GOAL_HEIGHT = 5.3333
 
-_BASE_XML = f"""
+# The REAL dm_control soccer pitch texture -- the same 3200x2400 PNG
+# dm_control.locomotion.soccer.pitch loads for its field plane, with the actual
+# line markings, centre circle and penalty boxes. Applied exactly as dm_control
+# does (type="2d", no texrepeat, so the image spans the plane once) rather than
+# a checkerboard of my own invention, so the Warp drills and the CPU soccer env
+# render the same world they already share collision geometry with.
+_PITCH_TEXTURE = os.path.join(
+    os.path.dirname(dm_soccer_pitch.__file__), "assets", "pitch",
+    "pitch_nologo_l.png")
+
+# Materials are VISUAL ONLY -- rgba/texture never enter contact dynamics, so
+# adding them cannot change a trained policy's behaviour. The pitch previously
+# rendered as undifferentiated MuJoCo grey, which makes an eval video hard to
+# read: you cannot see the ant moving relative to the ground, or tell where the
+# goal is. `pitch_mat` is assigned to the ground by name below; the goal geoms
+# pick up `goal_mat` the same way.
+def base_xml(scale=1.0):
+    """The full drill scene -- dm_soccer's pitch at `scale`, lit and textured."""
+    return f"""
 <mujoco model="warp_drill">
   <option cone="elliptic" timestep="0.0025"/>
   <visual><global offwidth="1024" offheight="1024"/></visual>
-  <worldbody>{_PITCH_XML}  </worldbody>
+  <asset>
+    <texture name="pitch_tex" type="2d" file="{_PITCH_TEXTURE}"/>
+    <material name="pitch_mat" texture="pitch_tex" reflectance="0.05"/>
+    <material name="goal_mat" rgba="0.93 0.93 0.95 1"/>
+  </asset>
+  <worldbody>
+    <light name="sun" pos="0 0 {30 * scale:g}" dir="0 0 -1" diffuse="0.9 0.9 0.9"
+           directional="true" castshadow="false"/>{pitch_xml(scale)}  </worldbody>
 </mujoco>
 """
+
+
+_BASE_XML = base_xml(1.0)
 
 
 @dataclass
@@ -166,10 +222,15 @@ def creature_size(creature_xml_path):
     d = mujoco.MjData(m)
     mujoco.mj_forward(m, d)
     mass = float(m.body_mass[1:].sum())  # skip worldbody
-    lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
-    for g in range(m.ngeom):
-        lo = np.minimum(lo, d.geom_xpos[g] - m.geom_size[g])
-        hi = np.maximum(hi, d.geom_xpos[g] + m.geom_size[g])
+    # geom_rbound (bounding-sphere radius), NOT geom_size: geom_size is only a
+    # 3-vector half-extent for BOXES. For a sphere it is (r, 0, 0) and for a
+    # capsule (r, halflen, 0), so size[2] is identically zero and the bbox came
+    # out with ZERO height on any creature whose geoms sit at one z -- the ant,
+    # whose legs are horizontal in the rest pose, measured 0.00 m and divided
+    # probe_speed by zero.
+    r = m.geom_rbound[:, None]
+    lo = (d.geom_xpos - r).min(axis=0)
+    hi = (d.geom_xpos + r).max(axis=0)
     return mass, float((hi - lo)[2])
 
 

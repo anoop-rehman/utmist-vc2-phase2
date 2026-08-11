@@ -432,3 +432,59 @@ run. So
   configuration pays their PPO settings -- 10 optimizer epochs at minibatch
   2048 is 250 optimizer steps per learner per iteration, 500 in total, against
   the 16 the stage-3 smokes took -- and because two learners cost ~1.65x one.
+
+## 8. The comparison, epochs 0-40 (run in progress)
+
+Both columns are the same quantity computed the same way: `train` is the mean
+sampled-episode return under the curriculum reward (their
+`train_R_eps_avg_0` / our `train_ret`), `eval` is the mean-action episode return
+under the curriculum reward (their `Agent_i gets eval reward` / our
+`eval_ret_curriculum`), `len` is the mean eval episode length. Their epoch axis
+and our iteration axis are the same axis (section 6).
+
+| epoch | OURS train | OURS eval 0/1 | OURS len | OURS win | THEIRS train | THEIRS eval 0/1 | THEIRS len |
+|---|---|---|---|---|---|---|---|
+| 0 | -7* | 510 / 496 | 500 | 0.00 | -1183 | 428 / 429 | 501 |
+| 6 | -1085 | 499 / 513 | 500 | 0.00 | -1038 | 425 / 424 | 501 |
+| 12 | -967 | 499 / 470 | 500 | 0.00 | -819 | 412 / 435 | 501 |
+| 18 | -868 | 488 / 514 | 500 | 0.00 | -715 | 412 / 413 | 501 |
+| 24 | -745 | 484 / 524 | 500 | 0.00 | -632 | 406 / 434 | 501 |
+| 30 | -573 | 457 / 548 | 497 | 0.00 | -501 | 426 / 453 | 501 |
+| 34 | -503 | 386 / 490 | **427** | 0.00 | -435 | 412 / 451 | 501 |
+| 38 | -436 | 317 / 336 | **318** | 0.00 | -340 | 441 / 413 | 501 |
+| 40 | -395 | 219 / 264 | **228** | 0.00 | -302 | 378 / 446 | 501 |
+
+\* our `train_ret` at epochs 0-4 is the metric warming up (section 6), not a
+reward difference; it reaches its true level at epoch 5-6.
+
+What lines up:
+
+* **The training-reward curve has the same shape and nearly the same level.**
+  Both climb monotonically from about -1100 toward 0; ours trails theirs by
+  roughly 5-8 epochs throughout (ours -1041 at 8, -633 at 28, -395 at 40;
+  theirs -972 at 8, -530 at 28, -302 at 40). This is the port's first
+  quantitative agreement with one of their training curves, and it exists only
+  because of the section-3d fix.
+* **The eval-reward collapse happens, and at a comparable epoch.** Theirs
+  falls off a cliff between epochs 41 and 50 (378 -> 204 -> 128 -> 9 -> -6) as
+  the ants stop standing still, start running and begin to fall; the eval
+  episode length goes with it. Ours starts the same collapse at **epoch ~34**
+  (eval length 500 -> 427 -> 318 -> 228 by epoch 40). Same landmark, ours
+  arriving ~7 epochs earlier.
+
+What does not line up:
+
+* **The absolute eval level is ~80-100 points higher on our side for the whole
+  plateau** (our 484-511 against their 403-446 through epoch 30). That is the
+  epoch-0 gap of section 5 persisting, not a new effect: their standing ant
+  slides backwards and ours does not, which is worth a constant ~-72 per
+  episode to them for as long as both policies are standing still.
+* Ours trails on `train_ret` yet reaches the collapse EARLIER. Both facts are
+  consistent with our policy committing to locomotion sooner, and neither is
+  explained here.
+
+Health through epoch 42: **0 diverged worlds, 0 ring clamps, 0 NaNs**, ring
+42/42 both sides, `opp_lag` 9.4-11.5 against the `epoch/4` their delta=0.5 rule
+predicts (10.5 at epoch 42), KL ~2e-3 per iteration, mean total mass 1.824 and
+`design_std` 0.292 (the design head is moving and has committed to nothing --
+unchanged from stages 2-3, and expected at `termination_epoch: 1000`).

@@ -79,7 +79,8 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                  reward_kind="direction", w_arrive=3.0,
                  segment_seconds_range=(2.0, 6.0), target_dist_range=(4.0, 8.0),
                  target_z=None, time_coef=0.0, arena="fenced", pitch_scale=0.3125,
-                 w_upright=1.0, pace_range=(1.5, 3.0), deadline_range=(0.5, 4.0)):
+                 w_upright=1.0, pace_range=(1.5, 3.0), deadline_range=(0.5, 4.0),
+                 arrival_reward_coef=None):
         self._ball = ball
         # -- drill v4: the TIMED kick -------------------------------------
         # reward_kind "timed" makes the segment a deadline rather than a
@@ -117,6 +118,9 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         # a slow trickle should not score alike. Off by default (0.0), because
         # the paper's window already bounds the time.
         self._time_coef = time_coef
+        # None => reward and fitness share reward_coef (v4 behaviour). See
+        # _update_task for the measurement that motivates overriding it.
+        self._arrival_reward_coef = arrival_reward_coef
         self._speed_clip = speed_clip
         # Public mutable knobs the trainer / eval set at runtime, same names as
         # dribble's so the trainers stay interchangeable.
@@ -272,19 +276,40 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         # standing over the ball) still banks whatever strike it made.
         self._bank(end)
         # Snapshot arrival BEFORE _close_segments respawns and overwrites
-        # seg_target_best. Both the fitness accumulator and the reward read this
-        # same value, so they can never disagree again.
-        arrived = self.arrival()
-        self.last_arrival = torch.where(end, arrived,
+        # seg_target_best.
+        #
+        # Two curves over the SAME distance, on purpose (v5):
+        #   fitness  exp(-0.5 d)                    -- the paper's constant,
+        #            held fixed so every kick arm stays comparable;
+        #   reward   exp(-arrival_reward_coef * d)  -- gentler by default.
+        # Measured on v4 (reward_coef 0.5 for both): over 7163 segments the
+        # median arrival was 0.107, i.e. EXACTLY the do-nothing value (the ball
+        # never moves, d = the 4.5 m spawn distance). The ant strikes 2-5x per
+        # episode at a median 15.2 m/s, which rolls the ball 10.6 m past a 3-6 m
+        # target -- and out there exp(-0.5 d) is numerically flat (d=10 -> 0.007,
+        # d=7 -> 0.030), so nothing tells it to strike softer. Dense in form,
+        # desert in practice: the same failure docs/fetch.md records for dribble,
+        # whose documented fix is a tolerance with an arena-sized margin.
+        # At coef 0.2, d=10 -> 0.135 and d=7 -> 0.247: real slope where the
+        # policy actually lives.
+        arrived_fit = self.arrival()
+        arrived_rew = (arrived_fit if self._arrival_reward_coef is None
+                       else self.arrival(coef=self._arrival_reward_coef))
+        self.last_arrival = torch.where(end, arrived_rew,
                                         torch.zeros_like(self.last_arrival))
         if bool(end.any()):
             idx = end.nonzero(as_tuple=True)[0]
-            self.target_fit_sum[idx] += arrived[idx]
+            self.target_fit_sum[idx] += arrived_fit[idx]
         self._close_segments(end)
 
-    def arrival(self):
+    def arrival(self, coef=None):
         """exp(-c*d): AT THE DEADLINE under reward_kind 'timed', at closest
         approach otherwise.
+
+        `coef` overrides the decay constant for THIS call. The reward passes
+        `arrival_reward_coef` (a gentler curve, to escape the flat-reward
+        desert measured on v4 -- see _update_task) while fitness keeps the
+        paper's 0.5, so runs stay comparable across arms.
 
         The paper's kick-to-target fitness is exp(-1/2 ||x_ball - x_target||)
         (Table S3). Same form in both branches -- what differs is WHEN d is
@@ -299,9 +324,10 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         branch only: under 'timed' the deadline already prices time, and
         decaying by it twice would double-count.
         """
+        c = self._reward_coef if coef is None else coef
         if self._timed:
-            return torch.exp(-self._reward_coef * self._target_dist_now())
-        a = torch.exp(-self._reward_coef * self.seg_target_best)
+            return torch.exp(-c * self._target_dist_now())
+        a = torch.exp(-c * self.seg_target_best)
         if self._time_coef:
             a = a * torch.exp(-self._time_coef * self.seg_best_t * CONTROL_DT)
         return a

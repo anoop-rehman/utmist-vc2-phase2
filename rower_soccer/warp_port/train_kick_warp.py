@@ -48,6 +48,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
         target_dist_range=tuple(args.target_dist_range),
         pace_range=tuple(args.pace_range),
         deadline_range=tuple(args.deadline_range),
+        arrival_reward_coef=args.arrival_reward_coef,
         time_coef=args.time_coef,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         floor_half=args.floor_half, fixed_start=args.fixed_start,
@@ -197,6 +198,15 @@ def main():
     p.add_argument("--target-dist-range", type=float, nargs=2, default=[4.0, 8.0],
                    help="Table S2 calls the kick target DISTANT; randomized per "
                         "attempt so the policy cannot memorise one range")
+    p.add_argument("--arrival-reward-coef", type=float, default=None,
+                   help="decay constant for the arrival term IN THE REWARD "
+                        "only; fitness always keeps --reward-coef so arms stay "
+                        "comparable. Default None = share it (v4 behaviour). "
+                        "Set ~0.2 to escape the flat-reward desert measured on "
+                        "v4: the ant overshoots 3-6 m targets by 2-3x and "
+                        "exp(-0.5*d) is numerically flat out there (d=10 -> "
+                        "0.007), so nothing gradients it toward striking "
+                        "softer. At 0.2, d=10 -> 0.135.")
     p.add_argument("--pace-range", type=float, nargs=2, default=[1.5, 3.0],
                    help="--reward-kind timed: band the pass pace v_pace is "
                         "drawn from (m/s), where the deadline is "

@@ -162,10 +162,7 @@ class SelfPlayPPO:
         self.device = device
         # Their two optimizers with two learning rates (dev_learner.py:129-140);
         # the critic's weight decay is their `l2_reg` on the value net only.
-        pi_params = ([p for n, p in ac.named_parameters()
-                      if n.startswith(("pi", "action_net", "log_std"))])
-        vf_params = [p for n, p in ac.named_parameters()
-                     if n.startswith(("vf", "value_net"))]
+        pi_params, vf_params = self._param_groups()
         self.opt_pi = torch.optim.Adam(pi_params, lr=policy_lr)
         self.opt_vf = torch.optim.Adam(vf_params, lr=value_lr,
                                        weight_decay=value_l2)
@@ -184,6 +181,21 @@ class SelfPlayPPO:
         self._obs = env.reset()
         self.total_steps = 0
         self.n_bad_grads = 0
+
+    def _param_groups(self):
+        """(policy, critic) parameters. Overridden by the dev trainer, whose
+        actor is two named heads rather than one `pi`/`action_net` pair."""
+        pi = [p for n, p in self.ac.named_parameters()
+              if n.startswith(("pi", "action_net", "log_std"))]
+        vf = [p for n, p in self.ac.named_parameters()
+              if n.startswith(("vf", "value_net"))]
+        return pi, vf
+
+    def _logp_entropy(self, obs, act):
+        """(log pi(act|obs), entropy). Overridden by the dev trainer, whose
+        actor has two heads and picks one per sample from the stage flag."""
+        d = self.ac.dist(obs)
+        return d.log_prob(act).sum(-1), d.entropy().sum(-1)
 
     def alpha(self):
         """Their curriculum weight on the dense reward: 1 at the start, linearly
@@ -247,14 +259,13 @@ class SelfPlayPPO:
             perm = torch.randperm(n, device=self.device)
             for s in range(0, n, self.mb):
                 i = perm[s:s + self.mb]
-                d = self.ac.dist(obs[i])
-                logp = d.log_prob(act[i]).sum(-1)
+                logp, ent = self._logp_entropy(obs[i], act[i])
                 ratio = (logp - logp_old[i]).exp()
                 pi_loss = -torch.min(
                     ratio * adv[i],
                     ratio.clamp(1 - self.clip, 1 + self.clip) * adv[i]).mean()
                 if self.ent_coef:
-                    pi_loss = pi_loss - self.ent_coef * d.entropy().sum(-1).mean()
+                    pi_loss = pi_loss - self.ent_coef * ent.mean()
                 vf_loss = (self.ac.value(obs[i]) - ret[i]).pow(2).mean()
                 self.opt_pi.zero_grad(set_to_none=True)
                 self.opt_vf.zero_grad(set_to_none=True)
@@ -290,7 +301,11 @@ def evaluate(env, ac, max_steps=None, mean_action=True):
     where the port map's `iter-0 eval ~= 490-510, win rate 0.00` comes from.
     """
     ac.eval()
-    max_steps = max_steps or env.max_episode_steps
+    # The dev env spends one extra step per episode on the design action, which
+    # their `_elapsed_steps` does not count; without the +1 a stand-still policy
+    # never closes an episode here and the eval reports zero games.
+    max_steps = max_steps or (env.max_episode_steps
+                              + int(getattr(env, "has_design_step", False)))
     obs = env.reset()
     env.reset_win_stats()
     rets, lens = [], []

@@ -1,29 +1,32 @@
-# CompetEvo -> mujoco_warp port: status (unit 2d, stages 0-1)
+# CompetEvo -> mujoco_warp port: status (unit 2d, stages 0-2)
 
 *Worktree `competevo-port`. Reference: `/workspace/competevo` (read-only).
 Plan: `rower_soccer/docs/repro/COMPETEVO_PORT_MAP.md`, section 5.5.
 This file records gate results, INCLUDING the ones that did not pass and the
 things that pass only because of a quirk in their code.*
 
-Scope so far: **`run-to-goal-ants-v0`** (fixed morphology, two ants, one merged
-scene, batched over worlds) plus a shared-policy PPO smoke run. Evolution
-(`run-to-goal-devants-v0`), the design-action stage flag, the per-world
-model-field writer and faithful opponent sampling are NOT here yet.
+Scope: **`run-to-goal-ants-v0`** (fixed morphology, stages 0-1) and
+**`run-to-goal-devants-v0`** (stage 2: per-world morphology, the 52-dim dev
+observation, the 28-dim design+motor action, the two-head dev policy). Faithful
+opponent sampling and their two-learner co-evolution loop are stage 3 and are
+NOT here yet.
 
-Numbering: this covers the port map's **Stage 0** (fixed-morph harness), split
-into an env-parity gate and a PPO smoke. The port map's Stage 1 (the design ->
-model-fields writer) is the next unit and is referred to below as "stage 2"
-where the task's numbering is used.
+Numbering: "stage 0/1" is the port map's Stage 0 (fixed-morph harness), split
+into an env-parity gate and a PPO smoke. "Stage 2" is the port map's Stage 1
+(the design -> model-fields writer) plus the dev env and policy around it.
 
 ## What exists
 
 | file | what |
 |---|---|
-| `scene.py` | the merged 2-ant MJCF, emitted from a leg table; per-agent index plumbing (`SceneMeta`/`AgentSlices`) |
-| `backend.py` | `warp_port` backends + `subtree_com`/`cfrc_ext`; CPU backend runs float64 for the gate |
-| `run_to_goal_env.py` | batched env: obs, their three reward/termination layers, per-world auto-reset, win counters |
-| `parity.py`, `their_env_driver.py` | JSON-over-subprocess harness driving their CPU env in their venv |
-| `tests/test_parity.py` | the gate (model equivalence, obs+reward parity, solver-divergence diagnostic) |
+| `scene.py` | the merged 2-ant MJCF -- fixed AND dev ants -- emitted from leg tables; the dev genome's targets as a table (`DEV_GENOME_TABLE`); per-agent index plumbing (`SceneMeta`/`AgentSlices`) |
+| `backend.py` | `warp_port` backends + `subtree_com`/`cfrc_ext`; **dev** variants with a PER-WORLD batched Model (Warp) and one MjModel per world (CPU mirror) |
+| `run_to_goal_env.py` | batched fixed-morph env: obs, their three reward/termination layers, per-world auto-reset, win counters |
+| `design.py` | **stage 2**: genome -> model fields (geoms, body pos, gears, and analytic capsule mass/inertia/ipos), plus exact `mj_setConst` constants |
+| `dev_env.py` | **stage 2**: `run-to-goal-devants-v0` batched -- stage flags, the design step, the 52-dim obs, the dev standing band |
+| `dev_ppo.py`, `train_dev.py` | **stage 2**: their `DevPolicy`/`DevValue` as one stage-masked module, and the smoke trainer |
+| `parity.py`, `their_env_driver.py`, `their_dev_driver.py` | JSON-over-subprocess harnesses driving their CPU envs in their venv |
+| `tests/test_parity.py`, `tests/test_design_parity.py` | the stage-0/1 and stage-2 gates |
 | `ppo.py`, `train_run_to_goal.py`, `render.py` | shared-policy PPO with their hyperparameters, eval pass, video |
 
 ## Gate 0a -- model equivalence (PASS)
@@ -309,56 +312,471 @@ goal is behind the other -- and then topple. Nothing in the video contradicts th
 table; it shows why episode length is 137.
 
 
-## What stage 2 needs, learned the hard way
+## Stage 2 -- per-world morphology (`run-to-goal-devants-v0`)
 
-1. **`inertiafromgeom` is not a footnote, and the numbers to match are already
-   available.** The compiled fixed ant has torso mass 0.327 (sphere r=0.25 at
-   density 5) and per-leg masses 0.0392 / 0.0392 / 0.0676 for the upper, mid and
-   foot capsules. Any per-world design write must reproduce MuJoCo's capsule
-   formula exactly -- mass = density * (pi r^2 L + 4/3 pi r^3), with the
-   cylinder+two-hemisphere inertia about the capsule frame, then `body_ipos` at
-   the capsule midpoint. The cheapest possible gate: for 10 random design
-   vectors, emit their XML with `set_design_params`, compile it with MuJoCo on
-   the CPU, and diff `body_mass`/`body_inertia`/`body_ipos`/`geom_*`/
-   `actuator_gear` against our per-world writer. That is exactly the
-   `test_model_matches_theirs` check already written here, parameterized by a
-   design vector -- reuse it rather than inventing a trajectory gate first.
-2. **Check which model fields mujoco_warp actually batches per world BEFORE
-   writing the design code.** `put_model` produces a `Model` whose arrays are
-   mostly unbatched (shared across worlds). Confirm the per-world axis exists
-   for `geom_size`, `geom_pos`, `geom_quat`, `body_pos`, `body_mass`,
-   `body_inertia`, `body_ipos`, `dof_M0`-style derived quantities and
-   `actuator_gear`; anything unbatched needs expanding, and note that *derived*
-   mass matrices are recomputed each step from `body_mass/body_inertia`, so
-   writing those is enough only if nothing was baked at `put_model` time.
-   Re-capture the CUDA graph after any model-shape change.
-3. **The parity harness generalizes for free, and should be used the same way.**
-   `their_env_driver.py` already speaks (prev-state, state, action) and returns
-   obs/reward field by field; the dev env needs only a different `build_env()`,
-   a `set_design_params` call before the state is set, and the 3-array obs
-   (`[stage_flag(1) | scale_vector(20) | sim_obs(31)]`) flattened in that order.
-   Keep the same "hand-set states, never a shared rollout" discipline: with a
-   different solver, a trajectory diff is a solver measurement.
-4. **The dev env's obs is NOT this obs.** Stage 2's sim_obs block is the same 31
-   numbers, but the policy input is 52 = stage flag + 20 scale + 31 sim, and the
-   design action is step 0 of the trajectory with reward 0 and mask 1. The PPO
-   buffer here is already `[T, worlds, agents, ...]`; the stage flag becomes a
-   per-world boolean selecting the policy head, so the buffer shape does not
-   change -- only the head selection and the action width (28 = 20 + 8) do.
-5. **One-time kernel compilation dominates short runs.** The first build of this
-   scene at `iterations=100` took ~122 s of Warp kernel compilation (cached
-   afterwards). Budget it; do not mistake it for a hang, and do not let a
-   parameter sweep silently recompile per configuration.
-6. **`nconmax`/`njmax` are per world** in this mujoco_warp (64/512 defaults are
-   ample here: 32 contacts observed for two ants, a floor and two goal rods).
-7. **Their goal rods collide.** `rightgoal`/`leftgoal` are cylinders with default
-   contype/conaffinity, so ants can hit them, and mujoco_warp warns that
-   CAPSULE-CYLINDER pairs get at most one contact under MULTICCD. Kept as-is
-   (it is their physics); worth remembering if a stage-2 ant ever wedges itself
-   against a goal line.
-8. **Self-collision is ON for these ants.** The port map's section 1.2
-   contype/conaffinity trick is from `evo_utils.py` and does *not* apply to the
-   gym_compete merger: because the ant's `<default>` already declares a `<geom>`,
-   their `color_set` flag skips that branch entirely. Do not "fix" it, and do
-   check the dev merger separately at stage 2 -- there the trick IS live, and it
-   only works for exactly two agents.
+Their dev agents have a FIXED topology whose geometry is a flat scale vector
+`s in [-1,1]^20`, emitted by the policy as the step-0 action of every episode.
+Their env applies it by mutating two lxml trees, re-merging them and calling
+`MjModel.from_xml_string` **twice per episode per worker**
+(`multi_dev_agent_env.py:274-316`). Here there is ONE compiled model and a
+design is a write of that world's row of the batched model arrays. Nothing is
+recompiled, ever.
+
+### Which mujoco_warp Model arrays batch per world (answering the stage-1 note)
+
+Measured, not assumed. In mujoco_warp 3.11 every `Model` array whose type spec
+starts with `*` -- **105 of them**, including all sixteen this port needs --
+defaults to a leading dimension of **1, shared across all worlds**, and every
+kernel reads it as `field[worldid % field.shape[0]]`. The supported way to get a
+per-world axis is
+
+```python
+mjw.put_model(mjm, batch_sizes={"body_mass": nworld, ...})
+```
+
+which allocates the listed fields `[nworld, ...]` with the compiled value tiled
+into every row. It has to be done at `put_model` time: the leading dimension is
+baked into the kernels (`collision_driver.py:307` specializes on
+`wp.static(ngeom_rbound > 1)`), so an array cannot be widened afterwards.
+`WarpBackend._put_model` is now an overridable hook and
+`CompeteWarpDevBackend` passes `batch_sizes`.
+
+Confirmed batched `[nworld, ...]` and written: `geom_size`, `geom_pos`,
+`geom_rbound`, `geom_aabb`, `body_pos`, `body_mass`, `body_inertia`,
+`body_ipos`, `body_subtreemass`, `actuator_gear`, `body_invweight0`,
+`dof_invweight0`, `actuator_acc0`. Also batched but constant under this genome
+(it only scales along fixed directions): `geom_quat`, `body_quat`, `body_iquat`.
+
+Two fields worth naming because they are easy to miss:
+
+* **`body_subtreemass`** is what `subtree_com` is divided by -- i.e. it is in the
+  forward-progress REWARD. Leave it stale and the reward is wrong, not the
+  physics.
+* **`geom_rbound` / `geom_aabb`** are the broadphase bounds. Leave them stale and
+  a design with longer legs silently loses contacts.
+
+**`bvh_aabb` does not exist in mujoco_warp** and is not in the list above.
+MuJoCo's compile-time body BVH is a CPU-MuJoCo structure (mujoco_warp's `bvh_*`
+are mesh/hfield/flex only, and it broadphases from `geom_aabb`/`geom_rbound`).
+It still had to be handled, because the CPU mirror used by the gate does descend
+it -- see the trajectory gate below, where a stale one was the entire residual.
+
+### The CUDA graph does NOT need re-capturing
+
+The stage-1 note warned that it might. It does not, and the test says so
+(`test_design_parity.py::mujoco_warp batches the model per world; graph
+survives`): a graph captured BEFORE any design write replays correctly after
+one, because a design write is an in-place write into device buffers the graph
+already points at. Only a SHAPE change would invalidate it, and the shapes are
+fixed at `put_model`. Measured on 8 worlds, graph captured at construction, then
+designs written and 20 graph replays: worlds given identical designs stay
+together to 1.2e-09 (fp32), worlds given different designs separate by 0.56 m.
+
+The thing that IS shape-sensitive is kernel compilation: switching the model
+arrays from shared to per-world is a new specialization, so the first build after
+this change recompiles the Warp kernels (~2 min, cached afterwards).
+
+## Gate 2a -- design -> model fields vs THEIR compiler (PASS)
+
+*Honest note on how this gate stood: the numbers below are real and reproduce
+exactly, but for a stretch the gate was not actually running them. The host
+round-trip work changed `HostConstants.__init__` to take a `spec` and
+`compute()` to take the genome, and this call site was left on the old
+`HostConstants(model).compute(fields, n)` signature -- so the single most
+load-bearing gate in the stage was erroring out with a `TypeError` and reporting
+FAIL while the rest of the suite went green. Fixed, and the fix makes the gate
+stricter: it now hands `compute` the genome and lets `HostConstants` derive the
+fields itself, which is the real production entry point rather than a
+pre-computed dict. Every number below is from the repaired gate.*
+
+`tests/test_design_parity.py`. Method, per the stage-1 advice: reuse the
+model-equivalence check, parameterized by a design vector, and include the mass
+block. For 10 random genomes `s ~ U(-1,1)^20` per agent, their code is driven
+through its real entry points in their venv (`env.reset()`, then
+`env.step([design0, design1])`, which runs `set_design_params` ->
+`load_tmp_mujoco_env`), and the merged MJCF it emits is returned along with the
+MjModel it compiled.
+
+Two references, because they answer different questions -- (a) their emitted
+MJCF compiled by OUR mujoco 3.11 ("is the writer right?"), (b) their MjModel as
+compiled by mujoco 2.3.5 in their venv ("is anything else different?").
+
+| field | max abs \|ours - their compiler\| |
+|---|---|
+| `geom_size` | 1.1e-16 |
+| `geom_pos` | 0.0 |
+| `geom_rbound` | 1.1e-16 |
+| `geom_aabb` | 1.1e-16 |
+| `body_pos` | 0.0 |
+| **`body_mass`** | **5.6e-17** |
+| **`body_inertia`** | **3.5e-18** |
+| **`body_ipos`** | **0.0** |
+| `body_subtreemass` | 4.4e-16 |
+| `actuator_gear` | 0.0 |
+| `body_invweight0` (rel) | 3.7e-16 |
+| `dof_invweight0` (rel) | 2.9e-16 |
+| `actuator_acc0` (rel) | 3.2e-16 |
+
+Those designs are not cosmetic: leg masses vary **4.7x** across the set.
+
+The (b) reference agrees with (a) to 0.0 on every field except `geom_aabb`,
+where it differs by exactly 1.0e-2 on all 26 ant geoms. That is `geom_margin`:
+**mujoco 2.3.5 pads the broadphase AABB by the contact margin and 3.11 does
+not.** It is a compiler-version artifact, not a port bug -- it applies to the
+base scene at `s = 0` too -- and the writer matches 3.11 because 3.11 is the
+compiler mujoco_warp's model comes from. (This one cost time: matching (b)
+naively put a margin into the writer that made it disagree with our own base
+model.)
+
+### The mass block, and why it is not just `geom_size`
+
+Every body in this robot carries exactly one geom, so `body_ipos` is the capsule
+midpoint, `body_iquat` is the geom frame (unchanged), and `body_inertia` is the
+capsule's principal inertia. The formula, verified against MuJoCo's compiler at
+2.5e-16 relative on mass and 3.8e-16 on inertia over random (r, h):
+
+```
+m_cyl = rho pi r^2 2h                m_sph = rho 4/3 pi r^3
+I_axial      = m_cyl r^2/2 + m_sph 2/5 r^2
+I_transverse = m_cyl (r^2/4 + h^2/3) + m_sph (2/5 r^2 + h^2 + 3/4 h r)
+```
+
+At `s = 0` this reproduces the numbers the stage-1 notes recorded: torso 0.327,
+legs 0.0392 / 0.0392 / 0.0676.
+
+Two traps found while building it, both now asserted rather than assumed:
+
+1. **MuJoCo sorts the principal moments** and rotates `body_iquat` to match, so
+   which slot of `body_inertia` holds `I_axial` is a property of the compiled
+   model. The spec reads the slot off the base model (the entry that differs
+   from the median -- a capsule's other two are equal), and
+   `_assert_inertia_ordering_is_stable` proves at build time that no design in
+   `[-1,1]^20` can reorder them, by checking the corner that squashes a capsule
+   hardest (shortest allowed, fattest allowed). Guessing the slot instead
+   produced a 92% relative error on `body_inertia` that nothing else caught.
+2. **The genome does not scale everything you would expect.** Per leg the five
+   parameters are upper-capsule LENGTH, mid RADIUS, mid LENGTH, foot RADIUS,
+   foot LENGTH; the upper capsule's radius and the torso sphere are never
+   scaled, and the child body `pos` is scaled by the PARENT capsule's length
+   factor (which is what keeps links attached). Gears scale by
+   `b = 1 + 0.15 s` using the RADIUS parameter of the capsule the motor drives,
+   not the length. This is now `DEV_GENOME_TABLE` in `scene.py`, resolved against
+   the compiled model by name.
+
+### `mj_setConst`: the constants with no closed form (SOLVED, not deferred)
+
+`body_invweight0` / `dof_invweight0` / `actuator_acc0` are not functions of the
+design in any form that can be written down -- MuJoCo derives them from
+`inv(M)` at qpos0. The first implementation left them at the base ant's values.
+Measured, that is **up to 46% wrong on `dof_invweight0`**, and since
+`*_invweight0` sets constraint impedance it is not bookkeeping: over 40 control
+steps (0.6 s) from qpos0 under identical open-loop torques it moved the
+trajectory by **7.1e-2** (against 1.5e-7 for the entire PGS -> Newton solver
+swap -- five orders of magnitude bigger).
+
+The fix is that `mj_setConst` is a NUMERIC routine over an existing model, not a
+compile. `design.HostConstants` keeps one host scratch `MjModel`, pushes the
+design fields into it, calls `mj_setConst`, and writes the three arrays back --
+**0.23 ms per world** for the `mj_setConst` loop itself, machine-epsilon
+agreement with a freshly compiled model. Only the worlds that reset on a given
+step pay it. `exact_constants=False` restores the stale behaviour, which is what
+the gate measures against.
+
+(An earlier revision of this file claimed 0.093 ms per world. Re-measured on the
+shared card it is 0.23 ms; the original number timed the bare `mj_setConst` call
+and not the field push around it. The cost that actually mattered turned out to
+be somewhere else entirely -- see the host round-trip section below.)
+
+### The host round-trip: one fused D2H, not a second `design_fields`
+
+The write path is `design_fields(spec, scale)` -> scatter ten arrays into the
+batched Model -> `mj_setConst` for the same worlds. `mj_setConst` runs on the
+host, so the five fields it reads (`body_mass`, `body_inertia`, `body_ipos`,
+`body_pos`, `actuator_gear`) have to get there.
+
+The first implementation pulled them field by field: ten transfers, each its own
+device sync. The second (the one this stage inherited, mid-edit) avoided the
+syncs by giving `HostConstants` a float64 CPU twin of the spec and **evaluating
+`design_fields` a second time on the host**. That trade is backwards.
+`design_fields` is launch-bound -- tens of small kernels over full-width
+`[M, ngeom, ...]` tensors -- and it is the expensive half of a write, so paying
+for it twice costs more than the sync ever did:
+
+| worlds resetting | fused D2H (now) | host re-derivation (before) |
+|---|---|---|
+| 1 | 3.71 ms | 6.47 ms |
+| 4 | 3.82 ms | 5.27 ms |
+| 16 | 5.15 ms | 7.39 ms |
+| 64 | 9.90 ms | 82.16 ms |
+| 256 | 80.5 ms | 101.0 ms |
+| 1024 | 208 ms | 306 ms |
+
+(medians of 15, interleaved A/B in one process; the card is shared with six
+other trainers, so single-shot timings on it swing by 5x and only medians of an
+interleaved comparison mean anything -- an unmedianed first pass of this same
+benchmark read 19 ms and 65 ms for the *same* configuration.)
+
+`HostConstants.from_fields` now takes the fields the writer already computed,
+flattens the five it needs into one `[M, 236]` float64 buffer and does **a single
+`.cpu()`** -- one sync, 236 doubles per world. `compute(scale)`, the float64
+host-side path, is kept as the reference the gate measures.
+
+One consequence, recorded because it is a real (tiny) semantic change: in
+production the spec is float32 on device, so `mj_setConst` now sees float32
+fields where it used to see a float64 re-derivation. Measured against the
+float64 path over 32 random designs, the constants differ by **1e-7 relative**
+(`body_invweight0` 9.4e-08, `dof_invweight0` 9.8e-08, `actuator_acc0` 1.0e-07)
+-- fp32 epsilon, and *more* consistent than before, since the model fields
+actually being simulated are fp32 too. Against the 30% error from leaving these
+constants stale it is nothing. The gate is unaffected: its spec is float64 CPU.
+
+## Gate 2b -- whole model, stepped (PASS)
+
+Field equality is necessary, not sufficient. 40 control steps (0.6 s) from
+qpos0 under identical open-loop torques, our written model vs a fresh compile of
+their emitted MJCF, 6 random designs:
+
+| model | max \|dqpos\| |
+|---|---|
+| **writer + `mj_setConst` + body BVH** | **3.1e-15** |
+| writer, `mj_setConst` skipped | 7.1e-2 |
+| writer, body BVH left stale | 4.9e-2 |
+
+The middle row is why `HostConstants` exists; the last is why `bvh_aabb` is in
+`CPU_EXTRA_FIELDS`. With both, the per-world write is *the same model* as a
+recompile, to machine precision, on a stepped trajectory -- not just field by
+field.
+
+## Gate 2c -- dev observation + reward parity (PASS, at machine epsilon)
+
+Same discipline as gate 0b: hand-set states, never a shared rollout, driven
+through their identical door -- but now each case also carries a random genome
+that is applied first, so the reward is being computed on a differently-shaped
+ant on both sides. 24 states, worst over all of them:
+
+| field group | max abs diff |
+|---|---|
+| obs / stage flag | 0.0 |
+| obs / scale vector (20) | 0.0 |
+| obs / sim block -- own qpos, qvel, opponent xy (31) | 2.2e-16 |
+| **obs / all 52 dims** | **2.2e-16** |
+| **reward / torso subtree-COM x** | **8.9e-16** |
+| reward / forward progress | 5.9e-14 |
+| reward / ctrl cost | 4.4e-16 |
+| reward / dense total | 5.9e-14 |
+| reward / sparse (goal) | 0.0 |
+| reward / total | 1.1e-13 |
+| flags: fell, reached_goal, winner, terminated | 0 mismatches / 24 |
+
+Coverage: 22/24 in contact, 6/24 with a fall, 6/24 with a goal crossed.
+
+The `subtree_com` row is the one that matters for this stage. It is a
+mass-weighted quantity, so it is only right if `body_mass`, `body_ipos` AND
+`body_subtreemass` are all right for that world's design -- it is the check that
+a geometry-only writer would fail.
+
+### What the dev env does differently from the fixed-morph one
+
+All four differences are theirs, not artifacts of batching:
+
+1. **obs is 52** = `[stage flag (1) | scale vector (20) | sim obs (31)]`, their
+   `DevAnt._get_obs` list flattened in order; **action is 28** =
+   `[design (20) | motor (8)]`.
+2. **Termination has an upper bound.** `DevAnt.after_step` requires
+   `0.28 <= z <= 1.2`; the fixed ant has no ceiling. A dev ant launched upward
+   dies and a fixed one does not.
+3. **No reset noise survives.** Their `reset` produces `qpos0 + U(-0.1,0.1)`,
+   which the step-0 rebuild then throws away by allocating a fresh `MjData`.
+   Measured against their env: after the design step our qpos equals theirs to
+   0.0 and qvel is exactly 0. The pre-design observation still carries the noisy
+   state (the critic sees it), so both are reproduced.
+4. **The dev merger's contact bitmask IS live** (unlike the gym_compete one --
+   stage-1 note 8 flagged this and it checks out): `conaffinity=i,
+   contype=1-i`, so the dev ants collide with each other and the floor but NOT
+   with themselves. Asserted in the gate. It is a two-agent-only trick and 2v2
+   will need a real bitmask.
+
+## Gate 2d -- episode shape (PASS)
+
+The design step pays reward 0, terminates nothing, flips the stage flag 0 -> 1,
+writes the emitted genome into the observation's scale block, does not advance
+`_elapsed_steps` (their `_step` is the only thing that does), and leaves the
+world at their fresh-`MjData` state. The next step is a normal one and collects
+the survive bonus. All measured against their env, not asserted from reading.
+
+Batching note: worlds are asynchronous, so at any wall step a few are in the
+design stage and the rest are executing -- exactly the mixed batch their
+`DevPolicy.forward` partitions on. Physics is stepped for every world and the
+design-stage worlds' step is DISCARDED (their state is overwritten). That wastes
+~1/200 of the physics and keeps one CUDA-graph launch per step, which is worth
+far more.
+
+## The dev policy
+
+`dev_ppo.DevActorCritic` is their `DevPolicy` + `DevValue` as one stage-masked
+module: their `forward` loops over the batch bucketing samples by stage flag and
+`get_log_prob` scatters the two log-prob columns back together, which is a
+masked computation with a Python loop in front of it. Both heads run on the whole
+batch here and the mask picks the answer.
+
+Reproduced from `config/run-to-goal-devants-v0.yaml` and `dev_actor.py`:
+scale head `RunningNorm(20) -> MLP[64,64] tanh -> Linear(20)` on ONLY the scale
+vector (the design policy never sees the sim state), control head
+`RunningNorm(31) -> MLP[64,128,64] tanh -> Linear(8)` on ONLY sim_obs
+(`use_entire_obs: false`), critic `MLP[64,64,64]` on the full 52.
+
+Three details that are easy to lose and all change behaviour:
+
+* the scale head's output weights are scaled by **1.0**, not the 0.1 the control
+  and value heads get (`dev_actor.py:29-30` vs `50-51`);
+* the scale distribution is built with **std / 5** (`dev_actor.py:91`), so with
+  `log_std` init 0 a fresh design policy explores at sigma 0.2, not 1.0;
+* the dev curriculum is **`termination_epoch: 1000`**, five times the fixed-morph
+  ants' 200 -- 50M agent-steps, so `alpha` barely moves in any smoke.
+
+## Stage-2 smoke -- random genomes train without NaNs (PASS, and that is ALL it shows)
+
+`runs/competevo_port/dev_smoke_v2/`. 1024 worlds, 12 min of training loop
+(~16 min wall -- the Warp kernel build and the untrained baseline eval are not
+in the budget), 27 iterations, **3.54M agent-steps**, 4,666 steps/s on a card
+shared with six other trainers.
+
+The claim being gated is narrow and it holds: **0 diverged worlds over 3.5M
+steps** with a freshly drawn `s ~ U(-1,1)^20` per agent per episode -- so every
+episode is a different pair of robots, and the per-world write, the
+`mj_setConst` round-trip and the CUDA graph all survive being driven by a policy
+rather than by a test. `nan_worlds 0` throughout, KL bounded (0.078 on iteration
+0, ~4e-3 after), no loss blowup.
+
+| | iter 0 | iter 10 | iter 20 | iter 26 |
+|---|---|---|---|---|
+| eval return | 511.2 / 512.0 | 487.8 / 505.4 | 450.6 / 468.7 | 282.5 / 233.6 |
+| eval ep len | 500 | 500 | 460 | 255 |
+| eval win rate | 0 / 0 | 0 / 0 | 0 / 0 | 0.011 / 0 |
+| `design_std` | 0.233 | 0.317 | 0.330 | 0.337 |
+| mean total mass | 1.819 | 1.832 | 1.834 | 1.830 |
+
+What that table does and does not say:
+
+* The return curve **falls**, and that is the same shape stage-1 smoke B had:
+  the survive bonus dominates early, the ants learn to drive forward, and
+  driving forward makes them topple, so episodes shorten from 500 to 255 and the
+  accumulated bonus goes with them. It is not a divergence and it is not
+  progress -- it is the exploration curriculum with `alpha` still at 0.965.
+* `design_std` drifting 0.233 -> 0.337 says the **design head is moving** (it
+  initialises at sigma 0.2 through the `std / 5`). It does not say it is moving
+  anywhere good.
+* Mean total mass is flat to 0.6% (1.819 -> 1.830), i.e. after 27 iterations the
+  design policy has not committed to bigger or smaller ants. Expected:
+  `termination_epoch` is 1000 and this is 27.
+* The single win (0.011 = 1 game in 90, one agent, one eval) is noise. Nothing
+  here is a win-rate result.
+* **This is not the port map's stage-2 reference gate** (section 5.5: their M1
+  curves, iter-0 eval ~428-440). Reproducing that is stage 3's job, because it
+  needs their two-learner loop and opponent sampling. What is claimed here is
+  that the machinery underneath is exact (gates 2a-2d) and that it runs.
+
+An earlier 12-min smoke on the pre-fix write path is kept at
+`runs/competevo_port/dev_smoke/` (31 iters, 4.06M steps, also 0 diverged). The
+two runs track each other closely on episode length per iteration
+(0.4 / 4.9 / 23 / 43 / 68 / 99 / 122 / 377 vs 0.4 / 4.8 / 24 / 41 / 71 / 103 /
+124 / 377), which is the useful part of the comparison: the fp32 `mj_setConst`
+inputs did not visibly move the training trajectory. Their wall-clock per
+iteration is **not** a clean A/B -- six other trainers share the card and the
+load differed between the runs -- but the direction agrees with the isolated
+benchmark above, the early reset-heavy iterations being roughly 2x cheaper
+(17.7 / 22.3 / 24.9 s -> 8.4 / 10.1 / 10.1 s for iterations 0, 2, 3).
+
+## Stage-1 notes: what became of each
+
+The stage-1 list of "what stage 2 needs, learned the hard way", with verdicts.
+
+1. **`inertiafromgeom` is not a footnote** -- correct, and the suggested method
+   (parameterize `test_model_matches_theirs` by a design vector rather than
+   invent a trajectory gate) was the right order of work. Gate 2a. The advice
+   was incomplete in one way: field equality on the fields you thought of is not
+   the same as model equality, and the two things it missed (`mj_setConst`
+   constants, the body BVH) were together worth 7 cm of trajectory. Gate 2b
+   exists because of that.
+2. **Check the per-world batching first** -- correct and worth the time. The
+   answer is above: 105 fields are batchable, all default to shared, and
+   `put_model(batch_sizes=...)` is the supported switch. Two corrections to the
+   note: there is no `dof_M0` in mujoco_warp's Model, and **the CUDA graph does
+   NOT need re-capturing** after a design write (only a shape change would, and
+   shapes are fixed at `put_model`). The note's instinct that *derived* mass
+   matrices are fine was right -- `qM` is rebuilt every step from
+   `body_mass`/`body_inertia` -- but `body_subtreemass`, `geom_rbound` and
+   `geom_aabb` are precomputed and are NOT rebuilt, so they do have to be
+   written.
+3. **The parity harness generalizes for free** -- correct.
+   `their_dev_driver.py` is `their_env_driver.py` with a different `build_env()`
+   and a design step, and it also returns the merged MJCF their code emitted,
+   which turned out to be the reference that matters (it separates "our writer
+   is wrong" from "mujoco 2.3.5 and 3.11 disagree").
+4. **The dev obs is not the fixed obs** -- correct in every particular (52 =
+   1 + 20 + 31, action 28 = 20 + 8, design step stored with reward 0 and
+   mask 1, buffer shape unchanged, stage flag selects the head).
+5. **One-time kernel compilation dominates short runs** -- still true, and
+   switching the model arrays to per-world is a new specialization, so it is
+   paid once more (~2 min) the first time.
+6. **`nconmax`/`njmax` are per world** -- unchanged; the dev ants generate no
+   more contacts than the fixed ones at these designs.
+7. **Their goal rods collide** -- unchanged, still theirs.
+8. **Self-collision is ON for the fixed ants, and the dev merger had to be
+   checked separately** -- checked, and the note was right: the trick IS live in
+   `evo_utils.create_multiagent_xml_str`, so the dev ants do NOT self-collide
+   while the fixed ants do. Same task, two different robots. Asserted in gate 2a.
+
+## What stage 3 needs
+
+Stage 3 is their actual co-evolution loop: two learners and opponent sampling
+(port map section 4.3), which is the part the paper's result actually rests on.
+
+1. **Two learners, not one shared policy.** `dev_ppo` still trains ONE
+   `DevActorCritic` playing both ants, as stage 1 did. Theirs holds two
+   independent policy+critic pairs and updates them in order (agent 0, then
+   agent 1, `optimize_policy`:91-92). The env, the buffer layout
+   `[T, worlds, agents, ...]` and the design plumbing are already per-agent, so
+   this is a trainer change only.
+2. **The opponent checkpoint ring.** Per iteration they run TWO worker fleets:
+   in fleet `idx`, ego agent `idx` uses its current weights and the opponent uses
+   a checkpoint sampled uniformly from `[max(1, floor(0.5*epoch)), epoch]`, and
+   only ego's half of each fleet's data is kept. On GPU: an in-memory ring of
+   state_dicts, the world batch split into K opponent-blocks with one sampled
+   checkpoint per block per iteration, and the ego role swapped between halves of
+   the batch. Note `delta=0.5` for dev (the fixed-morph ants use `delta: 0`,
+   full history), and that the dev runner does NOT make the opponent
+   deterministic (the fixed-morph one does).
+3. **The eval win-rate quotient.** Already implemented the way they count it
+   (truncated draws in the denominator), but it has not been compared against
+   their curves yet, because nothing has trained long enough to have a win rate.
+   The stage-2 smoke's 0.011 is one game in ninety.
+3b. **The design write is the next thing that will hurt, and it is host-bound.**
+   After the fused-D2H fix a write costs 3.7 ms for one world and 208 ms for all
+   1024, against a ~54 ms step -- i.e. it is dominated by a fixed per-call cost
+   (`design_fields` is tens of small kernels) plus a serial per-world
+   `mj_setConst` loop on the CPU. Steady state is fine, because only the worlds
+   that reset pay it, but two stage-3 changes push on exactly this: opponent
+   blocks make resets bunch up, and any curriculum that shortens episodes drives
+   the reset rate up (the smoke's first iterations, where every world resets
+   every step, are 5-15x slower per step than its last ones). If it becomes the
+   bottleneck the two levers, in order, are: batch the `mj_setConst` loop (it is
+   an `inv(M)` at qpos0 -- mujoco_warp can already do that on device for all
+   worlds at once), and fuse `design_fields` into one Warp kernel instead of ~40
+   torch ops.
+4. **The reference curve exists and should be used.** Their M1 sanity run of this
+   exact config (`tmp/run-to-goal-devants-v0/...`) gives iter-0 eval ~428-440 at
+   win rate 0.00 and TB curves for the first ~50-100 epochs. That is the stage-2
+   gate in the port map's numbering (section 5.5) and it is NOT claimed here --
+   what is claimed is that the machinery under it is exact.
+5. **Design-parameter CSVs.** Their runner logs 10 random designs per epoch to
+   `{run_dir}/{0,1}.csv`; the qualitative convergence of those is one of the
+   paper-level comparisons. `train_dev.py` logs `design_mean`/`design_std` only.
+6. **Sumo (`robo-sumo-devants-v0`) needs more than a config swap:** per-world
+   arena radius (another `geom_size` write, which this writer already supports),
+   the `|cfrc_ext|` + torso `xmat` observation block, the win/lose/draw
+   structure, and their transform-step obs off-by-one (which the port map says
+   not to reproduce).
+7. **2v2 will break the contact bitmask.** `conaffinity=i, contype=1-i` only
+   works for exactly two agents; it is live in the dev merger, so this is now a
+   real constraint on the port and not just a note about their code.

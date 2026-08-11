@@ -293,3 +293,83 @@ properly. Both processes rewrote `log.json` wholesale each iteration, so the
 file has been authoritative for the surviving run since 14:03; `train.log` has
 interleaved bytes from before then. Recorded because a reader of `train.log`
 would otherwise see two runs' iteration 0.
+
+## 6. Three things a reader of `log.json` will get wrong
+
+### `"curriculum_steps": null` in `args` does NOT mean the curriculum is off
+
+It is the CLI *override* flag, and `None` means "do not override the default".
+`train_selfplay.py` only forwards it when it is set:
+
+```python
+kw = ({} if args.curriculum_steps is None
+      else {"curriculum_steps": args.curriculum_steps})
+```
+
+so the trainer uses `dev_ppo.DEV_CURRICULUM_STEPS = 1000 * 50_000`, which is
+their `termination_epoch: 1000` expressed in agent-steps. **Passing the flag
+would have been the way to get this WRONG**, not the way to get it right.
+
+The proof is in the log rather than in the code: every row carries the `alpha`
+the iteration sampled at, and it reads
+
+```
+iter   0 1 2 3 4 5 6 7 8 9
+alpha  1.000 0.999 0.998 0.997 0.996 0.995 0.994 0.993 0.992 0.991
+```
+
+i.e. exactly `1 - epoch/1000`, their schedule, epoch for epoch. If the
+curriculum were disabled the trainer would log `alpha: null` and would optimize
+`parse + dense` instead.
+
+And `termination_epoch` is **1000** for this config
+(`run-to-goal-devants-v0.yaml:51`). The `200` in REPRO_NOTES' protocol sentence
+is `run-to-goal-ants-v0.yaml:43`, the FIXED-morph ants, which is not the config
+their sanity run is running. This matters for what the run can conclude: at
+`termination_epoch: 1000`, alpha is still **0.90** at epoch 100, so the +/-1000
+goal term carries 10% weight there -- and **their** win rate leaves 0 at epoch
+89 anyway. So in their run the win rate does not leave 0 because the sparse term
+started to bite; it leaves 0 because the ants learned to run far enough to cross
+a goal line while the reward was still ~90% dense. Reproducing that is a
+statement about locomotion learning, not about the curriculum schedule.
+
+### One of our iterations is exactly one of their epochs -- in every unit
+
+| unit | theirs, per epoch | ours, per iteration |
+|---|---|---|
+| ego transitions **per learner** (their `min_batch_size`) | 50,000 | 500 ego worlds x 100 rollout = **50,000** |
+| ego transitions, both learners | 100,000 | **100,000** (`trainer.total_steps`) |
+| simulated world-steps | 2 fleets x 50,000 = 100,000 | 1000 worlds x 100 = **100,000** |
+| simulated agent-transitions (2 agents) | 200,000 | **200,000** |
+| discarded (opponent-lane) transitions | 100,000 | 100,000 |
+
+The 2x between "env-steps" and "agent-transitions" is the easy mistake and it is
+worth restating that **theirs pays it too**: their two fleets each simulate
+50,000 env steps and the merge keeps only the ego half of each
+(`multi_evo_agent_runner.py:457`). `compare_curves.py` recomputes
+`(worlds/2) * rollout` from `log.json` and prints a MISMATCH banner if it is not
+50,000, so the axes cannot be silently misaligned by a later run.
+
+### `train_ret` diving to ~-1100 is the metric warming up, not a collapse
+
+`train_ret` is the mean over worlds of the **last completed episode's** return,
+and it starts at 0 for every world that has not finished an episode yet. So its
+early trajectory is dominated by episode LENGTH, not by reward quality:
+
+| iter | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `train_len` | 2.4 | 27.0 | 63.9 | 110.5 | 156.2 | 367.0 | 369.2 | 367.2 | 364.2 | 368.2 |
+| `train_ret` | -7.5 | -82.0 | -191.3 | -332.2 | -467.5 | -1089.5 | -1085.3 | -1065.6 | -1041.0 | -1033.9 |
+| **per step** | -3.11 | -3.03 | -2.99 | -3.00 | -2.99 | -2.97 | -2.94 | -2.90 | -2.86 | **-2.81** |
+
+Per step it is flat at -3.0 and then **improving monotonically** from iteration
+5 once episode length saturates. The dive is `-3.0 x length` with length growing
+from 2 to 367.
+
+Against theirs, which has no warm-up because their logger only reports completed
+episodes: `train_R_eps_avg_0` = **-1182.5** at epoch 0, -1046 at 5, -929 at 10,
+-658 at 20, -301 at 40, -177 at 50, -5 at 89, +240 at 159. Ours plateaus at
+**-1090** at iteration 5 and is at -1034 by iteration 9. **That is the closest
+agreement anything in this port has produced against their curves**, and it is
+the direct consequence of the section-3d fix -- before it, ours would have
+plateaued near -400.

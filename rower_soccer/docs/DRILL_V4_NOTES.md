@@ -331,3 +331,48 @@ positioning with a bad strike points at the FROZEN DECODER: it was trained by
 direction X at speed Y", and a directed strike may simply be outside what
 154,632 frozen parameters can express. That would predict an unfrozen kick run
 gains aim where every frozen variant has not -- a cheap and decisive experiment.
+
+## 9. v8 = approach the STRIKE POINT (the code landed in cd02a8d)
+
+*Housekeeping note: the v8 source changes were swept into commit `cd02a8d` by a
+`git add -A`, whose message describes only the D2 retraction. The rationale
+lives here instead. `ball_task.TimedKickReward.strike_offset`,
+`kick_env`/`train_kick_warp` plumbing, and the geometry test are all in that
+commit.*
+
+Splitting section 8's finding one level further, on v7/best.pt over 55,303
+ball-moving samples, against a random baseline of median 90 deg / 16.7% within
+30 deg / 50% within 90 deg:
+
+| | median | within 30 deg | within 90 deg |
+|---|---|---|---|
+| positioning (ant->ball vs ball->target) | 103.9 deg | 13.1% | 42.4% |
+| aim (ball velocity vs ball->target) | 93.2 deg | 15.7% | 48.2% |
+
+Both at or slightly WORSE than random, so this is not "positions well, strikes
+badly" -- there is no positioning skill at all. Worse, being biased PAST 90 deg
+means the ant tends to stand between the ball and the target, so contact pushes
+the ball away from where it should go. That is the -0.12 m mean gain of section
+8, explained.
+
+**The approach shaping is the cause.** To send a ball somewhere you must first
+reach the far side of it. `_StrikeReward._shaping` pays
+`w_p2b * (speed TOWARD the approach point)` on every step, so with the approach
+point ON the ball, the circling manoeuvre the task requires is penalised the
+whole way round. The policy is paid to charge straight at the ball from
+wherever it happens to be, and the strike direction is then whatever the
+approach direction happened to be -- i.e. random, which is exactly what is
+measured.
+
+`--strike-offset 0.5` moves the approach point to 0.5 m behind the ball on the
+ball->target line, reusing the `_approach_xy` hook v7 introduced. Walking there
+and continuing forward IS the kick.
+
+This is deliberately NOT another outcome-reward retune. v4->v6 (reward curve)
+and v6->v7 (spawn anchor) both re-priced the outcome and both were null at
+matched steps. Shaping cannot make a controller express a behaviour it is
+simultaneously being paid to avoid.
+
+Arms now live: v4 (original timed), v6 (control), v8 (strike point). v7 retired
+as null. v6 differs from v8 only in `--strike-offset`, so the pair is a clean
+comparison -- at MATCHED STEPS, per section 7's lesson.

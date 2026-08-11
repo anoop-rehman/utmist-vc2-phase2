@@ -61,7 +61,7 @@ class WarpBackend(PhysicsBackend):
 
         data = mujoco.MjData(model)
         mujoco.mj_forward(model, data)
-        self.wm = mjw.put_model(model)
+        self.wm = self._put_model(model)
         # Size the contact/constraint buffers EXPLICITLY: put_data otherwise
         # infers them from the initial (contact-free) MjData, and any runtime
         # overflow silently drops constraints and NaNs the sim.
@@ -82,6 +82,13 @@ class WarpBackend(PhysicsBackend):
                 for _ in range(substeps):
                     mjw.step(self.wm, self.wd)
             self._graph = cap.graph
+
+    def _put_model(self, model):
+        """Upload the compiled model. Overridable so a subclass can ask
+        mujoco_warp for PER-WORLD model arrays (`put_model(..., batch_sizes=)`,
+        used by the CompetEvo port's per-world morphology); the leading
+        dimension is baked into the kernels, so it has to be chosen here."""
+        return self._mjw.put_model(model)
 
     def step(self):
         if self._graph is not None:

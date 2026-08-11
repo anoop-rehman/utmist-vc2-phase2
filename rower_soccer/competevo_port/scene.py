@@ -91,6 +91,79 @@ GEAR = 150.0
 # name-filter preserves: torso, then per leg (upper, aux, foot).
 TORSO_LOCAL = "torso"
 
+# ---------------------------------------------------------------------------
+# The DEV ant (stage 2): `competevo/evo_envs/assets/dev_ant_body.xml`.
+#
+# Same robot as the fixed ant, but their evolution branch keeps its own copy of
+# the asset and it differs in three ways that all matter to the port:
+#
+#   1. NAMES. Torso is `0`, legs `1..4`, mid links `11..14`, feet `111..114`,
+#      joints `<body>_joint`. `DevAnt.set_design_params` dispatches on exactly
+#      those strings, so the genome->geometry map is expressed in this naming.
+#   2. ANKLE SIGN CONVENTION. The fixed ant alternates `axis="1 1 0"
+#      range="-70 -30"` with `axis="-1 1 0" range="30 70"`; the dev ant writes
+#      every ankle as `range="30 70"` with the axis negated where needed (and
+#      normalized to 0.707107). Same hinge, opposite parameterization -- a
+#      positive dev ankle action bends the leg the same way a negative fixed-ant
+#      one does.
+#   3. ACTUATOR ORDER. Theirs is `11,12,13,14,111,112,113,114` -- all four hips,
+#      then all four ankles -- NOT the fixed ant's per-leg interleave. This IS
+#      the action layout; getting it wrong silently permutes the policy's legs.
+#
+# The merger also behaves differently: `evo_utils.create_multiagent_xml_str`
+# sets `conaffinity=i, contype=1-i` on each agent's geom default unconditionally
+# (the fixed merger's `color_set` short-circuit does not exist here), so the dev
+# ants do NOT self-collide. That trick only works for exactly two agents.
+DEV_TORSO_LOCAL = "0"
+_DEV_LEGS = (
+    # (dx, dy) planar direction, ankle axis (their normalized, sign-flipped form)
+    ((0.2, 0.2), "-0.707107 0.707107 0"),
+    ((-0.2, 0.2), "-0.707107 -0.707107 0"),
+    ((-0.2, -0.2), "0.707107 -0.707107 0"),
+    ((0.2, -0.2), "0.707107 0.707107 0"),
+)
+_DEV_MOTOR_JOINTS = ("11_joint", "12_joint", "13_joint", "14_joint",
+                     "111_joint", "112_joint", "113_joint", "114_joint")
+
+# `DevAnt.SCALE_MAX` (dev_ant.py:10) and the two multipliers built from it in
+# `set_design_params`: geometry scales by `a = 1 + 0.3*s`, gears by
+# `b = 1 + 0.15*s`, for `s in [-1, 1]^20`.
+SCALE_MAX = 0.3
+GEOM_SCALE = SCALE_MAX            # a = 1 + GEOM_SCALE * s
+GEAR_SCALE = SCALE_MAX * 0.5      # b = 1 + GEAR_SCALE * s
+DESIGN_DIM = 20
+
+# The genome, as a table instead of `set_design_params`' 200 lines of string
+# multiplication. Per leg `L` (0-based), params `5L .. 5L+4` are:
+#
+#   5L+0  length of the UPPER capsule (body `L+1`), and the pos of its child
+#         body `1(L+1)` -- one number scales both, which is what keeps the
+#         links attached;
+#   5L+1  radius of the MID capsule (body `1(L+1)`), and the gear of that
+#         body's hip motor;
+#   5L+2  length of the MID capsule, and the pos of its child body `11(L+1)`;
+#   5L+3  radius of the FOOT capsule (body `11(L+1)`), and the gear of that
+#         body's ankle motor;
+#   5L+4  length of the FOOT capsule.
+#
+# Note what is NOT scaled: the torso sphere, the UPPER capsule's radius, every
+# joint range/axis, and the density. `None` below means "left at the base value".
+#
+# fields: (body_local_name, length_param, radius_param, pos_param, gear_param)
+#   length/radius apply to that body's single geom; pos to the body's own
+#   `pos`; gear to the motor driving that body's joint.
+def _dev_genome_table():
+    rows = []
+    for leg in range(4):
+        p = 5 * leg
+        rows.append((f"{leg + 1}", p + 0, None, None, None))
+        rows.append((f"1{leg + 1}", p + 2, p + 1, p + 0, p + 1))
+        rows.append((f"11{leg + 1}", p + 4, p + 3, p + 2, p + 3))
+    return tuple(rows)
+
+
+DEV_GENOME_TABLE = _dev_genome_table()
+
 
 def _fmt(*v):
     return " ".join(f"{x:g}" for x in v)
@@ -206,6 +279,122 @@ def run_to_goal_xml(n_agents=2, solver="Newton", iterations=100,
 """
 
 
+def _dev_ant_body_xml(agent_id, pos, euler):
+    """One dev agent's `<body>` subtree, name-prefixed and class-tagged.
+
+    Mirrors what `create_multiagent_xml_str` does to `dev_ant_body.xml`: prefix
+    every name, overwrite the root pos/euler with the registered init pose, tag
+    every geom with the agent's class. Their `add_prefix(force_set=True)` also
+    invents `agent{i}/anon<random>` names for the geoms (which are unnamed in the
+    asset); we name them `agent{i}/geom_<body>` so the design writer can look
+    them up. Nothing in their code reads those names.
+    """
+    p = f"agent{agent_id}"
+    out = [f'<body name="{p}/0" pos="{_fmt(*pos)}" euler="{_fmt(*euler)}">',
+           f'  <geom pos="0 0 0" size="0.25" type="sphere" class="{p}"'
+           f' name="{p}/geom_0"/>',
+           f'  <joint armature="0" damping="0" limited="false" margin="0.01"'
+           f' name="{p}/0_joint" pos="0 0 0" range="-30 30" type="free"/>']
+    for k, ((dx, dy), ankle_axis) in enumerate(_DEV_LEGS, start=1):
+        out += [
+            f'  <body name="{p}/{k}" pos="0 0 0">',
+            f'    <geom fromto="{_fmt(0, 0, 0, dx, dy, 0)}" size="0.08"'
+            f' type="capsule" class="{p}" name="{p}/geom_{k}"/>',
+            f'    <body name="{p}/1{k}" pos="{_fmt(dx, dy, 0)}">',
+            f'      <joint axis="0 0 1" name="{p}/1{k}_joint" pos="0 0 0"'
+            f' range="-30 30" type="hinge"/>',
+            f'      <geom fromto="{_fmt(0, 0, 0, dx, dy, 0)}" size="0.08"'
+            f' type="capsule" class="{p}" name="{p}/geom_1{k}"/>',
+            f'      <body name="{p}/11{k}" pos="{_fmt(dx, dy, 0)}">',
+            f'        <geom fromto="{_fmt(0, 0, 0, 2 * dx, 2 * dy, 0)}"'
+            f' size="0.08" type="capsule" class="{p}" name="{p}/geom_11{k}"/>',
+            f'        <joint axis="{ankle_axis}" name="{p}/11{k}_joint"'
+            f' pos="0 0 0" range="30 70" type="hinge"/>',
+            '      </body>',
+            '    </body>',
+            '  </body>',
+        ]
+    out.append('</body>')
+    return "\n".join(out)
+
+
+def _dev_agent_default_xml(agent_id, rgb):
+    """Their `<default class="agent{i}">` for the EVO merger. Unlike the
+    gym_compete merger this one always applies the two-agent contact bitmask
+    (`evo_utils.py:88-89`): `conaffinity=i`, `contype=1-i`. Against the floor's
+    contype=1/conaffinity=1 that gives agent-agent and agent-floor contacts and
+    kills self-collision for both ants. It is exactly a two-agent trick -- 2v2
+    needs a real bitmask (port map section 1.2).
+
+    `dev_ant_body.xml`'s `<default>` has no `<motor>` child, so unlike the fixed
+    ant there is no class-level ctrlrange; each motor carries its own.
+    """
+    p = f"agent{agent_id}"
+    return f"""    <default class="{p}">
+      <joint armature="1" damping="1" limited="true"/>
+      <geom conaffinity="{agent_id}" contype="{1 - agent_id}" condim="3"
+            density="5.0" friction="1 0.5 0.5" margin="0.01"
+            rgba="{_fmt(*rgb)} 1" material="geom"/>
+    </default>"""
+
+
+def dev_run_to_goal_xml(n_agents=2, solver="Newton", iterations=100,
+                        integrator="RK4", timestep=TIMESTEP):
+    """`run-to-goal-devants-v0`'s merged scene at its BASE design (all scale
+    parameters zero, i.e. `a = b = 1`).
+
+    This is the ONE model that gets compiled. Every episode's morphology is a
+    per-world overwrite of its design-derived fields (`design.py`), never a
+    recompile -- which is the whole point of the port: their `step()` calls
+    `MjModel.from_xml_string` twice per episode per worker.
+    """
+    bodies = "\n".join(_dev_ant_body_xml(i, INIT_POS[i], INIT_EULER[i])
+                       for i in range(n_agents))
+    defaults = "\n".join(_dev_agent_default_xml(i, AGENT_RGB[i])
+                         for i in range(n_agents))
+    motors = "\n".join(
+        f'    <motor ctrllimited="true" ctrlrange="-1.0 1.0"'
+        f' joint="agent{i}/{j}" gear="{GEAR:g}" name="agent{i}/{j}"'
+        f' class="agent{i}"/>'
+        for i in range(n_agents) for j in _DEV_MOTOR_JOINTS)
+    return f"""<mujoco model="mutiagent_world">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
+  <option integrator="{integrator}" timestep="{timestep}" solver="{solver}" iterations="{iterations}"/>
+  <default>
+    <joint armature="1" damping="1" limited="true"/>
+{defaults}
+  </default>
+
+  <visual>
+    <headlight ambient=".1 .1 .1" diffuse=".6 .6 .6" specular="0.3 0.3 0.3"/>
+    <map znear=".01"/>
+    <quality shadowsize="4096"/>
+    <global offwidth="1280" offheight="720"/>
+  </visual>
+
+  <asset>
+    <texture builtin="gradient" height="100" rgb1=".4 .5 .6" rgb2="0 0 0" type="skybox" width="100"/>
+    <texture builtin="flat" height="1278" mark="cross" markrgb="0 0 0" name="texgeom" random="0.01" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" type="cube" width="127"/>
+    <texture name="MatPlane" type="2d" builtin="checker" rgb1=".5 .5 .5" rgb2=".5 .5 .5" width="300" height="300" mark="edge" markrgb="0.1 0.1 0.1"/>
+    <material name="MatPlane" texture="MatPlane" texrepeat="2 2" texuniform="true" reflectance=".2"/>
+    <material name="geom" texture="texgeom" texuniform="true"/>
+  </asset>
+
+  <worldbody>
+    <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1"/>
+    <geom contype="1" conaffinity="1" friction="1 .1 .1" condim="3" material="MatPlane" name="floor" pos="0 0 0" rgba="1 1 1 1" size="20 20 0.125" type="plane"/>
+    <geom fromto="4 -5 0  4 +5 0" name="rightgoal" rgba="1 0 0 0.5" size=".03" type="cylinder"/>
+    <geom fromto="-4 -5 0  -4 +5 0" name="leftgoal" rgba="1 0 0 0.5" size=".03" type="cylinder"/>
+{bodies}
+  </worldbody>
+
+  <actuator>
+{motors}
+  </actuator>
+</mujoco>
+"""
+
+
 @dataclass
 class AgentSlices:
     """Everything `gym_compete.new_envs.agents.Agent` derives per agent, resolved
@@ -237,9 +426,13 @@ class SceneMeta:
     agents: list
     obs_dim: int
     act_dim: int
+    # Dev scenes only: the sim/motor sub-blocks of the 52-dim obs and 28-dim
+    # action. For the fixed-morph scene these equal obs_dim/act_dim.
+    sim_obs_dim: int = 0
+    n_motor: int = 0
 
 
-def _agent_slices(model, agent_id):
+def _agent_slices(model, agent_id, torso_local=TORSO_LOCAL):
     prefix = f"agent{agent_id}/"
     body_ids = [i for i in range(model.nbody)
                 if model.body(i).name.startswith(prefix)]
@@ -259,7 +452,7 @@ def _agent_slices(model, agent_id):
                or model.jnt(model.actuator_trnid[i, 0]).name.startswith(prefix)]
     ctrl = (int(act_ids[0]), int(act_ids[-1]) + 1)
     torso = int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY,
-                                  prefix + TORSO_LOCAL))
+                                  prefix + torso_local))
     # get_other_qpos()[:2]: concat(qpos[:start], qpos[stop:])[:2].
     other = [i for i in range(model.nq) if not (qpos[0] <= i < qpos[1])][:2]
     # Their goal assignment (MultiAgentEnv.__init__:133-137 + Ant.set_goal):
@@ -283,9 +476,32 @@ def build_run_to_goal_scene(n_agents=2, **xml_kwargs):
                             obs_dim, a0.ctrl[1] - a0.ctrl[0])
 
 
-def their_scene_path():
+def build_dev_scene(n_agents=2, **xml_kwargs):
+    """Compile the base dev scene and resolve the per-agent index plumbing.
+
+    `obs_dim`/`act_dim` are the DEV agent's, not the fixed ant's: the policy
+    sees `[stage_flag(1) | scale_vector(20) | sim_obs(31)] = 52` and emits
+    `[design(20) | motor(8)] = 28` (`DevAnt.set_env`, dev_ant.py:43-49). The
+    sim_obs block and the motor block are the same 31 and 8 numbers as stage 0.
+    """
+    model = mujoco.MjModel.from_xml_string(
+        dev_run_to_goal_xml(n_agents, **xml_kwargs))
+    agents = [_agent_slices(model, i, DEV_TORSO_LOCAL) for i in range(n_agents)]
+    a0 = agents[0]
+    sim_obs_dim = (a0.qpos[1] - a0.qpos[0]) + (a0.qvel[1] - a0.qvel[0]) + 2
+    n_motor = a0.ctrl[1] - a0.ctrl[0]
+    meta = SceneMeta(n_agents, model.nq, model.nv, model.nu, agents,
+                     1 + DESIGN_DIM + sim_obs_dim, DESIGN_DIM + n_motor)
+    meta.sim_obs_dim, meta.n_motor = sim_obs_dim, n_motor
+    return model, meta
+
+
+def their_scene_path(dev=False):
     """Their checked-in merged scene, for the model-equivalence test. Note their
     env OVERWRITES this file on construction (multi_agent_env.py:114-119), so it
     is a build artifact of the last run, not a hand-maintained asset."""
+    if dev:
+        return ("/workspace/competevo/competevo/evo_envs/assets/"
+                "world_body.dev_ant_body.dev_ant_body.xml")
     return ("/workspace/competevo/gym_compete/new_envs/assets/"
             "world_body.ant_body.ant_body.xml")

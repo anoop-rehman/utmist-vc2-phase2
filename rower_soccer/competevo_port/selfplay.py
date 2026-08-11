@@ -495,29 +495,50 @@ class CoEvoPPO:
 
 
 @torch.no_grad()
-def evaluate_pair(env, acs, max_steps=None):
+def evaluate_pair(env, acs, max_steps=None, alpha=None):
     """Their eval pass with two policies: BOTH agents on their current weights
     and mean actions (`mean_action=True` takes the non-sampling branch and loads
     `ckpt = self.epoch` for both), full episodes, win rate with truncated draws
-    in the denominator."""
+    in the denominator.
+
+    `alpha` is their curriculum weight at the epoch being evaluated. Pass it and
+    the returned `ret_curriculum` is the quantity their runner prints as
+    "Agent_i gets eval reward", which is NOT the env reward: their eval sampler
+    goes through the same `custom_reward` wrapper as training
+    (`multi_evo_agent_runner.py:147-164` is called from `sample_worker` whether
+    or not `mean_action` is set), so what their logger accumulates is
+    `alpha * dense + (1 - alpha) * parse` at the CURRENT epoch's alpha. `ret`
+    (the raw env return `parse + dense`) is kept as well; the two coincide only
+    while no goal is ever crossed, i.e. exactly the regime the early epochs are
+    in, and diverge by up to +/-1000 per game once they are not."""
     for ac in acs:
         ac.eval()
     max_steps = max_steps or (env.max_episode_steps
                               + int(getattr(env, "has_design_step", False)))
     obs = env.reset()
     env.reset_win_stats()
-    rets, lens = [], []
+    rets, lens, crets = [], [], []
+    cur = torch.zeros(env.n, env.n_agents, device=env.device, dtype=env.dtype)
     for _ in range(max_steps):
         o = obs.float()
         a = torch.stack([acs[i].mean_action(o[:, i]) for i in range(env.n_agents)],
                         dim=1)
         obs, rew, done, info = env.step(a.to(env.dtype))
+        if alpha is not None:
+            cur += alpha * info["dense"] + (1.0 - alpha) * info["parse"]
         if bool(done.any()):
             idx = done.nonzero(as_tuple=True)[0]
             rets.append(env.last_return[idx].float().cpu().numpy())
             lens.append(env.last_len[idx].float().cpu().numpy())
+            if alpha is not None:
+                crets.append(cur[idx].float().cpu().numpy())
+                cur[idx] = 0.0
     if not rets:
         return {"ret": np.zeros(env.n_agents), "win_rate": env.win_rate(),
-                "ep_len": 0.0, "games": env.games}
-    return {"ret": np.concatenate(rets, 0).mean(0), "win_rate": env.win_rate(),
-            "ep_len": float(np.concatenate(lens).mean()), "games": env.games}
+                "ep_len": 0.0, "games": env.games,
+                "ret_curriculum": np.zeros(env.n_agents)}
+    out = {"ret": np.concatenate(rets, 0).mean(0), "win_rate": env.win_rate(),
+           "ep_len": float(np.concatenate(lens).mean()), "games": env.games}
+    out["ret_curriculum"] = (np.concatenate(crets, 0).mean(0) if crets
+                             else out["ret"])
+    return out

@@ -296,13 +296,28 @@ class RunToGoalDevEnv:
         get reward 0; the rest read `[-8:]` and are simulated."""
         a = actions.reshape(self.n, self.n_agents, self.act_dim)
         design = a[..., :self.design_dim].clamp(-1.0, 1.0)
-        motor = a[..., -self.n_motor:].clamp(-1.0, 1.0)
+        # THE CONTROL COST IS CHARGED ON THE RAW ACTION, NOT THE CLIPPED ONE.
+        # Their `DevAnt.after_step(action)` is handed `actions[i][-8:]` straight
+        # off the policy (`multi_dev_agent_env.py:311`) and computes
+        # `.5 * np.square(action).sum()`; MuJoCo clamps `ctrl` to `ctrlrange`
+        # inside the step, so the TORQUE is clipped but the COST is not. This
+        # is not a detail at `log_std = 0`: a unit Gaussian on 8 dims costs
+        # 0.5 * 8 * 1 = 4.0 per step raw against 0.5 * 8 * E[clip(a,-1,1)^2]
+        # = ~2.1 clipped, and with `alpha = 1` early on the control cost IS the
+        # reward. Measured before this fix, our sampled episodes ran at
+        # -1.10 per step against their logged -3.0; the gates never caught it
+        # because they drive `terms()` directly, which was always faithful --
+        # only `step()`'s clamp was wrong.
+        motor_raw = a[..., -self.n_motor:]
+        motor = motor_raw.clamp(-1.0, 1.0)
         was_design = self.stage.clone()
 
         # Design-stage worlds are stepped and then thrown away; zero their ctrl
         # so a stale torque cannot NaN a world before it is overwritten.
-        motor_eff = torch.where(was_design.reshape(self.n, 1, 1),
-                                torch.zeros_like(motor), motor)
+        zero_design = was_design.reshape(self.n, 1, 1)
+        motor_eff = torch.where(zero_design, torch.zeros_like(motor), motor)
+        cost_action = torch.where(zero_design, torch.zeros_like(motor_raw),
+                                  motor_raw)
         self.ctrl.copy_(motor_eff.reshape(self.n, -1).to(self.ctrl.dtype))
         self._com_before = self._agent_com_x().clone()
         self.backend.step()
@@ -315,9 +330,19 @@ class RunToGoalDevEnv:
             self.qvel[bad] = 0.0
             self.backend.forward()
 
-        t = self.terms(motor_eff, bad)
+        t = self.terms(cost_action, bad)
         reward, winner = t["reward"], t["winner"]
         terminated = t["terminated"]
+        # The curriculum reward the trainer builds is
+        # `alpha * dense + (1 - alpha) * parse`, so these two have to be zeroed
+        # on the design step exactly as `reward` is -- their
+        # `MultiDevAgentEnv.step` returns `reward_parse: 0, reward_dense: 0`
+        # for the `attribute_transform` stage
+        # (`competevo/evo_envs/multi_dev_agent_env.py:286-289`). Before this the
+        # info dict leaked the executed-step terms into the design step, so a
+        # curriculum-reward trainer paid ~+1 (the survive bonus) once per
+        # episode that their runner never pays.
+        dense_i, parse_i = t["dense"], t["parse"]
 
         # The design branch: reward 0, no termination, no elapsed step
         # (`_elapsed_steps` is only touched by their `_step`).
@@ -328,6 +353,8 @@ class RunToGoalDevEnv:
             self._com_before[didx] = self._agent_com_x()[didx]
             keep = (~was_design).unsqueeze(-1)
             reward = torch.where(keep, reward, torch.zeros_like(reward))
+            dense_i = torch.where(keep, dense_i, torch.zeros_like(dense_i))
+            parse_i = torch.where(keep, parse_i, torch.zeros_like(parse_i))
             winner = winner & keep
             terminated = terminated & (~was_design)
 
@@ -347,7 +374,7 @@ class RunToGoalDevEnv:
             if self.auto_reset:
                 self.reset_idx(done.nonzero(as_tuple=True)[0])
 
-        info = {"dense": t["dense"], "parse": t["parse"],
+        info = {"dense": dense_i, "parse": parse_i,
                 "terminated": terminated, "truncated": truncated,
                 "winner": winner, "forward": t["forward"],
                 "ctrl_cost": t["ctrl_cost"], "com_x": t["com_x"],

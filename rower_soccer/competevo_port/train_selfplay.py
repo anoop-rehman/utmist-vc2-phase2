@@ -94,7 +94,7 @@ def main():
                        value_lr=args.value_lr, seed=args.seed, device=dev, **kw)
 
     log = {"args": vars(args), "iters": []}
-    base = evaluate_pair(eval_env, acs)
+    base = evaluate_pair(eval_env, acs, alpha=trainer.learners[0].alpha())
     print(f"untrained pair, mean actions: ret={base['ret'].round(1).tolist()} "
           f"len={base['ep_len']:.0f} win={base['win_rate'].tolist()} "
           f"games={base['games']}")
@@ -105,6 +105,13 @@ def main():
     t0 = time.time()
     deadline = t0 + args.minutes * 60
     for it in range(args.iters):
+        # alpha the iteration is about to SAMPLE at, read before `collect`
+        # advances the step count. Their `optimize(epoch)` samples, updates and
+        # evals all at alpha(epoch), so this is the value both the rollout and
+        # the eval printed for this iteration must use.
+        cs = trainer.learners[0].curriculum_steps
+        a_used = (max(1.0 - trainer.learners[0].total_steps / cs, 0.0)
+                  if cs else None)
         stats = trainer.train_iter()
         elapsed = time.time() - t0
         rings = [len(r) for r in trainer.rings]
@@ -113,7 +120,8 @@ def main():
                "train_ret": env.last_return.float().mean(0).cpu().numpy().tolist(),
                "train_len": float(env.last_len.float().mean()),
                "fwd_per_step": trainer.ep_fwd,
-               "alpha": trainer.learners[0].alpha(),
+               "alpha": a_used,
+               "alpha_next": trainer.learners[0].alpha(),
                "opp_lag": trainer.opponent_lag(),
                "opp_epochs": [list(s) for s in trainer.opp_epoch],
                "ring": rings,
@@ -123,14 +131,23 @@ def main():
                "mass": float(env.backend.model_arrays["body_mass"].sum(-1).mean()),
                "diverged": env.n_diverged, **stats}
         if it % args.eval_every == 0 or time.time() >= deadline:
-            ev = evaluate_pair(eval_env, acs)
+            # Their eval reward is the CURRICULUM reward at the alpha of the
+            # epoch that just ran: `optimize()` sets `self.epoch` and then
+            # samples, updates and evals, and `custom_reward` reads
+            # `self.epoch` in all three.
+            ev = evaluate_pair(eval_env, acs, alpha=a_used)
             row["eval_ret"] = ev["ret"].tolist()
+            row["eval_ret_curriculum"] = np.asarray(ev["ret_curriculum"]).tolist()
+            row["eval_alpha"] = a_used
             row["eval_win"] = ev["win_rate"].tolist()
             row["eval_len"] = ev["ep_len"]
+            row["eval_games"] = ev["games"]
             print(f"it {it:4d} {trainer.total_steps / 1e6:6.2f}M "
-                  f"{trainer.total_steps / elapsed:,.0f} sps | EVAL ret "
+                  f"{trainer.total_steps / elapsed:,.0f} sps | EVAL cur "
+                  f"{np.round(ev['ret_curriculum'], 1).tolist()} env "
                   f"{np.round(ev['ret'], 1).tolist()} win "
-                  f"{ev['win_rate'].tolist()} len {ev['ep_len']:.0f} | "
+                  f"{ev['win_rate'].tolist()} len {ev['ep_len']:.0f} "
+                  f"games {ev['games']} | "
                   f"fwd/step {row['fwd_per_step'][0]:+.3f}/"
                   f"{row['fwd_per_step'][1]:+.3f} | opp_lag {row['opp_lag']:.1f} "
                   f"ring {rings} clamp {row['ring_clamped']} "

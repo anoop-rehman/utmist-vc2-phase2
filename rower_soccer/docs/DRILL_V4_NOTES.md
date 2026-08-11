@@ -428,3 +428,52 @@ never as a single monitor line. Doing the latter is how dribble got reported as
 "0.77-0.79" for hours when its mean was 0.605 -- those were the tops of an
 oscillation caused by the monitor's 320-step-per-world cadence aliasing against
 the 600-step episode.
+
+## 11. v8 first read: the strike point works, and the old shaping was anti-learning
+
+*Measured 2026-08-11. Each row is 40k-126k ball-moving samples from a
+deterministic rollout of that arm's `best.pt`. Random baseline: median 90 deg,
+16.7% within 30 deg, 50% within 90 deg.*
+
+| arm | steps | positioning median | within 30 | within 90 | aim median |
+|---|---|---|---|---|---|
+| v6 (control, no offset) | 88M | **123.9 deg** | 9.3% | 31.3% | 124.6 deg |
+| v7 (spawn anchor) | 35M | 103.9 deg | 13.1% | 42.4% | 93.2 deg |
+| **v8 (`--strike-offset 0.5`)** | **9.2M** | **84.0 deg** | **17.8%** | **53.5%** | 94.4 deg |
+
+Two things, and the second is the more important one.
+
+**v8 is the only arm better than random.** Positioning 84.0 deg and 53.5% within
+90 deg: the creature is now on the correct side of the ball more often than not.
+Aim has NOT moved yet (94.4 vs v7's 93.2), which is what the causal story
+predicts -- aim is downstream of positioning, and v8 is 9.2M steps old.
+
+**Under the old shaping, more training makes positioning WORSE.** v6 at 88M is
+worse than v7 at 35M on near-identical treatments, and both are worse than
+random. At 123.9 deg the creature systematically stands on the TARGET side of
+the ball and shoves it away, and v6's aim (124.6 deg) has converged to its
+positioning -- the signature of "the ball goes wherever the creature happened to
+be walking".
+
+This inverts the obvious objection rather than merely answering it. v8 is the
+YOUNGEST arm and the best positioned; the arm with 10x more training is the
+worst. Training time alone predicts the opposite ordering, so the step mismatch
+cannot explain the result -- it works against it.
+
+It also explains why sections 7-9's arms were flat. The drill was not failing to
+learn; it was learning an anti-skill, because `w_p2b * (speed toward the ball)`
+pays for charging straight at the ball from wherever the creature happens to
+stand, and the straight line is on the wrong side of the ball half the time.
+Every step of training reinforced it.
+
+**Not yet established:** whether v8 HOLDS. The correct next measurement is to
+re-probe v8 at ~35M and ~88M and compare to v7 and v6 at those same step counts,
+because the whole point of this section is that the old arms degraded with
+training. Fitness has not moved yet either (v8 ~0.125, still the do-nothing
+baseline) -- positioning is the leading indicator, not the result.
+
+Caveat carried from section 10: all three rows load `best.pt`, which is a max
+over single-episode evals. That is fine here -- an angular median over 40k-126k
+samples is not something one lucky episode can manufacture, and the ordering is
+monotone across three arms -- but it is another reason not to read fine
+differences between two `best.pt` files.

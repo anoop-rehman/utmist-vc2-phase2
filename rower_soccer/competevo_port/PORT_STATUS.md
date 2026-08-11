@@ -256,9 +256,57 @@ the +/-1000 goal term FADES IN and is absent at the start. Run A trained on
 (`ppo.CURRICULUM_STEPS`, expressed in agent-steps -- 200 epochs x 50,000 steps --
 because our iteration is a different size than theirs) and is the default.
 
-### Run B -- 15 min, their exploration curriculum
+### Run B -- 15 min, their exploration curriculum (the recorded stage-1 result)
 
-<!--RUN B-->
+Same settings as run A plus their curriculum (alpha 1 -> 0 over 10M agent-steps)
+and their head init. 29 iterations, 3.80M agent-transitions, ~930 s, `--eval-every
+10`. Artifacts: `runs/competevo_port/smoke_B_curriculum/`
+(`log.json`, `train.log`, `eval.mp4`, `policy.pt`); run A's are in
+`runs/competevo_port/smoke_A_envreward/`.
+
+| iteration | alpha | **fwd reward / step** | eval return | eval win rate | eval ep len |
+|---|---|---|---|---|---|
+| baseline (untrained) | 1.000 | -- | 501.9 / 493.9 | 0.00 / 0.00 | 500 |
+| 0 | 0.993 | **-0.012** | 517.4 / 519.8 | 0.00 / 0.00 | 500 |
+| 10 | 0.928 | **+0.118** | 381.6 / 422.5 | 0.000 / 0.014 | 388 |
+| 20 | 0.862 | **+0.257** | 195.5 / 164.9 | 0.00 / 0.00 | 189 |
+| 28 | 0.834 | **+0.278** | 145.7 / 140.2 | 0.00 / 0.00 | 137 |
+
+**Gate: PASS on locomotion, with a caveat stated plainly.** Mean forward-progress
+reward per agent-step goes from -0.012 (an untrained net drifts slightly the
+wrong way) to +0.278 and is still climbing when the budget ends -- monotone
+across all 29 iterations. In task units that is the ants' centre of mass moving
+toward their own goal line at ~0.28 m/s on average, up from zero, learned from
+scratch in 15 minutes on a shared GPU. Both agents improve together, as they must
+under a shared policy.
+
+The caveat: **eval episode RETURN falls, 502 -> 146, and the win rate does not
+hold above zero.** Both follow from the same thing. Standing still pays 500
+(the +1/step survive bonus x 500 steps); running pays ~1.28/step but the ants
+fall, so episodes end at 137 steps and collect ~176. PPO is correctly climbing
+the reward it was given -- the curriculum reward is ~97% dense forward progress
+at this point -- and the policy has not yet learned to run *without falling*,
+which is what would let episode length recover and the goal line at x=+/-4 be
+reached with any regularity. One goal crossing shows up at iteration 10
+(win rate 0.014) and none later; at 4M agent-steps against their 50M this is a
+15-minute smoke, not a result. The port map's real Stage-0 gate -- "win rate
+leaves 0 and eval reward trend matches a their-code CPU run over the first ~50
+epochs" -- is NOT met and is not claimed. What is established is that the loop
+runs end to end, the numbers start where theirs start, and the policy learns the
+thing the reward asks for.
+
+Also honest: `alpha` only fell from 1.00 to 0.83 in this run, so the +/-1000 goal
+term was still almost entirely faded out. Their schedule is 10M agent-steps and
+we covered 3.8M. Nothing here says anything about how the sparse term behaves.
+
+Video: `runs/competevo_port/smoke_B_curriculum/eval.mp4` -- 1000 frames at 67 fps (their
+`render_fps`), a fixed window spanning 7 consecutive deterministic episodes of
+world 0, camera above the halfway line with both goal lines in frame. Episode
+lengths 99 / 171 / 98 / 87 / 296 / 92 / 84, no winner in any of them. Watching it
+is the point: the ants do drive toward each other's goals and collide near the
+halfway line -- which is the actual dynamic of run-to-goal, since each agent's
+goal is behind the other -- and then topple. Nothing in the video contradicts the
+table; it shows why episode length is 137.
 
 
 ## What stage 2 needs, learned the hard way

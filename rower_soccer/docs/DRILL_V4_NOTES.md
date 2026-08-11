@@ -810,3 +810,67 @@ is the only remaining explanation. If v8 has also drifted toward 74, the credit
 belongs to the strike-point shaping and v9 gets none of it.
 
 Until that lands this is a strong signal, not a conclusion.
+
+## 17. RESOLVED: the frozen decoder is the cause
+
+*Measured 2026-08-11. v8 re-probed at 64M, 109,139 ball-moving samples.*
+
+Section 16 left one confound: v9's aim was measured at 21M and v8's at 9.2M, so
+the gap might have been training time. v8 is now at 64M -- three times v9's age
+-- and v8/v9 differ in exactly one flag, `--freeze-decoder`. Re-probing settles
+it:
+
+| arm | decoder | steps | positioning | aim | aim within 30 deg | aim within 90 deg |
+|---|---|---|---|---|---|---|
+| v8 | frozen | 9.2M | 84.0 deg | 94.4 deg | 16.5% | 48.2% |
+| **v8** | **frozen** | **64M** | **115.0 deg** | **134.2 deg** | **6.3%** | **23.4%** |
+| **v9** | **UNFROZEN** | **21M** | **74.5 deg** | **74.1 deg** | **22.3%** | **59.9%** |
+| random | -- | -- | 90 deg | 90 deg | 16.7% | 50% |
+
+**Training time is excluded, and in the strongest possible way: it has the
+OPPOSITE sign.** With the decoder frozen, more training makes aim dramatically
+worse -- 94.4 -> 134.2 deg, with within-30 collapsing to 6.3%, far BELOW the
+16.7% of chance. The frozen arm is not failing to learn to aim; it is learning
+to aim away.
+
+The strike-point shaping's positioning gain was **transient**: 84.0 deg at 9.2M,
+reverted to 115.0 deg at 64M. Good positioning cannot be held when the
+controller underneath cannot convert it into a directed strike, which is also
+why v8's fitness declined (section 13) rather than plateauing.
+
+### The whole kick story, in order
+
+1. The drill's approach shaping pays for speed TOWARD the ball, so the creature
+   charges the ball from wherever it stands and the strike direction is whatever
+   the approach direction happened to be (section 8).
+2. Correcting that with a strike point moved POSITIONING off the random baseline
+   (section 11) but not the outcome, and the gain did not hold (this section).
+3. The reason is the frozen decoder. `follow` trained it to track a target
+   VELOCITY -- "walk in direction X at speed Y" -- and a directed strike is
+   outside what those 154,632 parameters can express. No shaping over the
+   expert's z can recover a behaviour the controller cannot represent.
+4. Unfreezing it produced the first better-than-random aim in six arms, in 21M
+   steps, fewer than three of the four frozen arms ever ran.
+
+Resolves section 12's prediction as well: v8 was to sit above 0.0974 and above
+the 0.105 baseline at ~98M. Its recent mean is 0.097 at 64M and falling. **The
+prediction failed, as recorded, and the reason is now known.**
+
+### What this costs, and the design question it raises
+
+v9 breaks the NPMP arrangement on purpose: one decoder, learned once by
+`follow`, shared frozen by all four drills so no skill can degrade another. If a
+directed strike genuinely lies outside that decoder's span, the arrangement
+cannot hold as designed, and the options are not equivalent:
+
+- **Train the decoder on a striking task too**, not just `follow`, so one shared
+  decoder spans both walking and striking. Keeps shared-z; costs a redesign of
+  the decoder-training stage and a re-run of everything downstream of it.
+- **Per-skill decoders.** Cheapest to implement, and it discards the shared-z
+  property the whole pipeline is built on -- the 2v2 controller would be
+  switching between four unrelated controllers rather than steering one.
+- **Unfreeze during drills, with a KL anchor to the follow decoder.** A middle
+  path: lets the strike develop while bounding gait drift. Untested here.
+
+This is a real fork in the pipeline design and belongs to the user, not to an
+overnight loop. Recorded rather than chosen.

@@ -1,0 +1,62 @@
+[PASS] batched opponents == per-slot opponents (module level, production weights) (2.5s) 8 as-initialized slots x 512 rows on cpu: max |batched - per-slot| = 1.49e-07 abs / 1.6e-07 rel on the distribution mean (max |mean| 0.92), 1.19e-07 abs / 3.5e-08 rel on the assembled action (fp32 reassociation; std bit-exact; two slots differ by 1.34 so the check bites)
+[PASS] batched opponents == per-slot opponents (module level, weights and normalizers spread far apart) (1.1s) 8 spread slots x 512 rows on cpu: max |batched - per-slot| = 4.77e-06 abs / 2.7e-07 rel on the distribution mean (max |mean| 17.76), 1.91e-06 abs / 1.2e-07 rel on the assembled action (fp32 reassociation; std bit-exact; two slots differ by 20.37 so the check bites)
+[PASS] batched opponents == per-slot opponents (CoEvoPPO's own methods) (4.4s) 8 worlds, blocks 3: CoEvoPPO._opponent_actions vs ._opponent_actions_batched differ by 0.00e+00 over both sides x 4 worlds x 28 action dims
+[PASS] the opponent mixture is unchanged by the batching (2.5s) slot -> action routing exact on both paths; slot draws uniform over 4 (chi2 1.9/3 dof, crit 15, n=200,000); after 6 batched epochs every live slot is inside the epoch-5 window [2,4], 0 diverged
+[PASS] a short training loop closes on BOTH opponent paths, 0 diverged (17.7s) 4 epochs each, both learners moved, all parameters finite -- batched=False: 3.4s, 0 diverged; batched=True: 13.7s, 0 diverged
+[PASS] two learners are independent (a step on one leaves the other bit-identical) (6.1s) 33 tensors each, disjoint; 33 of learner 0's tensors moved, 0 of learner 1's (kl +9.1e-01)
+[PASS] per-agent obs/action slicing (fails if the lanes are swapped) (2.9s) 4 ego worlds per learner; obs lane, action lane and recorded action all agree, and the swapped assignment fails all three
+[PASS] the ring samples THEIR distribution at the configured delta (17.1s) delta=0.5 ep100: support [50,99], chi2 44.9/49 dof (crit 98), worst bin 4.4% off uniform, P(current)=0; delta=0 ep100: [1,99] uniform, chi2 107.8/98; start==end -> current: epoch 1 at delta=0.5, every epoch at delta=1; populated ring at epoch 200: mean lag 50.07 (predicted E/4 = 50.0), 0 clamps
+[PASS] a pushed checkpoint round-trips, and does not alias live weights (3.7s) 33 tensors incl. RunningNorm buffers survive push -> 3 Adam steps -> get -> load_state_dict bit-identically; trainer ring keeps epoch 1 and epoch 2 distinct
+[PASS] the ring is bounded: it evicts and its footprint stops growing (1.5s) cap 8: 200 pushes -> 8 held, epochs 193..200, 192 evicted, footprint flat at 1.21 MB (152 kB each); default capacity 512 = 78 MB host at full occupancy, covers their 1000 epochs unclamped
+[PASS] the co-evolution loop closes on CPU (106.3s) 8 worlds, 12 epochs: rings 12/12, opponent epochs [6, 8, 9] / [7, 7, 10] (window 5-10 at the epoch-11 draw), mean lag 3.2, 0 diverged
+[PASS] batched opponents == per-slot opponents ON GPU (module level, production weights) (3.2s) 8 as-initialized slots x 512 rows on cuda: max |batched - per-slot| = 4.17e-07 abs / 4.4e-07 rel on the distribution mean (max |mean| 0.95), 4.17e-07 abs / 1.2e-07 rel on the assembled action (fp32 reassociation; std bit-exact; two slots differ by 1.14 so the check bites)
+[PASS] batched opponents == per-slot opponents ON GPU (module level, spread apart) (0.4s) 8 spread slots x 512 rows on cuda: max |batched - per-slot| = 1.50e-05 abs / 9.1e-07 rel on the distribution mean (max |mean| 16.44), 1.14e-05 abs / 8.0e-07 rel on the assembled action (fp32 reassociation; std bit-exact; two slots differ by 18.78 so the check bites)
+Warp 1.16.0 initialized:
+   CUDA Toolkit 12.9, Driver 12.7
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA RTX 4000 Ada Generation" (20 GiB, sm_89, mempool enabled)
+   Kernel cache:
+     /root/.cache/warp/1.16.0
+/workspace/utmist-vc2-phase2/.venv/lib/python3.11/site-packages/mujoco_warp/_src/io.py:713: UserWarning: MULTICCD is enabled, but the scene contains CCD pairs without multicontact support: [('CAPSULE', 'CYLINDER')]. At most 1 contact will be generated for these pairs.
+  warnings.warn(
+Module mujoco_warp._src.smooth c4020f1 load on device 'cuda:0' took 74.32 ms  (cached)
+Module _nxn_broadphase__locals__kernel_5d89c636 5d89c63 load on device 'cuda:0' took 0.74 ms  (cached)
+Module ccd_kernel_builder__locals__ccd_kernel_66f1113b 66f1113 load on device 'cuda:0' took 0.98 ms  (cached)
+Module ccd_kernel_builder__locals__ccd_kernel_66f1113b 5dcce03 load on device 'cuda:0' took 0.88 ms  (cached)
+Module _primitive_narrowphase__locals__primitive_narrowphase_1ded41bb 1ded41b load on device 'cuda:0' took 0.78 ms  (cached)
+Module mujoco_warp._src.constraint 36c8060 load on device 'cuda:0' took 0.53 ms  (cached)
+Module _friction_dof__locals__kernel_a6ed3529 a6ed352 load on device 'cuda:0' took 0.79 ms  (cached)
+Module _limit_slide_hinge__locals__kernel_56cb53b3 56cb53b load on device 'cuda:0' took 0.85 ms  (cached)
+Module _efc_contact_init__locals__kernel_0bd15084 0bd1508 load on device 'cuda:0' took 0.72 ms  (cached)
+Module _efc_contact_jac_dense__locals__kernel_f15eda8d 1ff2125 load on device 'cuda:0' took 0.86 ms  (cached)
+Module _efc_contact_update__locals__kernel_8c34abe6 8c34abe load on device 'cuda:0' took 0.80 ms  (cached)
+Module mujoco_warp._src.forward bfd9fb5 load on device 'cuda:0' took 0.92 ms  (cached)
+Module mujoco_warp._src.passive d8c18c6 load on device 'cuda:0' took 0.90 ms  (cached)
+Module mujoco_warp._src.forward b068ad6 load on device 'cuda:0' took 0.97 ms  (cached)
+Module _qfrc_smooth__locals__kernel_b98573a2 b98573a load on device 'cuda:0' took 0.68 ms  (cached)
+Module mujoco_warp._src.support ca784c5 load on device 'cuda:0' took 0.66 ms  (cached)
+Module _tile_cholesky_factorize_solve_block__locals__kernel_7b7e8b16 a1adcd5 load on device 'cuda:0' took 115.37 ms  (cached)
+Module _solve_init_dof__locals__kernel_befe379c befe379 load on device 'cuda:0' took 0.64 ms  (cached)
+Module mujoco_warp._src.solver 3a105a0 load on device 'cuda:0' took 1.31 ms  (cached)
+Module _solve_init_jaref_kernel__locals__kernel_83f8b17b 83f8b17 load on device 'cuda:0' took 0.68 ms  (cached)
+Module mul_m_kernel__locals___mul_m_dc7994af dc7994a load on device 'cuda:0' took 0.59 ms  (cached)
+Module _update_constraint_efc__locals__kernel_64b75440 64b7544 load on device 'cuda:0' took 0.84 ms  (cached)
+Module _update_constraint_init_qfrc_constraint_dense__locals__kernel_88a8869f 88a8869 load on device 'cuda:0' took 0.72 ms  (cached)
+Module _update_gradient_zero_grad_dot__locals__kernel_817148e6 817148e load on device 'cuda:0' took 0.49 ms  (cached)
+Module _update_gradient_grad__locals__kernel_00c9ca8d 00c9ca8 load on device 'cuda:0' took 0.53 ms  (cached)
+Module _update_gradient_JTDAJ_dense_tiled__locals__kernel_dbb9fc92 609fc34 load on device 'cuda:0' took 68.40 ms  (cached)
+Module _update_gradient_cholesky__locals__kernel_c46c742c 1436c86 load on device 'cuda:0' took 117.83 ms  (cached)
+Module _linesearch_iterative_kernel__locals__kernel_2e1c0e7d 2e65bde load on device 'cuda:0' took 1.14 ms  (cached)
+Module _update_constraint_efc__locals__kernel_dc2dbb33 dc2dbb3 load on device 'cuda:0' took 0.68 ms  (cached)
+Module _update_constraint_init_qfrc_constraint_dense__locals__kernel_175b3165 175b316 load on device 'cuda:0' took 0.57 ms  (cached)
+Module _update_gradient_zero_grad_dot__locals__kernel_932c92ad 932c92a load on device 'cuda:0' took 0.73 ms  (cached)
+Module _update_gradient_grad__locals__kernel_4c37eb70 4c37eb7 load on device 'cuda:0' took 0.55 ms  (cached)
+Module _update_gradient_cholesky__locals__kernel_aaa5ab0f a72662b load on device 'cuda:0' took 197.73 ms  (cached)
+Module mujoco_warp._src.sensor de892d8 load on device 'cuda:0' took 1.19 ms  (cached)
+Module _next_time_builder__locals___next_time_a67f49d6 a67f49d load on device 'cuda:0' took 0.70 ms  (cached)
+[PASS] batched opponents == per-slot opponents ON GPU (CoEvoPPO) (13.2s) 64 worlds, blocks 3: CoEvoPPO._opponent_actions vs ._opponent_actions_batched differ by 5.25e-06 over both sides x 32 worlds x 28 action dims
+[PASS] the co-evolution loop closes on the batched GPU env (118.4s) 64 worlds, 12 epochs: rings 12/12, opponent epochs [6, 8, 9] / [7, 7, 10] (window 5-10 at the epoch-11 draw), mean lag 3.2, 0 diverged
+
+15/15 passed
+EXIT=0

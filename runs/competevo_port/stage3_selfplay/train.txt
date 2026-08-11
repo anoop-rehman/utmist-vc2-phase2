@@ -1,0 +1,18 @@
+/workspace/utmist-vc2-phase2/.venv/lib/python3.11/site-packages/mujoco_warp/_src/io.py:713: UserWarning: MULTICCD is enabled, but the scene contains CCD pairs without multicontact support: [('CAPSULE', 'CYLINDER')]. At most 1 contact will be generated for these pairs.
+  warnings.warn(
+Warp 1.16.0 initialized:
+   CUDA Toolkit 12.9, Driver 12.7
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA RTX 4000 Ada Generation" (20 GiB, sm_89, mempool enabled)
+   Kernel cache:
+     /root/.cache/warp/1.16.0
+untrained pair, mean actions: ret=[508.0, 483.8999938964844] len=500 win=[0.0, 0.0] games=64
+
+=== training ===
+it    0   0.07M 3,630 sps | EVAL ret [513.5, 497.0] win [0.0, 0.0] len 500 | fwd/step -0.038/-0.012 | opp_lag 0.0 ring [1, 1] clamp [0, 0] (0.2 MB) | nan 0
+it    5   0.39M 950 sps | train_ret [-107.0, -106.6] len 96 | fwd/step -0.005/-0.002 kl -2.3e-05/-3.0e-05 | opp_lag 1.9 ring [6, 6] nan 0
+it   10   0.72M 1,372 sps | EVAL ret [515.2999877929688, 516.0999755859375] win [0.0, 0.0] len 500 | fwd/step -0.026/-0.017 | opp_lag 2.2 ring [11, 11] clamp [0, 0] (1.7 MB) | nan 0
+it   15   1.05M 1,338 sps | EVAL ret [514.7000122070312, 518.4000244140625] win [0.0, 0.0] len 500 | fwd/step +0.085/-0.044 | opp_lag 5.4 ring [16, 16] clamp [0, 0] (2.4 MB) | nan 0
+time budget reached after 16 iters
+saved runs/competevo_port/stage3_selfplay/policies.pt

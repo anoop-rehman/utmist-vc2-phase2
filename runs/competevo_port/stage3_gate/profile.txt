@@ -1,0 +1,39 @@
+/workspace/utmist-vc2-phase2/.venv/lib/python3.11/site-packages/mujoco_warp/_src/io.py:713: UserWarning: MULTICCD is enabled, but the scene contains CCD pairs without multicontact support: [('CAPSULE', 'CYLINDER')]. At most 1 contact will be generated for these pairs.
+  warnings.warn(
+/workspace/utmist-vc2-phase2/.venv/lib/python3.11/site-packages/mujoco_warp/_src/io.py:713: UserWarning: MULTICCD is enabled, but the scene contains CCD pairs without multicontact support: [('CAPSULE', 'CYLINDER')]. At most 1 contact will be generated for these pairs.
+  warnings.warn(
+Warp 1.16.0 initialized:
+   CUDA Toolkit 12.9, Driver 12.7
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA RTX 4000 Ada Generation" (20 GiB, sm_89, mempool enabled)
+   Kernel cache:
+     /root/.cache/warp/1.16.0
+env.step alone, ZERO action, 1024 worlds: 100.0 ms/step = 10,238 world-steps/s
+env.step alone, RANDOM action, 1024 worlds: 100.0 ms/step = 10,244 world-steps/s (1.0x the zero-action cost)
+float(info['forward'].mean()) host sync: 0.10 ms/call, i.e. 0.01 s per rollout
+  [1/7] one 13.5s  two 23.6s
+  [2/7] one 13.5s  two 25.4s
+  [3/7] one 13.9s  two 20.0s
+  [4/7] one 31.7s  two 28.8s
+  [5/7] one 47.8s  two 43.8s
+  [6/7] one 17.2s  two 28.4s
+  [7/7] one 54.2s  two 99.8s
+
+--- ONE learner (stage 2) (median of 7) ---
+  total iteration           17.20 s
+  env.step                  10.07 s   (64 calls, 157.4 ms each)
+    of which design.write    0.42 s   (51 calls)
+  policy.act (sampling)      1.19 s   (64 calls)
+  policy.value               0.71 s   (129 calls)
+  everything else            5.23 s   (PPO update + per-step host work in the rollout)
+
+--- TWO learners + ring (stage 3) (median of 7) ---
+  total iteration           28.40 s
+  env.step                  10.50 s   (64 calls, 164.1 ms each)
+    of which design.write    0.43 s   (54 calls)
+  policy.act (sampling)     11.02 s   (640 calls)
+  policy.value               2.25 s   (674 calls)
+  everything else            4.63 s   (PPO update + per-step host work in the rollout)
+
+stage 3 / stage 2 iteration wall: 1.65x

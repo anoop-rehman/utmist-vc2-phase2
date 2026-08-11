@@ -1,0 +1,82 @@
+Warp 1.16.0 initialized:
+   CUDA Toolkit 12.9, Driver 12.7
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA RTX 4000 Ada Generation" (20 GiB, sm_89, mempool enabled)
+   Kernel cache:
+     /root/.cache/warp/1.16.0
+/workspace/utmist-vc2-phase2/.venv/lib/python3.11/site-packages/mujoco_warp/_src/io.py:713: UserWarning: MULTICCD is enabled, but the scene contains CCD pairs without multicontact support: [('CAPSULE', 'CYLINDER')]. At most 1 contact will be generated for these pairs.
+  warnings.warn(
+Module mujoco_warp._src.smooth c4020f1 load on device 'cuda:0' took 83.59 ms  (cached)
+Module _nxn_broadphase__locals__kernel_ada2f1e9 ada2f1e load on device 'cuda:0' took 0.75 ms  (cached)
+Module ccd_kernel_builder__locals__ccd_kernel_66f1113b 66f1113 load on device 'cuda:0' took 0.83 ms  (cached)
+Module ccd_kernel_builder__locals__ccd_kernel_66f1113b 5dcce03 load on device 'cuda:0' took 1.18 ms  (cached)
+Module _primitive_narrowphase__locals__primitive_narrowphase_1ded41bb 1ded41b load on device 'cuda:0' took 0.98 ms  (cached)
+Module mujoco_warp._src.constraint 36c8060 load on device 'cuda:0' took 0.79 ms  (cached)
+Module _friction_dof__locals__kernel_a6ed3529 a6ed352 load on device 'cuda:0' took 0.87 ms  (cached)
+Module _limit_slide_hinge__locals__kernel_56cb53b3 56cb53b load on device 'cuda:0' took 0.71 ms  (cached)
+Module _efc_contact_init__locals__kernel_0bd15084 0bd1508 load on device 'cuda:0' took 0.60 ms  (cached)
+Module _efc_contact_jac_dense__locals__kernel_f15eda8d 1ff2125 load on device 'cuda:0' took 0.81 ms  (cached)
+Module _efc_contact_update__locals__kernel_8c34abe6 8c34abe load on device 'cuda:0' took 0.65 ms  (cached)
+Module mujoco_warp._src.forward bfd9fb5 load on device 'cuda:0' took 0.92 ms  (cached)
+Module mujoco_warp._src.passive d8c18c6 load on device 'cuda:0' took 0.91 ms  (cached)
+Module mujoco_warp._src.forward b068ad6 load on device 'cuda:0' took 1.33 ms  (cached)
+Module _qfrc_smooth__locals__kernel_b98573a2 b98573a load on device 'cuda:0' took 0.55 ms  (cached)
+Module mujoco_warp._src.support ca784c5 load on device 'cuda:0' took 0.56 ms  (cached)
+Module _tile_cholesky_factorize_solve_block__locals__kernel_7b7e8b16 a1adcd5 load on device 'cuda:0' took 211.90 ms  (cached)
+Module _solve_init_dof__locals__kernel_befe379c befe379 load on device 'cuda:0' took 0.61 ms  (cached)
+Module mujoco_warp._src.solver 3a105a0 load on device 'cuda:0' took 1.21 ms  (cached)
+Module _solve_init_jaref_kernel__locals__kernel_83f8b17b 83f8b17 load on device 'cuda:0' took 1.24 ms  (cached)
+Module mul_m_kernel__locals___mul_m_dc7994af dc7994a load on device 'cuda:0' took 0.56 ms  (cached)
+Module _update_constraint_efc__locals__kernel_64b75440 64b7544 load on device 'cuda:0' took 0.49 ms  (cached)
+Module _update_constraint_init_qfrc_constraint_dense__locals__kernel_88a8869f 88a8869 load on device 'cuda:0' took 0.49 ms  (cached)
+Module _update_gradient_zero_grad_dot__locals__kernel_817148e6 817148e load on device 'cuda:0' took 0.61 ms  (cached)
+Module _update_gradient_grad__locals__kernel_00c9ca8d 00c9ca8 load on device 'cuda:0' took 0.75 ms  (cached)
+Module _update_gradient_JTDAJ_dense_tiled__locals__kernel_dbb9fc92 609fc34 load on device 'cuda:0' took 1.63 ms  (cached)
+Module _update_gradient_cholesky__locals__kernel_c46c742c 1436c86 load on device 'cuda:0' took 210.51 ms  (cached)
+Module _linesearch_iterative_kernel__locals__kernel_2e1c0e7d 2e65bde load on device 'cuda:0' took 0.75 ms  (cached)
+Module _update_constraint_efc__locals__kernel_dc2dbb33 dc2dbb3 load on device 'cuda:0' took 0.82 ms  (cached)
+Module _update_constraint_init_qfrc_constraint_dense__locals__kernel_175b3165 175b316 load on device 'cuda:0' took 0.51 ms  (cached)
+Module _update_gradient_zero_grad_dot__locals__kernel_932c92ad 932c92a load on device 'cuda:0' took 0.49 ms  (cached)
+Module _update_gradient_grad__locals__kernel_4c37eb70 4c37eb7 load on device 'cuda:0' took 0.52 ms  (cached)
+Module _update_gradient_cholesky__locals__kernel_aaa5ab0f a72662b load on device 'cuda:0' took 286.09 ms  (cached)
+Module mujoco_warp._src.sensor de892d8 load on device 'cuda:0' took 1.23 ms  (cached)
+Module _next_time_builder__locals___next_time_a67f49d6 a67f49d load on device 'cuda:0' took 1.36 ms  (cached)
+  clean [1/7] per-slot 29.6s  batched 20.2s
+  clean [2/7] per-slot 23.7s  batched 15.0s
+  clean [3/7] per-slot 30.4s  batched 38.1s
+  clean [4/7] per-slot 33.3s  batched 55.4s
+  clean [5/7] per-slot 57.6s  batched 13.9s
+  clean [6/7] per-slot 18.6s  batched 22.5s
+  clean [7/7] per-slot 122.2s  batched 38.0s
+
+--- UNINSTRUMENTED iteration wall (median of 7, interleaved) ---
+  per-slot opponents     30.41 s   [18.610343400388956, 23.681628849357367, 29.591297898441553, 30.40797735005617, 33.29709469899535, 57.594070091843605, 122.18494906648993]
+  batched opponents      22.50 s   [13.89808588474989, 14.984473899006844, 20.236899003386497, 22.50235426425934, 38.00627600774169, 38.09103858470917, 55.40914345905185]
+  speedup                 1.35x
+  [1/7] per-slot 23.2s  batched 16.6s
+  [2/7] per-slot 33.3s  batched 24.5s
+  [3/7] per-slot 76.5s  batched 25.9s
+  [4/7] per-slot 35.7s  batched 15.0s
+  [5/7] per-slot 48.1s  batched 79.1s
+  [6/7] per-slot 50.5s  batched 16.4s
+  [7/7] per-slot 25.7s  batched 18.3s
+
+--- PER-SLOT opponents (blocks=4) (median of 7) ---
+  total iteration           35.68 s
+  env.step                  15.82 s   (64 calls, 247.2 ms each)
+    of which design.write    0.53 s   (62 calls)
+  policy.act (sampling)     16.29 s   (640 calls)
+  policy.value               3.04 s   (674 calls)
+  everything else            0.53 s   (PPO update + per-step host work in the rollout)
+
+--- BATCHED opponents (blocks=4) (median of 7) ---
+  total iteration           18.32 s
+  env.step                  10.39 s   (64 calls, 162.4 ms each)
+    of which design.write    0.55 s   (60 calls)
+  policy.act (sampling)      3.40 s   (192 calls)
+  policy.value               0.76 s   (162 calls)
+  everything else            3.78 s   (PPO update + per-step host work in the rollout)
+
+batched / per-slot iteration wall: 0.51x  (1.95x speedup)
+policy.act: 16.29 s -> 3.40 s (4.79x)

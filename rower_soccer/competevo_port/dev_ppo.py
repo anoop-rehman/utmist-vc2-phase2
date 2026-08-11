@@ -132,18 +132,206 @@ class DevActorCritic(nn.Module):
         return self._assemble(flag < 0.5, d_s.mean.clamp(-1.0, 1.0), d_c.mean)
 
     @torch.no_grad()
-    def act(self, obs):
+    def act(self, obs, noise=None):
+        """`noise=(eps_scale, eps_ctrl)` replaces the internal draw with
+        `mean + std * eps`, which is what `Normal.sample()` is. It exists so a
+        test can drive this path and the batched `StackedDevActors` path with
+        the SAME randomness and compare the actions; production passes None."""
         flag, _, _ = self.split(obs)
         is_design = flag < 0.5
         d_s, d_c = self.dists(obs)
         # `select_action` clamps the sampled design to [-1, 1] and their learner
         # then recomputes the old log-prob FROM THE STORED (clamped) action, so
         # the log-prob reported here is of the clamped sample, not the raw one.
-        a_s = d_s.sample().clamp(-1.0, 1.0)
-        a_c = d_c.sample()
+        if noise is None:
+            a_s, a_c = d_s.sample(), d_c.sample()
+        else:
+            a_s = d_s.mean + d_s.stddev * noise[0]
+            a_c = d_c.mean + d_c.stddev * noise[1]
+        a_s = a_s.clamp(-1.0, 1.0)
         logp = torch.where(is_design, d_s.log_prob(a_s).sum(-1),
                            d_c.log_prob(a_c).sum(-1))
         return self._assemble(is_design, a_s, a_c), logp, self.value(obs)
+
+
+def _tower_layers(mlp, head):
+    """The `[Linear, Tanh] * k + Linear` chain `_mlp(...) + head` really is.
+
+    Asserted rather than assumed: `StackedDevActors` reimplements this chain
+    with stacked weights, and it can only be equivalent if the chain is what it
+    thinks it is."""
+    lins = []
+    for i, m in enumerate(mlp):
+        if i % 2 == 0:
+            assert isinstance(m, nn.Linear), f"layer {i} is {type(m).__name__}"
+            lins.append(m)
+        else:
+            assert isinstance(m, nn.Tanh), f"layer {i} is {type(m).__name__}"
+    assert len(mlp) % 2 == 0, "the mlp does not end in an activation"
+    return lins + [head]
+
+
+class StackedDevActors(nn.Module):
+    """`n_groups x n_slots` copies of `DevActorCritic`'s ACTION path, with their
+    weights stacked so all of them evaluate in ONE batched forward.
+
+    Why this exists: stage 3 runs `blocks` opponent networks per side, and the
+    stage-3 profile measured those forwards at 11.0 s of a 28.4 s iteration --
+    640 `act` calls against 64, at ~17 ms each for a 38k-parameter MLP. That is
+    kernel-launch and host-sync overhead, not arithmetic: the FLOPs are
+    negligible at any batch size this port uses. The opponents all share an
+    architecture and differ only in weights, so the whole set is one
+    broadcasting `matmul` per layer over a leading `[groups, slots]` axis.
+
+    Three things it does NOT do, each deliberate:
+
+      * **no critic.** `CoEvoPPO` throws the opponent's value away
+        (`_opponent_actions` takes `[0]`), so a third of the per-slot forward
+        was dead work. Skipping it cannot change an action: the value net
+        consumes no randomness and, with the module in `eval()`, its
+        `RunningNorm` does not move either.
+      * **no log-prob.** Opponent transitions are never trained on.
+      * **no `.item()`.** `RunningNorm.forward` branches on `self.n.item()`,
+        which is a device->host sync. Each `DevActorCritic.act` runs three
+        normalizers, so `2 x blocks = 8` opponent forwards were 24 stalls per
+        env step. Here the same branch is a `torch.where` on the device, which
+        is the identical function of the same inputs (`n == 0` -> the raw
+        observation, else the whitened one) with no sync.
+
+    Weights are buffers, not parameters: nothing here is ever optimized, and
+    `CoEvoPPO` overwrites them from `opp_nets` at the top of every rollout.
+    """
+
+    def __init__(self, template, n_groups, n_slots):
+        super().__init__()
+        self.n_groups, self.n_slots = int(n_groups), int(n_slots)
+        S = self.n_groups * self.n_slots
+        self.n_stacked = S
+        self.design_dim = template.design_dim
+        self.sim_obs_dim = template.sim_obs_dim
+        self.n_motor = template.n_motor
+        self.obs_dim = template.obs_dim
+        self.act_dim = template.act_dim
+
+        self._depth = {}
+        for tower, mlp, head, norm in (
+                ("scale", template.scale_mlp, template.scale_mean,
+                 template.scale_norm),
+                ("control", template.control_mlp, template.control_mean,
+                 template.control_norm)):
+            lins = _tower_layers(mlp, head)
+            self._depth[tower] = len(lins)
+            for i, lin in enumerate(lins):
+                self.register_buffer(f"{tower}_w{i}",
+                                     torch.zeros(S, *lin.weight.shape))
+                self.register_buffer(f"{tower}_b{i}",
+                                     torch.zeros(S, lin.bias.numel()))
+            assert norm.demean and norm.destd, \
+                "the stacked normalizer assumes RunningNorm(demean, destd)"
+            self.register_buffer(f"{tower}_n", torch.zeros(S, 1))
+            self.register_buffer(f"{tower}_mean",
+                                 torch.zeros(S, norm.mean.numel()))
+            self.register_buffer(f"{tower}_var",
+                                 torch.ones(S, norm.var.numel()))
+        self.clip = template.scale_norm.clip
+        assert self.clip == template.control_norm.clip
+        self.register_buffer("scale_log_std", torch.zeros(S, self.design_dim))
+        self.register_buffer("control_log_std", torch.zeros(S, self.n_motor))
+
+    # -- weight loading ------------------------------------------------------
+    @torch.no_grad()
+    def sync_from(self, nets):
+        """`nets[g][k]` -> stacked row `g * n_slots + k`. Cheap enough to run
+        every rollout (a few hundred tiny copies once per iteration), which is
+        what keeps the stack from ever being stale."""
+        assert len(nets) == self.n_groups
+        for g, group in enumerate(nets):
+            assert len(group) == self.n_slots
+            for k, net in enumerate(group):
+                s = g * self.n_slots + k
+                for tower, mlp, head, norm, log_std in (
+                        ("scale", net.scale_mlp, net.scale_mean,
+                         net.scale_norm, net.scale_log_std),
+                        ("control", net.control_mlp, net.control_mean,
+                         net.control_norm, net.control_log_std)):
+                    for i, lin in enumerate(_tower_layers(mlp, head)):
+                        getattr(self, f"{tower}_w{i}")[s].copy_(lin.weight)
+                        getattr(self, f"{tower}_b{i}")[s].copy_(lin.bias)
+                    getattr(self, f"{tower}_n")[s].copy_(norm.n)
+                    getattr(self, f"{tower}_mean")[s].copy_(norm.mean)
+                    getattr(self, f"{tower}_var")[s].copy_(norm.var)
+                    getattr(self, f"{tower}_log_std")[s].copy_(log_std)
+
+    # -- forward -------------------------------------------------------------
+    def _norm(self, x, tower):
+        """`RunningNorm.forward` for every slot at once, with its `n == 0`
+        identity branch as a `where` instead of a host sync."""
+        G, K = self.n_groups, self.n_slots
+        mean = getattr(self, f"{tower}_mean").view(G, K, 1, -1)
+        var = getattr(self, f"{tower}_var").view(G, K, 1, -1)
+        n = getattr(self, f"{tower}_n").view(G, K, 1, 1)
+        y = x - mean
+        y = y / (var.sqrt() + 1e-8)
+        if self.clip:
+            y = y.clamp(-self.clip, self.clip)
+        return torch.where(n > 0, y, x)
+
+    def _tower(self, x, tower):
+        G, K = self.n_groups, self.n_slots
+        for i in range(self._depth[tower]):
+            w = getattr(self, f"{tower}_w{i}")
+            b = getattr(self, f"{tower}_b{i}")
+            x = torch.matmul(x, w.view(G, K, *w.shape[1:]).transpose(-1, -2))
+            x = x + b.view(G, K, 1, -1)
+            if i < self._depth[tower] - 1:
+                x = torch.tanh(x)
+        return x
+
+    def slot_dists(self, obs):
+        """`obs` `[G, M, obs_dim]` -> every slot's action distribution:
+        means `[G, K, M, d]`, stds `[G, K, d]`. This is the tensor the
+        equivalence gate compares against the per-slot modules."""
+        G, K = self.n_groups, self.n_slots
+        assert obs.shape[0] == G and obs.shape[-1] == self.obs_dim
+        obs = DevActorCritic._clean(obs)
+        d = self.design_dim
+        scale = obs[:, None, :, 1:1 + d]                  # [G, 1, M, d]
+        sim = obs[:, None, :, 1 + d:]
+        s_mean = self._tower(self._norm(scale, "scale"), "scale")
+        c_mean = self._tower(self._norm(sim, "control"), "control")
+        s_std = (self.scale_log_std.exp() / SCALE_STD_DIVISOR).view(G, K, d)
+        c_std = self.control_log_std.exp().view(G, K, self.n_motor)
+        return s_mean, s_std, c_mean, c_std
+
+    @torch.no_grad()
+    def act(self, obs, slots, noise=None):
+        """Actions for `[G, M, obs_dim]` observations, row `(g, m)` taken from
+        slot `slots[g, m]` of group `g`.
+
+        The gather happens on the DISTRIBUTION, not on a sample: row `m` is
+        drawn once from `N(mean[slot], std[slot])` instead of drawing all `K`
+        and discarding `K - 1`. Same distribution, `K`x fewer normal variates.
+        `noise=(eps_scale, eps_ctrl)`, shaped like the returned blocks, replaces
+        the draw with `mean + std * eps` -- the gate's seam."""
+        G, K = self.n_groups, self.n_slots
+        M = obs.shape[1]
+        s_mean, s_std, c_mean, c_std = self.slot_dists(obs)
+        si = slots.view(G, 1, M, 1)
+        s_mean = s_mean.gather(1, si.expand(G, 1, M, self.design_dim))[:, 0]
+        c_mean = c_mean.gather(1, si.expand(G, 1, M, self.n_motor))[:, 0]
+        sj = slots.view(G, M, 1)
+        s_std = s_std.gather(1, sj.expand(G, M, self.design_dim))
+        c_std = c_std.gather(1, sj.expand(G, M, self.n_motor))
+        if noise is None:
+            a_s = torch.normal(s_mean, s_std)
+            a_c = torch.normal(c_mean, c_std)
+        else:
+            a_s = s_mean + s_std * noise[0]
+            a_c = c_mean + c_std * noise[1]
+        a_s = a_s.clamp(-1.0, 1.0)
+        is_design = DevActorCritic._clean(obs)[..., 0] < 0.5
+        m = is_design.unsqueeze(-1).to(a_s.dtype)
+        return torch.cat([a_s * m, a_c * (1.0 - m)], dim=-1)
 
 
 class DevSelfPlayPPO(SelfPlayPPO):

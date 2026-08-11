@@ -1,0 +1,18 @@
+/workspace/utmist-vc2-phase2/.venv/lib/python3.11/site-packages/mujoco_warp/_src/io.py:713: UserWarning: MULTICCD is enabled, but the scene contains CCD pairs without multicontact support: [('CAPSULE', 'CYLINDER')]. At most 1 contact will be generated for these pairs.
+  warnings.warn(
+[PASS] two learners are independent (a step on one leaves the other bit-identical) (3.9s) 33 tensors each, disjoint; 33 of learner 0's tensors moved, 0 of learner 1's (kl +3.7e-01)
+[PASS] per-agent obs/action slicing (fails if the lanes are swapped) (0.5s) 4 ego worlds per learner; obs lane, action lane and recorded action all agree, and the swapped assignment fails all three
+[PASS] the ring samples THEIR distribution at the configured delta (3.7s) delta=0.5 ep100: support [50,99], chi2 44.9/49 dof (crit 98), worst bin 4.4% off uniform, P(current)=0; delta=0 ep100: [1,99] uniform, chi2 107.8/98; start==end -> current: epoch 1 at delta=0.5, every epoch at delta=1; populated ring at epoch 200: mean lag 50.07 (predicted E/4 = 50.0), 0 clamps
+[PASS] a pushed checkpoint round-trips, and does not alias live weights (0.4s) 33 tensors incl. RunningNorm buffers survive push -> 3 Adam steps -> get -> load_state_dict bit-identically; trainer ring keeps epoch 1 and epoch 2 distinct
+[PASS] the ring is bounded: it evicts and its footprint stops growing (0.2s) cap 8: 200 pushes -> 8 held, epochs 193..200, 192 evicted, footprint flat at 1.21 MB (152 kB each); default capacity 512 = 78 MB host at full occupancy, covers their 1000 epochs unclamped
+[PASS] the co-evolution loop closes on CPU (12.2s) 8 worlds, 12 epochs: rings 12/12, opponent epochs [6, 8, 9] / [7, 7, 10] (window 5-10 at the epoch-11 draw), mean lag 3.2, 0 diverged
+Warp 1.16.0 initialized:
+   CUDA Toolkit 12.9, Driver 12.7
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA RTX 4000 Ada Generation" (20 GiB, sm_89, mempool enabled)
+   Kernel cache:
+     /root/.cache/warp/1.16.0
+[PASS] the co-evolution loop closes on the batched GPU env (132.9s) 64 worlds, 12 epochs: rings 12/12, opponent epochs [6, 8, 9] / [7, 7, 10] (window 5-10 at the epoch-11 draw), mean lag 3.2, 0 diverged
+
+7/7 passed

@@ -243,7 +243,12 @@ class RunToGoalEnv:
         Returns (obs, reward[n, A], done[n], info). `done` is their shared done:
         termination OR truncation, identical for both agents.
         """
-        a = actions.reshape(self.n, self.n_agents, self.act_dim).clamp(-1.0, 1.0)
+        # Their `Ant.after_step(action)` charges `.5 * np.square(action).sum()`
+        # on the RAW policy action; MuJoCo clamps `ctrl` to `ctrlrange` inside
+        # the step, so the torque is clipped but the cost is not. Keep the two
+        # separate: `a` drives the actuators, `a_raw` is billed.
+        a_raw = actions.reshape(self.n, self.n_agents, self.act_dim)
+        a = a_raw.clamp(-1.0, 1.0)
         # Their global ctrl layout is agent0's motors then agent1's, in the
         # merged actuator order (scene._MOTOR_JOINTS).
         self.ctrl.copy_(a.reshape(self.n, -1).to(self.ctrl.dtype))
@@ -262,7 +267,7 @@ class RunToGoalEnv:
             self.qvel[bad] = 0.0
             self.backend.forward()
 
-        t = self.terms(a, bad)
+        t = self.terms(a_raw, bad)
         reward, dense, parse = t["reward"], t["dense"], t["parse"]
         forward_r, ctrl_cost = t["forward"], t["ctrl_cost"]
         com_x, fell, winner = t["com_x"], t["fell"], t["winner"]

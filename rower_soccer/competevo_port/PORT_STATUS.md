@@ -171,9 +171,19 @@ out (`custom/learners/learner.py:218-229`), so its advantages come from a frozen
 random critic. We train the critic. Port map risk 8 says do that only if a curve
 refuses to line up.
 
-Throughput on the shared RTX 4000 Ada (four production trainers also resident):
-**~20k world-control-steps/s at 1024 worlds** (= 40k agent-transitions/s; each
-control step is 5 substeps of RK4).
+Throughput on the shared RTX 4000 Ada (four production trainers also resident),
+1024 worlds, each control step = 5 substeps of RK4:
+
+* rollout only, measured in isolation: **~20k world-steps/s** (40k
+  agent-transitions/s), i.e. 3.9 s for a 64-step rollout;
+* end-to-end training, measured over the runs below: **~5k
+  agent-transitions/s**, because the PPO update and GPU contention dominate.
+  Iteration wall time swung between 6 s and 94 s on an otherwise unchanged
+  configuration -- the other trainers, not us.
+
+Solver iterations barely matter (26.0 / 27.8 / 26.5 control-steps/s at 512 worlds
+for `iterations` = 100 / 20 / 10), but the FIRST build at `iterations=100` spends
+~122 s compiling Warp kernels; it is cached after that.
 
 ### Baselines (measured, `--eval-worlds 64`, full episodes)
 
@@ -181,18 +191,24 @@ control step is 5 substeps of RK4).
 |---|---|---|---|
 | uniform-random actions in [-1,1] | -163.6 / -164.5 | 455 | 0.00 / 0.00 |
 | untrained net, stochastic (log_std 0) | ~ -1.02 / step | ~360 | 0.00 |
-| untrained net, MEAN actions (= their eval) | 440.7 / 460.7 | 500 | 0.00 / 0.00 |
+| untrained net, MEAN actions, torch default head init | 440.7 / 460.7 | 500 | 0.00 / 0.00 |
+| **untrained net, MEAN actions, THEIR head init** | **501.9 / 493.9** | **500** | **0.00 / 0.00** |
 | **their measured iter-0 eval** (REPRO_NOTES, `smoke-run-to-goal-ants-v0`) | **498.8 / 488.5** | 500 | **0.00** |
 
-The mean-action baseline is the one to compare: same task, same eval protocol,
-and it lands within ~10% of their measured 498.8 / 488.5 with the same zero win
-rate. The residual gap was diagnosed rather than waved at: their output heads run
-`init_fc_weights` (weights x0.1, bias 0), so an untrained net emits near-zero
-mean actions and the ant simply stands for 500 steps collecting the +1 survive
-bonus, giving ~499. Ours used torch's default init, whose ~0.1 mean actions are
-real torque at gear 150, so the ant drifts and loses forward reward. That init is
-now reproduced in `ppo.ActorCritic` -- **after** the run below, so the run's
-440.7 / 460.7 is the pre-fix number and is reported as measured.
+The mean-action baseline is the one to compare -- same task, same eval protocol
+-- and this is the port map's `iter-0 eval ~= 490-510 per agent, win rate 0.00`
+gate. **PASS: 501.9 / 493.9 at win rate 0.00, against their measured
+498.8 / 488.5.**
+
+Getting there required finding a real difference rather than shrugging at a 10%
+gap. The first attempt read 440.7 / 460.7. Cause: their output heads run
+`init_fc_weights` (weights x0.1, bias 0, `custom/utils/tools.py:19-21`), so an
+untrained net emits near-zero mean actions and the ant stands still for 500 steps
+collecting the +1 survive bonus -- exactly 500 minus a little control cost. Ours
+used torch's default init, whose ~0.1 mean actions are real torque at gear 150,
+so the untrained ant drifted and lost forward reward. Reproducing their init
+closed the gap. Run A below predates the fix and its numbers are the pre-fix
+ones, reported as measured.
 
 Note also the two random baselines are not the same thing: uniform noise costs
 0.5*E[a^2]*8 = 1.33/step in control cost, a unit-variance Gaussian clipped to

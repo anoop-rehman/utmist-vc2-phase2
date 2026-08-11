@@ -488,3 +488,112 @@ Health through epoch 42: **0 diverged worlds, 0 ring clamps, 0 NaNs**, ring
 predicts (10.5 at epoch 42), KL ~2e-3 per iteration, mean total mass 1.824 and
 `design_std` 0.292 (the design head is moving and has committed to nothing --
 unchanged from stages 2-3, and expected at `termination_epoch: 1000`).
+
+## 9. Result: 107 epochs, finished
+
+The run completed its budget: **107 epochs (0-106) in 257.3 min, 144 s/epoch,
+693 ego-transitions/s**, 0 diverged worlds, 0 NaNs, 0 ring clamps, ring 107/107
+on both sides, `opp_lag` 29.1 against the 26.5 their delta=0.5 rule predicts at
+epoch 106. Their CPU reference reached epoch 198 in the same wall clock window,
+having started 16 h earlier.
+
+### What matches
+
+**1. The training-reward curve, end to end.** Over the 107 epochs both climb
+from about -1100 to just above zero, and they arrive at the same place:
+
+| | epoch 5 | epoch 106 |
+|---|---|---|
+| ours `train_ret` | -1089 | **+27** |
+| theirs `train_R_eps_avg_0` | -1047 | **+38** |
+
+**2. The eval-reward curve, quantitatively.** Over the 54 epochs where both
+sides have an eval, the correlation between their `eval_R_eps_avg_i` and our
+`eval_ret_curriculum_i` is **+0.936 (agent 0) and +0.965 (agent 1)**. Both
+curves execute the same three-phase shape at the same epochs: a flat plateau to
+~epoch 32-40, a collapse to a trough at epochs 50-70, and a recovery from ~75.
+
+| epoch | 0 | 20 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 106 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **ours** eval 0 | 510 | 484 | 219 | 86 | 57 | 73 | 136 | 275 | 365 | 420 |
+| **theirs** eval 0 | 428 | 403 | 378 | -6 | -13 | -8 | 135 | 271 | 263 | 235 |
+
+**3. The eval episode length, which is the behavioural signature under it.**
+Through the trough the two are within a few steps of each other -- ours
+43 / 43 / 48 at epochs 60 / 64 / 70 against theirs 43 / 44 / 46 -- so both
+policies are producing ants that run and fall after the same number of steps.
+
+**4. The asymmetry.** In both runs **agent 0's win rate is 0.00 at every single
+eval** and agent 1 is the only one that ever scores. That was not designed in:
+the task is mirror-symmetric and the two learners are independent.
+
+### What does not match: the win rate is an order of magnitude too low
+
+| | first epoch with a nonzero eval win rate | mean win rate, epochs 78-106 (agent 0 / agent 1) |
+|---|---|---|
+| ours | **46** (1 win in 176 games) | **0.0019 / 0.0143** (6 and 20 wins in 2,017 games) |
+| theirs | **89** | **0.0000 / 0.1667** |
+
+Read carefully, because the two halves of that table say opposite things:
+
+* our win rate **leaves zero earlier than theirs** (epoch 46 vs 89), and is
+  consistently nonzero from epoch 78 on;
+* but it saturates around **1-6%** where theirs reaches **17-60%** -- a **12x**
+  gap on the mean over the comparable window, and the gap is widening at the
+  end (epoch 106: ours 0.058, theirs 0.50).
+
+The early-departure difference is a resolution artifact and should not be
+claimed as an advantage: our eval runs 69-704 games per epoch against their
+estimated 30-60, so we can resolve a 0.6% win rate and they cannot. The
+**magnitude** gap is not an artifact -- 20 wins in 2,017 games against a rate
+that would predict ~300 is far outside sampling noise.
+
+So: **the port reproduces their learning curve and fails to reproduce their
+win rate.** Our agents learn to run at the same rate they do, survive for the
+same number of steps, and recover from the same collapse at the same epoch --
+and then cross the goal line about a twelfth as often.
+
+### Candidates for the win-rate gap, none of them tested here
+
+Listed in the order I would test them, with what each predicts.
+
+1. **The eval-reward level offset, which is the same shape as the gap.** Ours
+   has run ~60-90 points above theirs since epoch 0 with identical episode
+   lengths, i.e. our ants collect more survive-and-forward reward per step and
+   fewer goal crossings, while theirs collect less and score more. Section 5
+   measured the epoch-0 version of this: with both ants standing still for 500
+   steps, theirs slides 1.08 m backwards and ours does not. If the same physics
+   difference makes our ants slower over the ground, they simply reach x = +/-4
+   less often within an episode. **This is my leading candidate and it is
+   testable cheaply**: log mean |COM x| at episode end, or the fraction of
+   episodes ending by goal versus by fall, on both sides.
+2. **`blocks = 4`.** A learner facing only 4 distinct opponents per epoch,
+   where theirs faces dozens, may be learning a narrower, more defensive
+   policy. Stage 3b made raising `blocks` nearly free and nobody has measured
+   what value is enough.
+3. **The two declared optimizer mismatches** (section 3c): our critic's L2 is
+   half theirs and our grad clip covers the value parameters too. Both would
+   act on how fast the critic sharpens, which is what an agent needs to value
+   the +/-1000 goal term at alpha 0.9.
+4. **fp32 + Newton at 100 iterations.** Everything in candidate 1 could equally
+   be solver behaviour rather than a modelling difference.
+
+### What 2e establishes, stated narrowly
+
+* The config mapping is exact where it can be and declared where it cannot
+  (section 1), and one of our iterations is one of their epochs in every unit.
+* The two reward-fidelity bugs found here (sections 3b, 3d) were real and the
+  control-cost one was worth the whole exercise: it moved the sampled reward
+  from -1.10 to -3.00 per step, which is their number, and it is the reason the
+  training curves now agree.
+* The two-learner loop is stable at their hyperparameters and their batch size
+  for 107 epochs: 0 diverged worlds over 10.7M ego transitions, ring exact.
+* At **144 s/epoch against their 6-7.5 min**, the port is **~3x** faster
+  end-to-end than their 24-worker CPU run -- not the ~19x the raw env-step
+  ratio suggests, because this configuration pays their PPO settings. A full
+  1000-epoch run is ~43 h here against ~110 h for them.
+* **The paper-number gate is NOT met.** The curve shape is reproduced (r =
+  0.94-0.97 on eval reward, matching training curve, matching collapse and
+  recovery, matching episode lengths, matching agent asymmetry); the win rate
+  is 12x too low. Nothing here should be read as "the port reproduces their
+  result".

@@ -1,0 +1,21 @@
+=== baselines (before any training) ===
+uniform-random actions : ret=[-172.89999389648438, -164.89999389648438] len=456 win=[0.0, 0.0] games=64
+untrained net, mean act: ret=[501.8999938964844, 493.8999938964844] len=500 win=[0.0, 0.0] games=64   (their iter-0 eval reference: 490-510 per agent, win rate 0.00)
+
+=== training ===
+it    0   0.13M steps 3,120 sps | train_ret [0.0, 0.0] len 0 | EVAL ret [517.4000244140625, 519.7999877929688] win [0.0, 0.0] len 500 | fwd/step -0.012
+it    5   0.79M steps 4,942 sps | train_ret [-98.3, -98.3] len 93 fwd/step +0.045 alpha 0.9606784 kl +3.42e-03
+it   10   1.44M steps 6,195 sps | train_ret [-369.6, -384.3] len 391 | EVAL ret [381.6000061035156, 422.5] win [0.0, 0.014492753623188406] len 388 | fwd/step +0.118
+it   15   2.10M steps 4,563 sps | train_ret [-267.7, -265.9] len 351 fwd/step +0.157 alpha 0.8951424 kl +3.39e-03
+it   20   2.75M steps 4,729 sps | train_ret [-169.1, -180.8] len 277 | EVAL ret [195.5, 164.89999389648438] win [0.0, 0.0] len 189 | fwd/step +0.257
+it   25   3.41M steps 4,028 sps | train_ret [-125.0, -120.2] len 237 fwd/step +0.261 alpha 0.8296064 kl +3.78e-03
+it   28   3.80M steps 4,217 sps | train_ret [-99.7, -116.2] len 220 | EVAL ret [145.6999969482422, 140.1999969482422] win [0.0, 0.0] len 137 | fwd/step +0.278
+time budget reached after 29 iters
+video: /workspace/vc2-competevo-port/runs/competevo_port/smoke/eval.mp4  (1000 frames, 7 episodes)
+   len  99 return [112.7, 72.9] winner None
+   len 171 return [71.8, 228.6] winner None
+   len  98 return [58.6, 79.8] winner None
+   len  87 return [18.0, 108.5] winner None
+   len 296 return [80.1, 368.4] winner None
+   len  92 return [191.6, 168.7] winner None
+   len  84 return [217.3, 78.0] winner None

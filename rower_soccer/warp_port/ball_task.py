@@ -504,8 +504,35 @@ class TimedKickReward(_StrikeReward):
     """
 
     def __init__(self, w_arrive=3.0, reward_coef=0.5, w_upright=1.0,
-                 w_anchor=0.0, anchor_free_radius=1.0, **kw):
+                 w_anchor=0.0, anchor_free_radius=1.0, strike_offset=0.0, **kw):
         super().__init__(**kw)
+        # -- v8: aim the approach at the STRIKE POINT, not at the ball -----
+        # Measured on v7/best.pt over 55,303 ball-moving samples, against a
+        # random baseline of median 90 deg / 16.7% within 30 deg:
+        #
+        #   positioning (ant->ball vs ball->target)  median 103.9 deg, 13.1%
+        #   aim         (ball vel  vs ball->target)  median  93.2 deg, 15.7%
+        #
+        # Both at or slightly WORSE than random: the ant has no positioning
+        # skill, and past 90 deg it tends to stand BETWEEN ball and target, so
+        # contact shoves the ball away (mean gain -0.12 m).
+        #
+        # The cause is this class's own shaping. To send a ball somewhere you
+        # must first get to the far side of it, and the me->ball term pays
+        # w_p2b * (speed TOWARD the ball) on every step -- so the circling
+        # manoeuvre the task requires is penalised the whole way round. The
+        # policy is paid to charge straight at the ball from wherever it
+        # happens to be, which makes the strike direction whatever the approach
+        # direction happened to be, i.e. random.
+        #
+        # strike_offset > 0 moves the approach target to
+        #     ball + strike_offset * unit(ball - target)
+        # i.e. `strike_offset` metres behind the ball on the ball->target line.
+        # Walking to THAT point and then continuing forward IS the kick. Note
+        # this is not another outcome-reward retune (v4->v6->v7 all were, and
+        # all were null); it removes shaping that opposes the required
+        # behaviour.
+        self.strike_offset = strike_offset
         self.w_arrive = w_arrive
         self.reward_coef = reward_coef
         self.w_upright = w_upright
@@ -535,9 +562,14 @@ class TimedKickReward(_StrikeReward):
         self.anchor_free_radius = anchor_free_radius
 
     def _approach_xy(self, env):
-        if not self.w_anchor:
-            return env._ball_xy()
-        return env.ball_spawn_xy
+        base = env.ball_spawn_xy if self.w_anchor else env._ball_xy()
+        if not self.strike_offset:
+            return base
+        # Behind the ball, on the far side from the target. Degenerate only if
+        # the ball is exactly on the target, where any direction is as good.
+        away = base - env.target_xy
+        n = torch.linalg.norm(away, dim=-1, keepdim=True).clamp(min=1e-6)
+        return base + self.strike_offset * (away / n)
 
     def __call__(self, env):
         # env.last_arrival is the deadline snapshot taken before the respawn,

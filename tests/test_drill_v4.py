@@ -264,6 +264,48 @@ def t_anchor_stops_paying_for_the_chase():
     return f"chase paid {paid_unanchored:.3f} -> {paid_anchored:.3f}"
 
 
+def t_strike_offset_puts_the_approach_behind_the_ball():
+    """v8: the approach point must sit on the FAR side of the ball from the
+    target, so that walking to it and continuing forward IS the kick.
+
+    Measured motivation (v7/best.pt, 55,303 strikes): positioning, the angle
+    between ant->ball and ball->target, is median 103.9 deg against a 90 deg
+    random baseline -- no positioning skill, and biased to the WRONG side.
+    """
+    from rower_soccer.warp_port.ball_task import TimedKickReward
+    r = TimedKickReward(w_arrive=3.0, w_strike=0.0, strike_offset=0.5)
+    env = _moving_env((0.0, 0.0), (0.0, 0.0), (2.0, 0.0), (2.0, 0.0))
+    env.target_xy = torch.tensor([[6.0, 0.0]])       # target beyond the ball
+    p = r._approach_xy(env)[0]
+    # ball at x=2, target at x=6 => approach point at x=1.5, i.e. BEHIND the
+    # ball as seen from the target. If the sign were flipped this would be 2.5
+    # and the shaping would drive the creature to the target side, which is the
+    # failure mode being fixed.
+    assert abs(float(p[0]) - 1.5) < 1e-5, float(p[0])
+    assert abs(float(p[1])) < 1e-5, float(p[1])
+
+    # ...and the ordering that matters, stated directly: the approach point is
+    # farther from the target than the ball is.
+    d_ball = float(torch.linalg.norm(torch.tensor([2.0, 0.0]) - env.target_xy[0]))
+    d_pt = float(torch.linalg.norm(p - env.target_xy[0]))
+    assert d_pt > d_ball, (d_pt, d_ball)
+
+    # Off-axis case: still colinear with (target -> ball), extended by exactly
+    # strike_offset.
+    env2 = _moving_env((0.0, 0.0), (0.0, 0.0), (3.0, 4.0), (3.0, 4.0))
+    env2.target_xy = torch.tensor([[0.0, 0.0]])      # ball 5 m from target
+    q = r._approach_xy(env2)[0]
+    assert abs(float(torch.linalg.norm(q)) - 5.5) < 1e-5, float(torch.linalg.norm(q))
+
+    # off by default => every existing arm is untouched
+    off = TimedKickReward(w_arrive=3.0, w_strike=0.0)
+    assert off.strike_offset == 0.0
+    env3 = _moving_env((0.0, 0.0), (0.0, 0.0), (2.0, 0.0), (2.0, 0.0))
+    env3.target_xy = torch.tensor([[6.0, 0.0]])
+    assert abs(float(off._approach_xy(env3)[0][0]) - 2.0) < 1e-6
+    return "approach point 0.5 m behind the ball, on the target line"
+
+
 def t_anchor_penalty_shape():
     """Zero inside the free radius, linear outside, clipped, and NOT a
     function of uprightness or of shaping_scale."""
@@ -563,6 +605,8 @@ def main():
     check("kick: anchor stops paying for the chase (v7)",
           t_anchor_stops_paying_for_the_chase)
     check("kick: anchor penalty shape and channel (v7)", t_anchor_penalty_shape)
+    check("kick: strike offset sits behind the ball (v8)",
+          t_strike_offset_puts_the_approach_behind_the_ball)
     check("kick: anchor is off by default (v7)", t_anchor_is_off_by_default)
     check("kick: anchor magnitude is calibrated (v7)",
           t_anchor_magnitude_is_calibrated)

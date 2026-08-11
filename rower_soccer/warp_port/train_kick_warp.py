@@ -50,6 +50,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
         deadline_range=tuple(args.deadline_range),
         arrival_reward_coef=args.arrival_reward_coef,
         w_anchor=args.w_anchor, anchor_free_radius=args.anchor_free_radius,
+        strike_offset=args.strike_offset,
         time_coef=args.time_coef,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         floor_half=args.floor_half, fixed_start=args.fixed_start,
@@ -225,6 +226,18 @@ def main():
                         "is 50-200 steps, so 0.01 makes a full-segment 2.5 m "
                         "dribble cost ~3, the same order as a perfect pass "
                         "(w_arrive * 1.0 = 3). 0 = off.")
+    p.add_argument("--strike-offset", type=float, default=0.0,
+                   help="--reward-kind timed (v8): aim the me->ball approach "
+                        "shaping at a point this many metres BEHIND the ball "
+                        "on the ball->target line, instead of at the ball. "
+                        "Measured on v7 over 55,303 strikes, positioning "
+                        "(ant->ball vs ball->target) is median 103.9 deg "
+                        "against a 90 deg random baseline -- i.e. no "
+                        "positioning skill, biased to the WRONG side, so "
+                        "contact shoves the ball away. The cause is the "
+                        "approach term itself: it pays for speed TOWARD the "
+                        "ball every step, so circling round to the far side "
+                        "is penalised the whole way. 0 = off (v4/v6/v7).")
     p.add_argument("--anchor-free-radius", type=float, default=1.0,
                    help="metres around the ball's spawn point that cost "
                         "nothing (see --w-anchor). The creature has to stand "

@@ -373,3 +373,62 @@ episodes: `train_R_eps_avg_0` = **-1182.5** at epoch 0, -1046 at 5, -929 at 10,
 agreement anything in this port has produced against their curves**, and it is
 the direct consequence of the section-3d fix -- before it, ours would have
 plateaued near -400.
+
+## 7. Is a ~110-epoch run long enough to test the win-rate criterion? Yes.
+
+The worry is reasonable and the answer is measurable, because their run is the
+same config: **their win rate leaves 0 at epoch 89, where `alpha = 0.911`.**
+
+| their epoch | alpha | win rate 0 / 1 | their eval reward |
+|---|---|---|---|
+| 89 | 0.911 | 0.00 / **0.17** | 126 / 191 |
+| 92 | 0.908 | 0.00 / 0.25 | 199 / 310 |
+| 94 | 0.906 | 0.00 / 0.40 | 195 / 361 |
+| 97 | 0.903 | 0.00 / 0.25 | 222 / 381 |
+
+So in their run the win rate does **not** leave zero because the sparse term
+started to bite -- at alpha 0.91 the +/-1000 goal reward carries 9% weight and
+has carried roughly that much since epoch 50. It leaves zero because the ants
+have learned to run far enough to cross a goal line. A ~110-epoch run reaches
+`alpha = 0.89` and therefore **brackets their transition with ~20 epochs of
+margin**. The criterion is testable in this budget.
+
+Two honest qualifications on how much a null result would prove:
+
+* their win-rate signal there is **noisy and one-sided**: 0.17-0.40 for agent 1
+  and a flat 0.00 for agent 0 all the way to epoch 149, on an eval of roughly
+  4-12 games. It is a real departure from zero, but it is not a clean number.
+* our learning is currently running **slower per epoch than theirs** on the one
+  quantity that is directly comparable, `train_R_eps_avg` (see below), so a
+  0.00 at epoch 110 would be evidence that the port learns more slowly, not
+  proof that it cannot cross.
+
+### The other landmark this budget definitely reaches
+
+Their eval reward does something much less ambiguous than the win rate before
+epoch 89: it **collapses**, 377/446 at epoch 40 to -6/-3 at epoch 50, stays at
+about -10 through epoch 70, and recovers from 75.
+
+| their epoch | 40 | 42 | 44 | 46 | 48 | 50 | 60 | 70 | 75 | 80 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| eval reward, agent 0 | 377.8 | 203.6 | 128.3 | 48.2 | 8.6 | -5.9 | -12.5 | -8.3 | 100.1 | 134.9 |
+
+That is the same dive-then-recover PORT_STATUS records for stage-1 smoke B and
+`dev_smoke_v2` -- a policy that stops standing still, starts running, falls, and
+loses the survive bonus -- and it lands squarely inside a 110-epoch budget. It
+is a sharper shape test than the win rate, because it is a 400-point excursion
+rather than a 0.2 on twelve games.
+
+### Cost, corrected
+
+Measured on this run: **~133-136 s per iteration** (15 iterations in 1,988 s;
+18 in 2,454 s), on a card shared with six drill trainers and a Transform2Act
+run. So
+
+* a full 1000-epoch dev run at this rate is **~37-38 hours**, not 4;
+* but their CPU run of the same config is currently taking **6-7.5 min per
+  epoch**, i.e. ~110 hours for 1000 epochs. The port is **~3x** faster
+  end-to-end here, not the ~19x the raw env-step ratio suggests, because this
+  configuration pays their PPO settings -- 10 optimizer epochs at minibatch
+  2048 is 250 optimizer steps per learner per iteration, 500 in total, against
+  the 16 the stage-3 smokes took -- and because two learners cost ~1.65x one.

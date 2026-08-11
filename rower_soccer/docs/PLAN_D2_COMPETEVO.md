@@ -78,3 +78,37 @@ We're lucky: the repo is given, so M1 is mostly dependency archaeology, and 2c
 - 2v2 quadruples sim cost per match and squares the opponent space — the GPU port
   (M2) is not optional, it is what makes M3/M4 affordable.
 - CPU allocation: ≤30 cores while Direction 1's GPU runs are live.
+
+## Measured 2026-08-11: the GPU port is not yet a speedup
+
+M2's premise is "at GPU speed, paper-scale runs cost hours". Measured against
+the existing dev smoke runs, it does not hold yet:
+
+| | env-steps/s | 1000-epoch config |
+|---|---|---|
+| Their CPU reference (24 workers, REPRO_NOTES.md) | 185 | ~3 days |
+| **Our GPU port** (dev_smoke_v2, median iteration) | **168** | ~3.4 days |
+| Our warp drill stack, same card (dribble_ant_v3) | ~11,100 | — |
+
+The port is currently *slightly slower than the CPU code it replaces*, and ~66x
+slower than our own drill stack on the same GPU.
+
+It is not eval: eval-free iterations still take a median 381 s against 510 s for
+eval-bearing ones, and only 3 of 27 iterations run eval.
+
+**It is not the physics.** `RunToGoalDevEnv.step()` timed in isolation at 1024
+worlds is 95.6 ms/step = 10,713 env-steps/s, in line with the drill stack. A
+64-step rollout is therefore ~6.1 s of env time inside a ~381 s iteration:
+
+> **Physics is 1.6% of the iteration. 98.4% is the learning path.**
+
+So the GPU *physics* port succeeded and the policy/PPO path is the entire
+bottleneck. This reframes M2: the remaining work is not more physics porting, it
+is the sampling forward pass, the PPO update, and any per-step host round-trips.
+The stage-2 design write is known host-bound (208 ms full-batch vs 54 ms step),
+but 208 ms cannot explain 375 s, so something else dominates and must be found
+before 2e (paper-number validation) is meaningful.
+
+Sequencing note: stage 3 adds a SECOND learner to a loop already ~98% dominated
+by the update, so its per-iteration cost must be measured against the 391 s
+one-learner baseline rather than assumed.

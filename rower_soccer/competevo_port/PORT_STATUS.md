@@ -1262,3 +1262,34 @@ Item 3b's prediction is now measured and was wrong about which cost matters.
 7. **2v2 will break the contact bitmask.** `conaffinity=i, contype=1-i` only
    works for exactly two agents; it is live in the dev merger, so this is now a
    real constraint on the port and not just a note about their code.
+
+## Milestone 2e -- paper-number validation (see `M2E_VALIDATION.md`)
+
+The full config mapping, the deviation list and the measured comparison live in
+`M2E_VALIDATION.md`. Two things belong here because they are **corrections to
+what the stages above measured**, not new work:
+
+1. **The control cost was billed on the CLIPPED action, in both envs.** Their
+   `Ant.after_step(action)` / `DevAnt.after_step(action)` charge
+   `.5 * np.square(action).sum()` on the raw policy output
+   (`multi_dev_agent_env.py:311` hands them `actions[i][-8:]` unmodified) and
+   let MuJoCo clamp `ctrl` to `ctrlrange` separately -- so the torque is
+   clipped and the cost is not. `step()` clamped first and billed the clamp.
+   At `log_std = 0` on 8 dims that is `0.5 * 8 * 1 = 4.0` per step against
+   `~2.1`, and with `alpha = 1` the control cost IS the reward: **measured, our
+   sampled rollouts ran at -1.10 reward per agent-step where their logged
+   `train_R_eps_avg` implies -3.0; after the fix, -3.00.** Every learning claim
+   in stages 1-3 was therefore made against a reward whose dominant term was
+   half theirs. Nothing about the parity gates is affected -- they drive
+   `terms()`, which was always faithful, and never go through `step()`'s clamp,
+   which is exactly why 15/15 could pass with this live.
+2. **The design step leaked `dense`/`parse` into the info dict.** `reward` was
+   zeroed for design-stage worlds but the info the curriculum trainer reads was
+   not, so every episode collected one spurious ~+1. Theirs returns
+   `reward_parse: 0, reward_dense: 0` for `attribute_transform`
+   (`multi_dev_agent_env.py:286-289`). Fixed.
+
+And one correction to the reference numbers this file quotes: **their eval
+reward is the CURRICULUM reward**, not the env reward -- their eval sampler goes
+through `custom_reward` exactly as training does. `evaluate_pair` now computes
+both; `eval_ret_curriculum` is the comparable column.

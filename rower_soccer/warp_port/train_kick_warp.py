@@ -75,7 +75,11 @@ def make_eval(args):
     env = make_env(args, num_worlds=1, seed=7, use_graph=True)
     # Render the arena the physics actually runs in, not the default pitch.
     return env, WarpRenderer(args.creature_xml, has_ball=True,
-                             base_xml=env._base_xml(), distance=8.0,
+                             # 12 m, not 8: at 8 the TARGET (3-6 m out, and up
+                             # to 6 m the other side of the ball) sits off-frame
+                             # for much of a segment, so a human cannot see
+                             # where the ball was actually meant to go.
+                             base_xml=env._base_xml(), distance=12.0,
                              ball=env._ball_spec())
 
 

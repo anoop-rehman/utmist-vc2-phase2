@@ -33,11 +33,28 @@ from rower_soccer.warp_port.scene import BallSpec
 
 
 def make_eval(args):
-    """One-world Warp env + renderer, built once and reused. Warp is ground truth."""
+    """One-world Warp env + renderer, built once and reused. Warp is ground truth.
+
+    use_graph=True. This was False, and it was quietly costing most of the run.
+    Measured on this env, one control step of the ONE-world eval env:
+
+        graph=False   1462.1 ms/step        graph=True   92.4 ms/step
+
+    A 15 s eval episode is 600 steps, so that is 877 s versus 55 s per video --
+    and --video-secs defaults to 300. The trainer was therefore spending FAR
+    more wall clock rendering than training: dribble_ant_v3 sat at ~1.3k fps
+    while the four kick/shoot trainers, whose eval envs already capture a
+    graph, ran at ~8.5-9k on the same GPU. 136 videos had been rendered against
+    kick v7's 7.
+
+    The cost is invisible in every metric that matters -- fitness, ep_rew and
+    the videos themselves are all correct, the run is just 5.5x slower than it
+    looks like it should be -- which is why it survived this long.
+    """
     from rower_soccer.warp_port.dribble_env import WarpDribbleEnv
     from rower_soccer.warp_port.render import WarpRenderer
     env = WarpDribbleEnv(
-        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml,
+        num_worlds=1, use_graph=True, seed=7, creature_xml=args.creature_xml,
         ball=BallSpec(radius=args.ball_radius, mass=args.ball_mass), arena=args.arena, pitch_scale=args.pitch_scale,
         target_speed_range=tuple(args.target_speed),
         ball_spawn_range=tuple(args.ball_spawn),

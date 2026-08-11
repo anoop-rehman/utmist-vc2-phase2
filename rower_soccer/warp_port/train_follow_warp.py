@@ -21,6 +21,35 @@ import numpy as np
 import torch
 
 from rower_soccer.warp_port import curriculum
+from rower_soccer.warp_port import score
+
+
+def make_eval_env(args, num_worlds, seed):
+    """The env the trainer EVALUATES in: same task, same knobs, N worlds.
+
+    Factored out of make_eval so the one-world render env and the N-world
+    scoring env are built from one list of kwargs. They must agree exactly -- if
+    they drift, the number that selects best.pt and the video meant to show it
+    stop describing the same task, and nothing would say so. (Note that this
+    list already differs from the TRAINING env's, which passes no arena /
+    pitch_scale; that is pre-existing and left alone here.)
+    """
+    from rower_soccer.warp_port.follow_env import WarpFollowEnv
+    return WarpFollowEnv(
+        # use_graph=True: capturing a CUDA graph for the eval env is
+        # ~16x faster per step (measured on the dribble env, the same scene
+        # plus a ball: 1462.1 -> 92.4 ms/step, i.e. 877 -> 55 s per 600-step
+        # video at the default --video-secs 300). Warp is still ground truth
+        # either way; the graph changes only how the same kernels are launched.
+        num_worlds=num_worlds, use_graph=True, seed=seed,
+        creature_xml=args.creature_xml, arena=args.arena,
+        pitch_scale=args.pitch_scale,
+        target_speed_range=tuple(args.target_speed),
+        spawn_dist_range=tuple(args.spawn_dist),
+        bounds=args.bounds, reward_coef=args.reward_coef,
+        w_vel_shaping=args.vel_shaping, reward_mode=args.reward_mode,
+        progress_scale=args.progress_scale, episode_seconds=args.episode_secs,
+        energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
 
 
 def make_eval(args, has_ball=False):
@@ -29,21 +58,23 @@ def make_eval(args, has_ball=False):
     Warp is ground truth: the eval runs in the SAME simulator the policy trains in,
     and the video is drawn from that simulator's state. The dm_control CPU drill is
     no longer in the loop -- see warp_port/render.py for why.
+
+    One world because the RENDERER can only draw one. That constraint belongs to
+    the video and to nothing else, which is why scoring no longer runs here --
+    see make_score_env and docs/DRILL_V4_NOTES.md section 10.
     """
-    from rower_soccer.warp_port.follow_env import WarpFollowEnv
     from rower_soccer.warp_port.render import WarpRenderer
-    from rower_soccer.warp_port.worm_env_base import _arena_xml
-    env = WarpFollowEnv(
-        num_worlds=1, use_graph=False, seed=7, creature_xml=args.creature_xml, arena=args.arena, pitch_scale=args.pitch_scale,
-        target_speed_range=tuple(args.target_speed),
-        spawn_dist_range=tuple(args.spawn_dist),
-        bounds=args.bounds, reward_coef=args.reward_coef,
-        w_vel_shaping=args.vel_shaping, reward_mode=args.reward_mode,
-        progress_scale=args.progress_scale, episode_seconds=args.episode_secs,
-        energy_coef=args.energy_coef, smooth_coef=args.smooth_coef)
+    env = make_eval_env(args, num_worlds=1, seed=7)
     # Render the arena (the physics scene), not the default pitch background.
     return env, WarpRenderer(args.creature_xml, has_ball=False,
                              base_xml=env._base_xml())
+
+
+def make_score_env(args):
+    """The N-world scoring env that selects best.pt. No renderer: the score
+    never needed one, and the one-world env was only ever the render env."""
+    return make_eval_env(args, num_worlds=args.score_worlds,
+                         seed=args.score_seed)
 
 
 _STYLE_REF_DEFAULT = os.path.join(
@@ -172,6 +203,7 @@ def main():
     # bad reward, creature glitching) is visible in minutes instead of after the
     # first full --video-secs interval. Subsequent videos keep the normal cadence.
     p.add_argument("--first-video-secs", type=float, default=60.0)
+    score.add_args(p)
     p.add_argument("--ckpt-secs", type=float, default=1800.0,
                    help="wallclock seconds between full checkpoints (overwrite)")
     p.add_argument("--mid-ckpt-frac", type=float, default=0.5,
@@ -378,9 +410,24 @@ def main():
     print(f"[setup] worlds={env.n} obs={env.obs_dim} act={env.act_dim} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
     eval_env, eval_ren = make_eval(args)
+    # The BATCHED scoring env: N worlds, no renderer, built ONCE (a Warp env
+    # costs a scene compile plus a graph capture) and reused every evaluation.
+    # best.pt is selected on this, not on the one-world render eval -- a running
+    # max over single-episode draws selects the luckiest draw rather than the
+    # best policy, measured across all four drills in
+    # docs/DRILL_V4_NOTES.md section 10.
+    score_env = make_score_env(args) if args.score_worlds > 0 else None
+    if score_env is not None:
+        print(f"[setup] scoring env: {args.score_worlds} worlds, seed "
+              f"{args.score_seed} re-applied every rollout (paired draws)",
+              flush=True)
     t0 = time.perf_counter()
     # Back-date the video timer so the first one lands at --first-video-secs.
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
+    # Default (--score-secs 0) puts scoring on the video cadence, so the two
+    # numbers in the log describe the SAME weights and can be compared directly.
+    score_cadence = args.score_secs if args.score_secs > 0 else args.video_secs
+    last_score = last_video
     last_ckpt = t0
     speed_curr = curriculum.from_args(args)
     it = 0
@@ -396,6 +443,12 @@ def main():
             line = speed_curr.update(env, eval_env)
             if line:
                 print(line, flush=True)
+            # The scoring env has to track the curriculum too, or best.pt is
+            # selected at a difficulty the run left behind long ago. Synced
+            # here rather than threaded through SpeedCurriculum.update, which
+            # takes a single eval env.
+            if score_env is not None:
+                score_env.speed_range = env.speed_range
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
@@ -408,7 +461,10 @@ def main():
                            "train/ep_rew": stats["ep_rew_env_mean"],
                            "train/entropy": stats["ent"], "train/std": stats["std"],
                            "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"]})
-        if args.video_secs > 0 and now - last_video >= args.video_secs:
+        do_video = args.video_secs > 0 and now - last_video >= args.video_secs
+        do_score = (score_env is not None and score_cadence > 0
+                    and now - last_score >= score_cadence)
+        if do_video:
             last_video = now
             vpath = os.path.join(run_dir, "videos",
                                  f"eval_step_{trainer.total_steps:010d}.mp4")
@@ -430,27 +486,12 @@ def main():
                      f" [amp {st['amp']:.2f} freq {st['freq']:.2f}"
                      f" shape {st['shape']:.2f}]" if st else "")
                   + ")", flush=True)
-            # Keep the BEST policy, not just the latest.
-            #
-            # follow_v5_velshape's transfer eval went 262 -> 351 -> 465 -> 476.5 and
-            # then COLLAPSED to 166.6 in its final stretch (log_std pinned at the
-            # entropy ceiling). final.pt and latest.pt both hold the collapsed 166
-            # policy. The 476 weights -- comfortably in C's 445-495 band -- existed,
-            # were never saved, and are gone.
-            #
-            # Late collapse is not exotic in long PPO runs, and 48-hour runs give it
-            # far more room. Scored on the DETERMINISTIC dm_control transfer eval,
-            # which is the number we actually care about.
-            if ep_rew > best_score:
-                best_score = ep_rew
-                export_sb3_compatible(ac, best_path)
-                print(f"[monitor] new BEST transfer eval {best_score:.1f} "
-                      f"-> {best_path}", flush=True)
-                if args.gcs_bucket:
-                    from rower_soccer.warp_port.gcs import sync_async
-                    sync_async(best_path, args.gcs_bucket, args.run_name)
             if use_wandb:
                 import wandb
+                # eval/ep_rew_warp and eval/fitness_warp keep their names and
+                # their meaning: the OLD one-world single-episode numbers,
+                # retained so they can be compared against the batched pair.
+                # They no longer select anything.
                 logs = {"env_step": trainer.total_steps,
                         "eval/video": wandb.Video(vpath, format="mp4"),
                         "eval/ep_rew_warp": ep_rew, "eval/fitness_warp": fit}
@@ -458,6 +499,52 @@ def main():
                     logs.update({f"eval/style_{k}" if k != "style" else "eval/style": v
                                  for k, v in st.items()})
                 wandb.log(logs)
+        sel = None
+        if do_score:
+            last_score = now
+            sc = score.score_policy(score_env, ac, seed=args.score_seed)
+            print(f"[monitor] score: ep_rew_batched={sc.ep_rew:.1f} "
+                  f"fitness_batched={sc.fitness:.3f} +/-{sc.fitness_sem:.3f} "
+                  f"(sem over {sc.worlds} worlds, world spread "
+                  f"{sc.fitness_std:.3f})", flush=True)
+            if use_wandb:
+                import wandb
+                wandb.log({"env_step": trainer.total_steps,
+                           "eval/ep_rew_batched": sc.ep_rew,
+                           "eval/fitness_batched": sc.fitness,
+                           "eval/fitness_batched_sem": sc.fitness_sem,
+                           "eval/fitness_batched_std": sc.fitness_std})
+            # follow selects on ep_rew, not fitness -- unlike the three ball
+            # drills. Left as it is: follow's fitness is exp(-c*dist) read at
+            # the final step only, so it grades where the creature happened to
+            # be standing when the clock ran out, while ep_rew integrates the
+            # whole episode. Changing WHICH statistic selects is a separate
+            # decision from fixing how noisily it is measured.
+            sel = sc.ep_rew
+        elif do_video and score_env is None:
+            # --score-worlds 0: explicit opt-out, back to the old behaviour.
+            sel = ep_rew
+        # Keep the BEST policy, not just the latest.
+        #
+        # follow_v5_velshape's transfer eval went 262 -> 351 -> 465 -> 476.5 and
+        # then COLLAPSED to 166.6 in its final stretch (log_std pinned at the
+        # entropy ceiling). final.pt and latest.pt both hold the collapsed 166
+        # policy. The 476 weights -- comfortably in C's 445-495 band -- existed,
+        # were never saved, and are gone.
+        #
+        # Late collapse is not exotic in long PPO runs, and 48-hour runs give it
+        # far more room. Scored on the DETERMINISTIC eval -- and, since
+        # 2026-08-11, on the BATCHED one: a running max over a ONE-episode
+        # estimator selects the luckiest draw, not the best policy
+        # (docs/DRILL_V4_NOTES.md 10).
+        if sel is not None and sel > best_score:
+            best_score = sel
+            export_sb3_compatible(ac, best_path)
+            print(f"[monitor] new BEST transfer eval {best_score:.1f} "
+                  f"-> {best_path}", flush=True)
+            if args.gcs_bucket:
+                from rower_soccer.warp_port.gcs import sync_async
+                sync_async(best_path, args.gcs_bucket, args.run_name)
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now
             save_checkpoint(trainer, ckpt_path)

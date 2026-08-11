@@ -1,0 +1,13 @@
+[PASS] proprio is BYTE-IDENTICAL to the drill's (contact-free) (0.5s) 65-wide proprio + 6-wide ball_ego identical in all 4 slots (max |diff| exactly 0)
+[PASS] proprio matches the drill's in contact (MEASURED bound) (0.0s) max |diff| 0.00e+00 (proprio), 0.00e+00 (ball_ego); bitwise=True
+[PASS] obs lanes are per-creature (a slot swap is detectable) (0.2s) body_height and ball_ego are per-slot in 2 worlds x 4 slots; every pairwise swap is detectable
+[PASS] action lanes are per-creature (a torque moves only its own body) (0.2s) driven slot moves >= 8.65e+00 rad/s, the other three move <= 4.50e-19
+[PASS] team mirroring: mirrored state -> mirrored obs (0.2s) max |diff| 0.00e+00 over 4 slots x 99 dims (without the slot swap: 5.61e+00)
+[PASS] team mirroring: mirrored state + mirrored action -> mirrored step (0.3s) after one 10-substep control step: dqpos 0.00e+00, dqvel 0.00e+00
+[PASS] goal / off-court boxes agree with dm_control's own detector (0.1s) goal box and field box equal dm_control's to 1e-6; 13 constructed positions agree (4 goals, 10 out of play)
+[PASS] goals count on a rising edge and pay dm_soccer's +1/-1 (0.3s) rising edge counts once, +1/-1 by team, ball re-spotted after a goal
+[PASS] out of play -> dm_soccer throw-in (0.0s) shrink (0.752, 0.886), ball velocity zeroed, players untouched
+[PASS] the match ends at the time limit, and only there (1.5s) done exactly once, at step 40 = 1.0s / 0.025s
+[PASS] the env steps N worlds for M steps, finite, 0 diverged (cpu) (2.0s) 2 worlds x 40 steps on cpu: 0 diverged, obs (8, 99) finite, 47 env-steps/s, throw-ins/world 0.0, upright 0.83
+[PASS] the env steps N worlds for M steps, finite, 0 diverged (warp) (29.2s) 32 worlds x 200 steps on cuda: 0 diverged, obs (128, 99) finite, 340 env-steps/s, throw-ins/world 0.0, upright 0.53
+12/12 passed

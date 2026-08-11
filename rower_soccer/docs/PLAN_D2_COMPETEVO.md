@@ -78,3 +78,55 @@ We're lucky: the repo is given, so M1 is mostly dependency archaeology, and 2c
 - 2v2 quadruples sim cost per match and squares the opponent space — the GPU port
   (M2) is not optional, it is what makes M3/M4 affordable.
 - CPU allocation: ≤30 cores while Direction 1's GPU runs are live.
+
+## Measured 2026-08-11: the GPU port IS a ~19x speedup
+
+*This section previously claimed the opposite. That claim was wrong; the
+retraction and its cause are kept below because the mistake is instructive.*
+
+| | env-steps/s | 1000-epoch config |
+|---|---|---|
+| Their CPU reference (24 workers, REPRO_NOTES.md) | 185 | ~3 days |
+| **Our GPU port** (dev_smoke_v2, median iteration 18.7 s) | **3,505** | **~4 hours** |
+| Bare `RunToGoalDevEnv.step()`, 1024 worlds, isolated | ~10,200 | — |
+
+M2's premise -- "at GPU speed, paper-scale runs cost hours" -- **holds**: 5e7
+steps at 3,505 env-steps/s is about four hours against their three days.
+
+Where the remaining ~3x sits, measured by the stage-3 agent with interleaved
+medians of 7 at 1024 worlds:
+
+| | one learner | two learners |
+|---|---|---|
+| total iteration | 17.20 s | 28.40 s |
+| `env.step` (64 calls) | 10.07 s (**59%**) | 10.50 s (**37%**) |
+| `policy.act` | 1.19 s (64 calls) | **11.02 s** (640 calls) |
+| `policy.value` | 0.71 s | 2.25 s |
+| update + host work | 5.23 s | 4.63 s |
+| `DesignWriter.write` | 0.42 s (~2%) | 0.43 s (~2%) |
+
+So physics DOMINATES a one-learner iteration, and the tractable target is
+`policy.act`'s call count under self-play (640 vs 64: `blocks=4` means 2 ego +
+8 opponent forwards per step, ~17 ms each for a 38k-parameter MLP -- pure
+launch overhead, fixable by stacking slot params into one `bmm` or lowering
+`blocks`).
+
+### The retraction, and why it matters
+
+The earlier claim was "168 env-steps/s, slower than their CPU, physics only
+1.6% of the iteration". It came from reading `log.json`'s `sec` field as
+per-iteration when it is CUMULATIVE elapsed seconds. The median of a
+monotonically increasing cumulative series is about half its total, so a 758 s
+run over 27 iterations yielded a "median iteration" of 391 s -- which is
+758/2, not a duration. Everything downstream inherited the 20x error.
+
+Two lessons worth keeping:
+
+- **The isolated measurement was right and the ratio was wrong.** The bare-env
+  timing (95.6 ms/step) matched the agent's independent 100.0 ms. The error was
+  entirely in the denominator, which is exactly where a plausible-looking
+  derived number hides.
+- **A sanity check was available and skipped.** 27 iterations x 391 s is 2.9
+  hours; the run demonstrably took 12.6 minutes. Any wall-clock cross-check
+  would have caught it immediately.
+

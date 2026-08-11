@@ -523,3 +523,53 @@ to ~0.097, the strike offset has fixed an angle that does not matter and the
 frozen-decoder hypothesis (section 8) becomes the live one.
 
 Both arms run on. v8 needs ~80M more steps, a few hours at ~7k fps.
+
+## 13. v8 is declining too, faster than its control -- v9 tests the decoder
+
+*Measured 2026-08-11 at v8 = 27.5M steps.*
+
+Section 12 predicted v8 would stay flat or rise while v6 fell. By 10M-step
+block, at matched steps:
+
+| block | v8 (strike point) | v6 (control) |
+|---|---|---|
+| 0-10M | 0.1263 | 0.1287 |
+| 10-20M | 0.1194 | 0.1290 |
+| 20-30M | **0.1100** | 0.1222 |
+
+v8 is declining FASTER than v6 (-0.0163 over 30M against -0.0065), not slower.
+The prediction stays formally open until ~98M, where it was set -- but the
+interim data runs against it and saying so now is the point of having written
+it down.
+
+So: the strike point fixed POSITIONING (123.9 -> 84.0 deg, the only arm ever
+better than random) and that did not stop the decline. Positioning was a real
+deficit and correcting it was not sufficient, which is a genuine result about
+the drill even though it is not the one hoped for.
+
+That leaves the hypothesis from section 8 as the live one:
+
+> **the frozen decoder cannot express a directed strike.**
+
+It was trained by `follow` to track a target VELOCITY, so its action repertoire
+is "walk in direction X at speed Y", and 154,632 parameters are held fixed. If
+aiming a ball lies outside that span, then no shaping over the expert's z can
+recover it -- which is precisely the pattern four arms (v4, v6, v7, v8) have now
+shown: contact solved, direction random, outcome decaying.
+
+`kick_ant_v9_unfrozen` launched to test it: identical to v8 except
+`--freeze-decoder` is dropped. The three live kick arms now form a clean design:
+
+| arm | shaping | decoder |
+|---|---|---|
+| v6 | old | frozen |
+| v8 | strike point | frozen |
+| v9 | strike point | UNFROZEN |
+
+v8 vs v6 isolates the shaping; v9 vs v8 isolates the decoder.
+
+v9 deliberately breaks the NPMP arrangement (one gait shared by all four
+drills), which is what makes it a clean test and also why it is an EXPERIMENT,
+not a candidate checkpoint. If it works, the finding is about the decoder, and
+adapting the shared-decoder setup -- e.g. including a striking task when the
+decoder is trained -- is a separate design question.

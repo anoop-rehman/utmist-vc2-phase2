@@ -381,9 +381,20 @@ comparison -- at MATCHED STEPS, per section 7's lesson.
 
 *Measured 2026-08-11 across all four live drills.*
 
+> **Correction (see section 14).** The `typical` column below is the TRAINING
+> monitor's fitness -- stochastic actions, sampled mid-episode, averaged over
+> 2048 worlds -- while `best.pt fitness` is the DETERMINISTIC end-of-episode
+> eval. They are different quantities and the ratios are therefore inflated.
+> Re-scoring `dribble_ant_v3/best.pt` on the correct comparison gives a
+> deterministic single-episode mean of **0.895**, not 0.60, against the pinned
+> 0.980. The conclusion is unchanged and in fact sharper: ten fresh
+> single-episode draws of that exact checkpoint peaked at 0.973, so the pin
+> really is the top of its own draw distribution -- but the effect is ~1.1x on
+> the right scale, not the 1.6x claimed here.
+
 The saved `best.pt` fitness sits far above each run's typical fitness:
 
-| run | best.pt fitness | typical | ratio |
+| run | best.pt fitness | typical (training monitor -- see correction) | ratio |
 |---|---|---|---|
 | dribble_ant_v3 | 0.980 | ~0.60 | 1.6x |
 | kick_ant_v4_timed | 0.312 | ~0.12 | 2.6x |
@@ -574,7 +585,7 @@ not a candidate checkpoint. If it works, the finding is about the decoder, and
 adapting the shared-decoder setup -- e.g. including a striking task when the
 decoder is trained -- is a separate design question.
 
-## 12. `best.pt` is now selected on a BATCHED deterministic score
+## 14. `best.pt` is now selected on a BATCHED deterministic score
 
 *Measured 2026-08-11. Code: `warp_port/score.py`, wired into all four drill
 trainers. Tests: `tests/test_batched_score.py` (9 checks, all passing).*

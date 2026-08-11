@@ -123,6 +123,11 @@ class SegmentedBallTask:
         self.cmd_dir = torch.zeros(n, 2, device=dev)
         self.cmd_dir[:, 0] = 1.0
         self.target_xy = torch.zeros(n, 2, device=dev)
+        # Where the ball was placed at the start of the current segment. The
+        # ball itself moves the instant it is struck; this does not, which is
+        # what makes it usable as "the spot to kick from" (see
+        # TimedKickReward's w_anchor). Every spawn path must write it.
+        self.ball_spawn_xy = torch.zeros(n, 2, device=dev)
         self.seg_t, self.seg_best, self.credit = z(), z(), z()
         self.touched, self.banked, self.seg_reset = b(), b(), b()
         # Worlds the divergence sanitizer teleported. _sanitize runs BEFORE
@@ -225,6 +230,23 @@ class SegmentedBallTask:
         self.qpos[idx, self.bq + 5] = 0.0
         self.qpos[idx, self.bq + 6] = 0.0
         self.qvel[idx.unsqueeze(-1), self._ball_vcols] = 0.0
+        # Every ball placement is a segment spawn, so this is the one place the
+        # anchor can be recorded without a future spawn path being able to skip
+        # it.
+        self.ball_spawn_xy[idx] = ball_xy
+
+    def anchor_excess(self, free_radius=1.0, cap=5.0):
+        """How far past `free_radius` the creature has strayed from the spot the
+        ball was spawned on, in metres, clipped to `cap`.
+
+        Zero inside the radius: the creature has to be able to stand beside the
+        ball and swing at it, and paying it to stand on the exact spawn point
+        would fight the strike. Clipped above so a world that has wandered off
+        (or one segment's leftover geometry) cannot dominate the return.
+        """
+        pos, _ = self._root_frames()
+        d = torch.linalg.norm(pos[:, :2] - self.ball_spawn_xy, dim=-1)
+        return (d - free_radius).clamp(min=0.0, max=cap)
 
     def _write_root(self, idx, xy, yaw):
         qr = self.meta.qpos_root
@@ -296,13 +318,23 @@ class _StrikeReward(RewardStrategy):
 
     def reset(self, env):
         pos, _ = env._root_frames()
-        self.prev_pb = torch.linalg.norm(env._ball_xy() - pos[:, :2], dim=-1)
+        self.prev_pb = torch.linalg.norm(self._approach_xy(env) - pos[:, :2],
+                                         dim=-1)
+
+    def _approach_xy(self, env):
+        """The point the me->ball approach shaping pulls the creature toward.
+
+        The live ball by default. Subclasses override to anchor it (see
+        TimedKickReward's w_anchor): once the ball is rolling, "move toward the
+        ball" and "chase the ball" are the same instruction.
+        """
+        return env._ball_xy()
 
     def _shaping(self, env):
         pos, _ = env._root_frames()
         root_xy, root_vel = pos[:, :2], env._root_vel_xy()
-        ball_xy, ball_vel = env._ball_xy(), env._ball_vel_xy()
-        d_pb = ball_xy - root_xy
+        ball_vel = env._ball_vel_xy()
+        d_pb = self._approach_xy(env) - root_xy
         dist_pb = torch.linalg.norm(d_pb, dim=-1)
         v_b2c = (ball_vel * env.cmd_dir).sum(-1).clamp(min=0.0)
         if self.mode == "progress":
@@ -471,19 +503,54 @@ class TimedKickReward(_StrikeReward):
     undefined until the deadline.
     """
 
-    def __init__(self, w_arrive=3.0, reward_coef=0.5, w_upright=1.0, **kw):
+    def __init__(self, w_arrive=3.0, reward_coef=0.5, w_upright=1.0,
+                 w_anchor=0.0, anchor_free_radius=1.0, **kw):
         super().__init__(**kw)
         self.w_arrive = w_arrive
         self.reward_coef = reward_coef
         self.w_upright = w_upright
         self.w_b2c = 0.0   # see docstring: fights pace modulation
+        # -- v7: the SPAWN ANCHOR ----------------------------------------
+        # Strike the ball from where it lies; do not travel with it. Two parts,
+        # deliberately in different channels:
+        #
+        #   1. the me->ball approach shaping is re-aimed at the ball's SPAWN
+        #      point instead of the live ball (_approach_xy below). Before
+        #      contact the two are identical, so approach is learned exactly as
+        #      before. After contact they diverge, and the old term was paying
+        #      w_p2b * (speed toward the rolling ball) -- i.e. paying for the
+        #      dribble this drill exists to rule out. Anchoring deletes that
+        #      payment rather than adding a second term to cancel it.
+        #   2. a penalty on how far past `anchor_free_radius` the creature has
+        #      strayed from that spawn point, OUTSIDE shaping_scale so
+        #      --shaping-anneal-steps cannot quietly switch it off. It is part
+        #      of the objective ("kick from there"), not a training aid.
+        #
+        # w_anchor is per step. A segment is T/CONTROL_DT = 50-200 steps, so a
+        # creature walking the ball 2-3 m downfield for a whole segment pays
+        # roughly w_anchor * 2.5 * 125 ~ 3 at w_anchor=0.01 -- the same order as
+        # w_arrive * 1.0 = 3, a perfect pass. Approaching the ball REDUCES this
+        # term (the anchor is where the ball was), so it never opposes reaching.
+        self.w_anchor = w_anchor
+        self.anchor_free_radius = anchor_free_radius
+
+    def _approach_xy(self, env):
+        if not self.w_anchor:
+            return env._ball_xy()
+        return env.ball_spawn_xy
 
     def __call__(self, env):
         # env.last_arrival is the deadline snapshot taken before the respawn,
         # zero on every other step -- see kick_env._update_task.
         r = (self.w_arrive * env.last_arrival + self.w_strike * env.credit
              + env.shaping_scale * self._shaping(env))
-        return r * upright(env) ** self.w_upright
+        r = r * upright(env) ** self.w_upright
+        if self.w_anchor:
+            # Not multiplied by upright: a penalty scaled by uprightness is
+            # cheaper to incur while tipped over, which is a discount on
+            # falling and has nothing to do with what this term measures.
+            r = r - self.w_anchor * env.anchor_excess(self.anchor_free_radius)
+        return r
 
     def fitness(self, env):
         cur = env.target_fit_sum / env.n_segments.clamp(min=1.0)

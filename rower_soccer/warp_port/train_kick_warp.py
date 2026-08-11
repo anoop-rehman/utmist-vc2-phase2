@@ -49,6 +49,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
         pace_range=tuple(args.pace_range),
         deadline_range=tuple(args.deadline_range),
         arrival_reward_coef=args.arrival_reward_coef,
+        w_anchor=args.w_anchor, anchor_free_radius=args.anchor_free_radius,
         time_coef=args.time_coef,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         floor_half=args.floor_half, fixed_start=args.fixed_start,
@@ -211,6 +212,24 @@ def main():
                         "exp(-0.5*d) is numerically flat out there (d=10 -> "
                         "0.007), so nothing gradients it toward striking "
                         "softer. At 0.2, d=10 -> 0.135.")
+    p.add_argument("--w-anchor", type=float, default=0.0,
+                   help="--reward-kind timed (v7): weight on the SPAWN ANCHOR, "
+                        "per step. Two effects, both aimed at 'walk to the "
+                        "ball and strike it FROM THERE' rather than 'shove it "
+                        "downfield': the me->ball approach shaping is re-aimed "
+                        "at the ball's spawn point (before contact that is the "
+                        "ball, so approach is unchanged; after contact the old "
+                        "term was literally paying for the chase), and the "
+                        "creature pays w_anchor per step per metre it strays "
+                        "past --anchor-free-radius from that point. A segment "
+                        "is 50-200 steps, so 0.01 makes a full-segment 2.5 m "
+                        "dribble cost ~3, the same order as a perfect pass "
+                        "(w_arrive * 1.0 = 3). 0 = off.")
+    p.add_argument("--anchor-free-radius", type=float, default=1.0,
+                   help="metres around the ball's spawn point that cost "
+                        "nothing (see --w-anchor). The creature has to stand "
+                        "beside the ball to swing at it, so this must exceed "
+                        "its standing reach or the anchor fights the strike.")
     p.add_argument("--pace-range", type=float, nargs=2, default=[1.5, 3.0],
                    help="--reward-kind timed: band the pass pace v_pace is "
                         "drawn from (m/s), where the deadline is "
@@ -424,6 +443,14 @@ def run(args, task, make_env_fn, make_eval_fn):
             extra = ""
             if hasattr(env, "goals"):
                 extra = f" goals/ep={float(env.goals.mean()):.2f}"
+            # v7: the whole point of the anchor is visible here. A creature
+            # that strikes and stays sits near 0; one that walks the ball
+            # downfield climbs. Instantaneous, not an episode mean, so it is a
+            # snapshot of where the batch happens to be standing.
+            anchor = None
+            if getattr(args, "w_anchor", 0.0) > 0:
+                anchor = float(env.anchor_excess(args.anchor_free_radius).mean())
+                extra += f" anchor={anchor:.2f}m"
             # diverged: world-steps whose physics went non-finite (ppo.collect).
             # Expected 0 or a trickle; if it climbs the contact model is wrong.
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
@@ -444,6 +471,8 @@ def run(args, task, make_env_fn, make_eval_fn):
                        "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"]}
                 if hasattr(env, "goals"):
                     log["train/goals_per_ep"] = float(env.goals.mean())
+                if anchor is not None:
+                    log["train/anchor_excess_m"] = anchor
                 if getattr(args, "cone_anneal_steps", 0) > 0:
                     log["train/cone_deg"] = float(np.rad2deg(cone))
                 wandb.log(log)

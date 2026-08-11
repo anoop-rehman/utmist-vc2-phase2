@@ -80,7 +80,8 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                  segment_seconds_range=(2.0, 6.0), target_dist_range=(4.0, 8.0),
                  target_z=None, time_coef=0.0, arena="fenced", pitch_scale=0.3125,
                  w_upright=1.0, pace_range=(1.5, 3.0), deadline_range=(0.5, 4.0),
-                 arrival_reward_coef=None):
+                 arrival_reward_coef=None, w_anchor=0.0,
+                 anchor_free_radius=1.0):
         self._ball = ball
         # -- drill v4: the TIMED kick -------------------------------------
         # reward_kind "timed" makes the segment a deadline rather than a
@@ -137,7 +138,9 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
             arrive = dict(w_upright=w_upright, w_arrive=w_arrive,
                           reward_coef=reward_coef, **common)
             if self._timed:
-                reward = TimedKickReward(**arrive)
+                reward = TimedKickReward(w_anchor=w_anchor,
+                                         anchor_free_radius=anchor_free_radius,
+                                         **arrive)
             elif reward_kind == "point":
                 reward = KickToPointReward(**arrive)
             else:

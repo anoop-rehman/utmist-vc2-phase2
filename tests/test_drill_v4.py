@@ -80,6 +80,14 @@ class StubEnv:
         self.target_fit_sum = z.clone()
         self.prev_target_fit_sum = z.clone()
         self.prev_n_segments = z.clone()
+        self.ball_spawn_xy = torch.zeros(n, 2)
+
+    # ball_task.SegmentedBallTask.anchor_excess, verbatim -- the stub must not
+    # reimplement it, or the test would pass against a formula the env does
+    # not use.
+    def anchor_excess(self, free_radius=1.0, cap=5.0):
+        from rower_soccer.warp_port.ball_task import SegmentedBallTask
+        return SegmentedBallTask.anchor_excess(self, free_radius, cap)
 
     def _root_frames(self):
         return torch.zeros(self.n, 3), torch.eye(3).expand(self.n, 3, 3)
@@ -197,6 +205,132 @@ def t_timed_kick_drops_ball_to_cmd_shaping():
     return "w_b2c forced to 0; arrival paid from last_arrival"
 
 
+def _moving_env(root_xy, root_vel, ball_xy, spawn_xy):
+    """Stub posed mid-segment: creature at root_xy moving at root_vel, ball
+    already struck and sitting at ball_xy, segment spawned at spawn_xy."""
+    env = StubEnv()
+    env._root_frames = lambda: (torch.tensor([[*root_xy, 0.0]]),
+                                torch.eye(3).expand(1, 3, 3))
+    env._root_vel_xy = lambda: torch.tensor([list(root_vel)])
+    env._ball_xy = lambda: torch.tensor([list(ball_xy)])
+    env.ball_spawn_xy = torch.tensor([list(spawn_xy)])
+    return env
+
+
+def t_anchor_stops_paying_for_the_chase():
+    """The v7 claim, stated as a reward comparison.
+
+    Mid-segment: the ball has been struck and is 4 m downfield of where it
+    spawned; the creature is standing on the spawn point. Running AFTER the
+    ball is what the unanchored me->ball term pays for -- that is the dribble.
+    """
+    from rower_soccer.warp_port.ball_task import TimedKickReward
+    # chasing: 1 m/s straight at the rolled-away ball.
+    chase = dict(root_xy=(0.0, 0.0), root_vel=(1.0, 0.0),
+                 ball_xy=(4.0, 0.0), spawn_xy=(0.0, 0.0))
+
+    off = TimedKickReward(w_arrive=3.0, w_player_to_ball=0.15, w_strike=0.0)
+    env = _moving_env(**chase)
+    off.reset(env)
+    paid_unanchored = float(off(env)[0])
+    assert paid_unanchored > 0.0, "baseline is wrong: v4/v6 should pay to chase"
+    assert abs(paid_unanchored - 0.15) < 1e-6, paid_unanchored
+
+    on = TimedKickReward(w_arrive=3.0, w_player_to_ball=0.15, w_strike=0.0,
+                         w_anchor=0.01, anchor_free_radius=1.0)
+    env = _moving_env(**chase)
+    on.reset(env)
+    paid_anchored = float(on(env)[0])
+    # Standing ON the spawn point => no penalty yet; the chase simply is not
+    # paid. clamp(min=0) means running AWAY from the anchor is 0, not negative,
+    # so the whole difference has to come from the approach term.
+    assert abs(paid_anchored) < 1e-6, paid_anchored
+
+    # ...while approaching the ball BEFORE it is struck is paid identically,
+    # because the anchor and the ball are then the same point. If this ever
+    # differs, the anchor has started fighting the approach.
+    pre = dict(root_xy=(-2.0, 0.0), root_vel=(1.0, 0.0),
+               ball_xy=(0.0, 0.0), spawn_xy=(0.0, 0.0))
+    a, b = TimedKickReward(w_player_to_ball=0.15, w_strike=0.0), None
+    env = _moving_env(**pre); a.reset(env)
+    approach_off = float(a(env)[0])
+    b = TimedKickReward(w_player_to_ball=0.15, w_strike=0.0, w_anchor=0.01,
+                        anchor_free_radius=1.0)
+    env = _moving_env(**pre); b.reset(env)
+    approach_on = float(b(env)[0])
+    # 2 m from the anchor, free radius 1 => 1 m excess * 0.01.
+    assert abs((approach_off - 0.01) - approach_on) < 1e-6, (approach_off,
+                                                             approach_on)
+    return f"chase paid {paid_unanchored:.3f} -> {paid_anchored:.3f}"
+
+
+def t_anchor_penalty_shape():
+    """Zero inside the free radius, linear outside, clipped, and NOT a
+    function of uprightness or of shaping_scale."""
+    from rower_soccer.warp_port.ball_task import TimedKickReward
+    r = TimedKickReward(w_arrive=3.0, w_player_to_ball=0.0, w_strike=0.0,
+                        w_anchor=0.01, anchor_free_radius=1.0)
+    seen = {}
+    for d in (0.0, 0.5, 1.0, 2.0, 5.0, 6.0, 20.0):
+        env = _moving_env((d, 0.0), (0.0, 0.0), (d, 0.0), (0.0, 0.0))
+        r.reset(env)
+        seen[d] = float(r(env)[0])
+    assert seen[0.0] == seen[0.5] == seen[1.0] == 0.0, seen
+    assert abs(seen[2.0] + 0.01) < 1e-6, seen          # 1 m excess
+    assert abs(seen[5.0] + 0.04) < 1e-6, seen          # 4 m excess
+    # cap at 5 m of excess: 6 m and 20 m must cost the same, so one runaway
+    # world cannot dominate the batch return.
+    assert abs(seen[6.0] - seen[20.0]) < 1e-6, seen
+    assert abs(seen[20.0] + 0.05) < 1e-6, seen
+
+    # Annealing the shaping must NOT switch the anchor off -- it is part of the
+    # objective, not a training aid.
+    env = _moving_env((3.0, 0.0), (0.0, 0.0), (3.0, 0.0), (0.0, 0.0))
+    r.reset(env)
+    env.shaping_scale = 0.0
+    assert abs(float(r(env)[0]) + 0.02) < 1e-6, float(r(env)[0])
+
+    # Tipping over must not discount it (upright multiplies the rest, not this).
+    env = _moving_env((3.0, 0.0), (0.0, 0.0), (3.0, 0.0), (0.0, 0.0))
+    r.reset(env)
+    rot = torch.eye(3).expand(1, 3, 3).clone()
+    rot[:, 2, 2] = 0.1
+    env._root_frames = lambda: (torch.tensor([[3.0, 0.0, 0.0]]), rot)
+    assert abs(float(r(env)[0]) + 0.02) < 1e-6, float(r(env)[0])
+    return "0 inside r_free, linear, capped at 5 m, survives annealing"
+
+
+def t_anchor_is_off_by_default():
+    """Every existing kick arm (v3/v4/v6) must be bit-identical without the
+    flag, or this change silently rewrites runs already in flight."""
+    from rower_soccer.warp_port.ball_task import TimedKickReward
+    r = TimedKickReward(w_arrive=3.0, w_player_to_ball=0.15, w_strike=0.0)
+    assert r.w_anchor == 0.0
+    env = _moving_env((0.0, 0.0), (1.0, 0.0), (4.0, 0.0), (99.0, 99.0))
+    r.reset(env)
+    # spawn_xy is deliberately absurd: with the anchor off nothing may read it.
+    assert abs(float(r(env)[0]) - 0.15) < 1e-6, float(r(env)[0])
+    return "w_anchor=0 => live-ball approach, anchor never read"
+
+
+def t_anchor_magnitude_is_calibrated():
+    """A full-segment dribble should cost the same ORDER as a perfect pass is
+    worth -- otherwise the term either does nothing or eats the objective."""
+    from rower_soccer.warp_port.ball_task import TimedKickReward
+    w_anchor, w_arrive = 0.01, 3.0
+    r = TimedKickReward(w_arrive=w_arrive, w_player_to_ball=0.0, w_strike=0.0,
+                        w_anchor=w_anchor, anchor_free_radius=1.0)
+    # 125 steps ~ the middle of the 50-200 step segment band, creature walking
+    # the ball 2.5 m past the free radius.
+    env = _moving_env((3.5, 0.0), (0.0, 0.0), (3.5, 0.0), (0.0, 0.0))
+    r.reset(env)
+    per_step = -float(r(env)[0])
+    total = per_step * 125
+    perfect_pass = w_arrive * 1.0
+    assert 0.3 < total / perfect_pass < 3.0, (total, perfect_pass)
+    return f"125-step 2.5 m dribble costs {total:.2f} vs {perfect_pass:.1f} for a pass"
+
+
 def t_timed_kick_fitness_is_mean_arrival():
     from rower_soccer.warp_port.ball_task import TimedKickReward
     r = TimedKickReward()
@@ -298,6 +432,61 @@ def t_kick_deadline_matches_the_pace_band(steps=400, worlds=16):
             f"T in [{min(Ts):.2f}, {max(Ts):.2f}]s")
 
 
+def t_ball_spawn_xy_tracks_spawns(steps=250, worlds=8):
+    """The anchor is only meaningful if it equals the ball's position at the
+    instant of every spawn, and holds still afterwards.
+
+    Both spawn paths are covered: the episode reset, and the mid-episode
+    segment restart (which does NOT move the creature, so the anchor is the
+    only thing that changes). Also asserts the anchor does NOT follow a ball
+    the creature has kicked -- a buffer quietly aliased to the live ball would
+    pass every algebra test above and make the whole term a no-op.
+    """
+    env = _kick(worlds, w_anchor=0.01)
+    env.reset()
+    assert torch.allclose(env.ball_spawn_xy, env._ball_xy(), atol=1e-5), \
+        "anchor wrong immediately after reset"
+
+    prev_seg = env.n_segments.clone()
+    n_restarts, n_drifted, max_drift = 0, 0, 0.0
+    for k in range(steps):
+        # Random actions do not get an untrained ant to the ball, so the ball
+        # would never move and "the anchor does not follow the ball" would be
+        # vacuously true. Roll it directly instead -- through qvel, NOT
+        # _write_ball, because _write_ball is the spawn path and is SUPPOSED to
+        # move the anchor. This is the struck-ball case.
+        if k % 25 == 12:
+            env.qvel[:, env._ball_vcols[0]] = 4.0
+        _, _, done = env.step(torch.randn(env.n, env.act_dim,
+                                          device=env.device) * 0.8)
+        restarted = env.n_segments > prev_seg
+        if bool(restarted.any()):
+            i = restarted.nonzero(as_tuple=True)[0]
+            err = (env.ball_spawn_xy[i] - env._ball_xy()[i]).norm(dim=-1).max()
+            assert float(err) < 1e-4, f"anchor not rewritten on restart: {err}"
+            n_restarts += int(i.numel())
+        held = (~restarted).nonzero(as_tuple=True)[0]
+        if held.numel():
+            drift = (env.ball_spawn_xy[held]
+                     - env._ball_xy()[held]).norm(dim=-1)
+            max_drift = max(max_drift, float(drift.max()))
+            n_drifted += int((drift > 0.25).sum())
+        prev_seg = env.n_segments.clone()
+        if done:
+            env.reset()
+            assert torch.allclose(env.ball_spawn_xy, env._ball_xy(), atol=1e-5)
+            prev_seg = env.n_segments.clone()
+
+    assert n_restarts > 10, f"too few segment restarts to conclude: {n_restarts}"
+    # If the anchor tracked the live ball, max_drift would be ~0 everywhere and
+    # this term would be measuring nothing.
+    assert n_drifted > 0 and max_drift > 0.25, (n_drifted, max_drift)
+    ex = float(env.anchor_excess(1.0).max())
+    assert 0.0 <= ex <= 5.0, ex
+    return (f"{n_restarts} restarts all rewrote the anchor; ball drifted up to "
+            f"{max_drift:.2f} m from it")
+
+
 def t_kick_arrival_is_graded_at_the_deadline(steps=300, worlds=8):
     """last_arrival is exp(-c * d_at_T) on the closing step and 0 otherwise --
     the only channel the reward has, so if it is stale or leaky the objective
@@ -371,7 +560,15 @@ def main():
           t_timed_kick_drops_ball_to_cmd_shaping)
     check("kick: timed fitness is mean arrival at T",
           t_timed_kick_fitness_is_mean_arrival)
+    check("kick: anchor stops paying for the chase (v7)",
+          t_anchor_stops_paying_for_the_chase)
+    check("kick: anchor penalty shape and channel (v7)", t_anchor_penalty_shape)
+    check("kick: anchor is off by default (v7)", t_anchor_is_off_by_default)
+    check("kick: anchor magnitude is calibrated (v7)",
+          t_anchor_magnitude_is_calibrated)
     if not args.no_physics:
+        check("kick: ball_spawn_xy tracks every spawn path (v7)",
+              t_ball_spawn_xy_tracks_spawns)
         check("kick: task width 12 (point) / 14 (timed)", t_kick_task_width)
         check("kick: deadline matches the pace band",
               t_kick_deadline_matches_the_pace_band)

@@ -235,3 +235,42 @@ Not done here, deliberately — `skills/` and `game/` are owned elsewhere and
    fix `v_pace` to a mid-band constant (≈2.25 m/s given the band above), so a
    human click means "pass it there, briskly", and derive `t_remaining` on the
    client from the click time.
+
+## 7. The anchor arm (v7) is a clean NULL result — dribbling was not the problem
+
+*Measured 2026-08-11.*
+
+v7 added the spawn anchor (see `TimedKickReward.w_anchor`): the me->ball approach
+shaping re-aimed at the ball's spawn point instead of the live ball, plus a
+per-step penalty for straying from it. v6 is its exact control — identical flags,
+`--w-anchor 0` — so the pair isolates the anchor.
+
+**The mechanism works.** The reported `anchor=` stat fell 0.76 -> 0.29 m: the ant
+really does stay next to where the ball lay and strike from there, instead of
+travelling with it.
+
+**It changes nothing.** Compared over the SAME step window (0 - 35.4M, since v7
+is younger):
+
+| | n | mean fitness | median |
+|---|---|---|---|
+| v6 (control) | 54 | 0.1254 | 0.1240 |
+| v7 (anchor) | 54 | 0.1251 | 0.1245 |
+
+Last quarter of that window: 0.1189 vs 0.1224. Indistinguishable.
+
+A methodological note worth keeping, because it nearly produced a false positive:
+comparing the two runs' LATEST monitor lines gave "v7 0.127 vs v6 0.104", which
+looks like a win and is not one — those are different step counts on a noisy
+curve. Control arms must be compared at matched steps, never at matched
+wall-clock.
+
+**What this rules out.** Three timed arms — v4 (reward_coef 0.5), v6 (gentler
+0.2, closer spawn, longer deadline), v7 (v6 + anchor) — all sit at ~0.12 against
+a 0.105 do-nothing baseline. The reward-shape hypothesis (v4->v6) and the
+dribbling hypothesis (v6->v7) have both now been tested and neither moved it. The
+remaining suspect is the timed formulation itself, not its shaping terms.
+
+Do NOT read v3's 0.376-0.395 as "the untimed kick works better": v3's fitness is
+`exp(-c * closest approach over the window)` while v4/v6/v7 grade distance AT the
+deadline. Different measures; the numbers are not comparable.

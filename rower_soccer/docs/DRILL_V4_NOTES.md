@@ -710,3 +710,25 @@ and `eval/ep_rew_warp` keep their names and their one-world meaning.
 - The scoring env tracks the curricula: `target_cone` on the cone anneal
   (dribble, kick) and `speed_range` on the speed curriculum (dribble, follow).
   Without that it would grade `best.pt` at a difficulty the run had outgrown.
+
+### 14a. Independent replication of the batched score
+
+The section-14 numbers were produced by the agent that built the fix. Re-run
+independently (`--k 6 --repeats 3`, different background load), 9/9 PASS:
+
+| | agent's run | independent re-run |
+|---|---|---|
+| single-episode sd (pooled) | 0.1758 (640 eps) | 0.2148 (384 eps) |
+| batched sd, 64 worlds | 0.0231 | 0.0314 |
+| noise reduction | 7.6x | **6.8x** |
+| theoretical `sqrt(64)` | 8.0x | 8.0x |
+| same-seed repeat sd | 0.0375 | 0.0362 |
+
+Both land under the theoretical 8.0x and bracket each other, so quote the win
+as **~7x**, not 7.6x -- the ratio itself has sampling error, and reporting the
+single most favourable measurement of a variance-reduction claim would repeat
+in miniature exactly the error the fix exists to remove.
+
+Means agree in both runs (0.8071 vs 0.8599 here, |diff| 0.0528 against a
+0.2658 tolerance), confirming this is a variance fix and not a change of
+metric.

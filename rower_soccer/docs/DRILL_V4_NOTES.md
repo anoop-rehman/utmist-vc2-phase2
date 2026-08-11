@@ -376,3 +376,55 @@ simultaneously being paid to avoid.
 Arms now live: v4 (original timed), v6 (control), v8 (strike point). v7 retired
 as null. v6 differs from v8 only in `--strike-offset`, so the pair is a clean
 comparison -- at MATCHED STEPS, per section 7's lesson.
+
+## 10. `best.pt` is a running max over SINGLE-EPISODE evals, so it selects noise
+
+*Measured 2026-08-11 across all four live drills.*
+
+The saved `best.pt` fitness sits far above each run's typical fitness:
+
+| run | best.pt fitness | typical | ratio |
+|---|---|---|---|
+| dribble_ant_v3 | 0.980 | ~0.60 | 1.6x |
+| kick_ant_v4_timed | 0.312 | ~0.12 | 2.6x |
+| kick_ant_v6_timed | 0.300 | ~0.10 | 3.0x |
+| shoot_ant_v4 | 0.689 | ~0.40 | 1.7x |
+
+That is the signature of a running maximum over a noisy estimator, in every
+run at once.
+
+The mechanism is NOT a train/eval mix-up -- the code and its comment agree, and
+`fit` there really is the deterministic `eval_video` number. The problem is that
+the eval is **one world, one 15 s episode**, with the target/spawn band drawn
+once. `best.pt` is then `max` over every such draw taken during the run
+(dribble: ~136 of them). Max-of-N over a noisy statistic grows with N, so the
+longer a run goes the more certainly `best.pt` is a lucky draw rather than a
+better policy.
+
+Consistency check: dribble's monitor fitness has mean 0.605 and stdev 0.191, so
+0.980 is ~2 sigma out -- exactly where the max of ~136 draws should land. That
+stdev is itself computed on a 2048-world average, so a single-episode stdev is
+LARGER and the estimate is conservative.
+
+Two consequences, both live:
+
+1. **Every registry pin is such a checkpoint**, and so is every probe in
+   sections 7-9 above (they all load `best.pt`). The kick diagnosis is not
+   invalidated -- "positioning is at the random baseline" is far outside what an
+   episode draw can manufacture, and the same result appears across v6/v7 -- but
+   any FINE comparison between two `best.pt` files is comparing draw luck.
+2. **A genuinely improving policy can stop being saved.** Once `best_score`
+   ratchets to a 2-sigma outlier, later and better policies lose to it unless
+   they also draw well.
+
+Fix (not yet applied): score the checkpoint on a BATCHED deterministic eval --
+the same one-world env is used only because it is the render env, and fitness
+does not need the renderer. 64 worlds would cut the standard error ~8x for
+negligible cost. Failing that, a rolling mean/median of the last K evals rather
+than an instantaneous max.
+
+Reporting rule that follows: quote drill fitness as a mean over recent samples,
+never as a single monitor line. Doing the latter is how dribble got reported as
+"0.77-0.79" for hours when its mean was 0.605 -- those were the tops of an
+oscillation caused by the monitor's 320-step-per-world cadence aliasing against
+the 600-step episode.

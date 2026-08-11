@@ -22,6 +22,7 @@ import argparse
 import numpy as np
 import torch
 
+from rower_soccer.warp_port import score
 from rower_soccer.warp_port.train_kick_warp import run
 
 
@@ -193,6 +194,7 @@ def main():
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)
     p.add_argument("--first-video-secs", type=float, default=60.0)
+    score.add_args(p)
     p.add_argument("--ckpt-secs", type=float, default=1800.0)
     p.add_argument("--mid-ckpt-frac", type=float, default=0.5)
     p.add_argument("--resume", action="store_true")

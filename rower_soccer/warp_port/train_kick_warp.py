@@ -29,6 +29,7 @@ import numpy as np
 import torch
 
 
+from rower_soccer.warp_port import score
 from rower_soccer.warp_port.scene import BallSpec
 
 
@@ -310,6 +311,7 @@ def main():
     p.add_argument("--run-name", required=True)
     p.add_argument("--video-secs", type=float, default=300.0)
     p.add_argument("--first-video-secs", type=float, default=60.0)
+    score.add_args(p)
     p.add_argument("--ckpt-secs", type=float, default=1800.0)
     p.add_argument("--mid-ckpt-frac", type=float, default=0.5)
     p.add_argument("--resume", action="store_true")
@@ -430,9 +432,26 @@ def run(args, task, make_env_fn, make_eval_fn):
           f"segment_steps={env.segment_steps} "
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
     eval_env, eval_ren = make_eval_fn(args)
+    # The BATCHED scoring env: N worlds, no renderer, built once and reused.
+    # best.pt is selected on this and not on the one-world render eval, which
+    # made best.pt a max over ~136 lucky single-episode draws -- see
+    # warp_port/score.py and docs/DRILL_V4_NOTES.md section 10. use_graph=True
+    # is not optional: uncaptured this env is ~16x slower per step and one
+    # scoring rollout would cost 15 minutes of blocked training.
+    score_env = None
+    if args.score_worlds > 0:
+        score_env = make_env_fn(args, num_worlds=args.score_worlds,
+                                seed=args.score_seed, use_graph=True)
+        print(f"[setup] scoring env: {args.score_worlds} worlds, seed "
+              f"{args.score_seed} re-applied every rollout (paired draws)",
+              flush=True)
     t0 = time.perf_counter()
     last_ckpt = t0
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
+    # Default (--score-secs 0) puts scoring on the video cadence, so the two
+    # numbers in the log describe the SAME weights and can be compared directly.
+    score_cadence = args.score_secs if args.score_secs > 0 else args.video_secs
+    last_score = last_video
     it = 0
     deadline = t0 + args.max_hours * 3600.0
     cone = getattr(args, "target_cone", 0.0)
@@ -445,6 +464,10 @@ def run(args, task, make_env_fn, make_eval_fn):
             cone = args.cone_start + frac * (args.cone_max - args.cone_start)
             env.target_cone = cone
             eval_env.target_cone = cone
+            # The scoring env has to track the curriculum too, or best.pt is
+            # selected at a difficulty the run left behind long ago.
+            if score_env is not None:
+                score_env.target_cone = cone
         stats = trainer.train_iter()
         it += 1
         now = time.perf_counter()
@@ -489,7 +512,10 @@ def run(args, task, make_env_fn, make_eval_fn):
                 if getattr(args, "cone_anneal_steps", 0) > 0:
                     log["train/cone_deg"] = float(np.rad2deg(cone))
                 wandb.log(log)
-        if args.video_secs > 0 and now - last_video >= args.video_secs:
+        do_video = args.video_secs > 0 and now - last_video >= args.video_secs
+        do_score = (score_env is not None and score_cadence > 0
+                    and now - last_score >= score_cadence)
+        if do_video:
             last_video = now
             vpath = os.path.join(run_dir, "videos",
                                  f"eval_step_{trainer.total_steps:010d}.mp4")
@@ -497,25 +523,50 @@ def run(args, task, make_env_fn, make_eval_fn):
             ep_rew, fit = eval_video(eval_env, ac, vpath, eval_ren)
             print(f"[monitor] video: {vpath} (WARP eval "
                   f"ep_rew={ep_rew:.1f} fitness={fit:.3f})", flush=True)
-            # Keep the BEST policy, not just the latest: late collapse is not
-            # exotic in long PPO runs and has cost this project a good policy
-            # before (follow_v5 went 476 -> 166 in its final stretch, and only
-            # the 166 was saved). Scored on FITNESS, which no shaping term can
-            # inflate.
-            if fit > best_score:
-                best_score = fit
-                export_sb3_compatible(ac, best_path)
-                print(f"[monitor] new BEST fitness {best_score:.3f} "
-                      f"-> {best_path}", flush=True)
-                if args.gcs_bucket:
-                    from rower_soccer.warp_port.gcs import sync_async
-                    sync_async(best_path, args.gcs_bucket, args.run_name)
             if use_wandb:
                 import wandb
+                # eval/fitness_warp keeps its name and its meaning: the OLD
+                # one-world single-episode number. It is retained purely so it
+                # can be compared against eval/fitness_batched -- it no longer
+                # selects anything.
                 wandb.log({"env_step": trainer.total_steps,
                            "eval/video": wandb.Video(vpath, format="mp4"),
                            "eval/ep_rew_warp": ep_rew,
                            "eval/fitness_warp": fit})
+        sel = None
+        if do_score:
+            last_score = now
+            sc = score.score_policy(score_env, ac, seed=args.score_seed)
+            print(f"[monitor] score: fitness_batched={sc.fitness:.3f} "
+                  f"+/-{sc.fitness_sem:.3f} (sem over {sc.worlds} worlds, "
+                  f"world spread {sc.fitness_std:.3f}) "
+                  f"ep_rew={sc.ep_rew:.1f}", flush=True)
+            if use_wandb:
+                import wandb
+                wandb.log({"env_step": trainer.total_steps,
+                           "eval/fitness_batched": sc.fitness,
+                           "eval/fitness_batched_sem": sc.fitness_sem,
+                           "eval/fitness_batched_std": sc.fitness_std,
+                           "eval/ep_rew_batched": sc.ep_rew})
+            sel = sc.fitness
+        elif do_video and score_env is None:
+            # --score-worlds 0: explicit opt-out, back to the old behaviour.
+            sel = fit
+        # Keep the BEST policy, not just the latest: late collapse is not
+        # exotic in long PPO runs and has cost this project a good policy
+        # before (follow_v5 went 476 -> 166 in its final stretch, and only
+        # the 166 was saved). Scored on FITNESS, which no shaping term can
+        # inflate -- and, since 2026-08-11, on the BATCHED fitness, because a
+        # running max over a one-episode estimator selects the luckiest draw
+        # rather than the best policy (docs/DRILL_V4_NOTES.md 10).
+        if sel is not None and sel > best_score:
+            best_score = sel
+            export_sb3_compatible(ac, best_path)
+            print(f"[monitor] new BEST fitness {best_score:.3f} "
+                  f"-> {best_path}", flush=True)
+            if args.gcs_bucket:
+                from rower_soccer.warp_port.gcs import sync_async
+                sync_async(best_path, args.gcs_bucket, args.run_name)
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now
             save_checkpoint(trainer, ckpt_path)

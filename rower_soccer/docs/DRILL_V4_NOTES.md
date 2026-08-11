@@ -573,3 +573,129 @@ drills), which is what makes it a clean test and also why it is an EXPERIMENT,
 not a candidate checkpoint. If it works, the finding is about the decoder, and
 adapting the shared-decoder setup -- e.g. including a striking task when the
 decoder is trained -- is a separate design question.
+
+## 12. `best.pt` is now selected on a BATCHED deterministic score
+
+*Measured 2026-08-11. Code: `warp_port/score.py`, wired into all four drill
+trainers. Tests: `tests/test_batched_score.py` (9 checks, all passing).*
+
+Section 10's fix, applied. The render eval is unchanged -- same one world, same
+cadence, same videos -- but it no longer selects anything. Selection now runs a
+SEPARATE scoring env: N worlds (`--score-worlds`, default 64), no renderer, one
+full deterministic episode, `best.pt` saved on the mean. The one-world number is
+still computed and still logged, under its existing `eval/fitness_warp`, purely
+so the two can be compared; the new one is `eval/fitness_batched`.
+
+### The measurement
+
+One fixed checkpoint (`runs_v2/dribble_ant_v3/best.pt`), dribble's own
+`config.json`, 15 s episodes, deterministic actions, nothing changing but the
+seed. Reproduce:
+
+    MUJOCO_GL=egl PYTHONPATH=. .venv/bin/python -m tests.test_batched_score \
+        --k 10 --repeats 5
+
+| estimator | samples | mean | sd | min | max |
+|---|---|---|---|---|---|
+| single episode, 1 world | 10 seeds | 0.8948 | **0.0832** | 0.730 | 0.973 |
+| single episode, 1 world | 640 (pooled over the batched runs' worlds) | -- | **0.1758** | -- | -- |
+| **batched, 64 worlds** | 10 seeds | 0.8801 | **0.0231** | 0.846 | 0.923 |
+| batched, 64 worlds, SAME seed | 5 repeats | 0.8585 | 0.0375 | 0.808 | 0.894 |
+
+**7.6x less noise, exactly as predicted.** sigma1/sqrt(64) = 0.1758/8 = 0.0220
+against a measured 0.0231. The estimator is doing precisely what averaging 64
+independent draws should do, with no hidden correlation between worlds.
+
+**Same quantity, not a different metric.** Means 0.8948 (single) vs 0.8801
+(batched), difference 0.0148 against a combined 3-sigma of 0.1682. This is a
+variance fix.
+
+Two notes on how sigma1 was estimated, because the obvious way is wrong. The
+direct K=10 sd is **0.0832**, less than half the pooled 0.1758, and it is not
+stable: two earlier runs of this same file at the same seeds measured 0.1132 and
+0.0315. The single-episode fitness distribution is bounded above (fitness is
+`exp(-c*d)` at the final step, so it piles up near 1) with a long lower tail, so
+whether one bad draw lands in a 10-sample window swings the sd 3x. The pooled
+figure uses every world of every batched rollout -- each world IS an independent
+single-episode draw -- for 640 episodes at no extra GPU cost, and it is the
+number the tests assert against. Anyone quoting a single-episode spread off
+K~10 samples will under-report it.
+
+### This directly confirms section 10's diagnosis
+
+`dribble_ant_v3`'s saved `best.pt` recorded a fitness of **0.980**. Re-scoring
+**that exact checkpoint** ten times, one episode each, gave mean 0.895 and a max
+of **0.973**. The pin is the top of its own draw distribution. Nothing about it
+was a better policy; 136 evals of an estimator with sd 0.18 against a ceiling of
+1.0 arrive at ~0.98 whatever the weights are doing.
+
+Correction to section 10 while we are here: that section compared `best.pt`'s
+0.980 against a "typical ~0.60" taken from the training monitor. Those are two
+different quantities -- the monitor is the STOCHASTIC policy's fitness sampled
+wherever a 64-step rollout lands mid-episode over 2048 worlds, while the eval is
+the DETERMINISTIC policy's fitness at the end of the episode, and dribble's
+fitness rises through an episode as the ball is shepherded in. The deterministic
+single-episode mean is 0.895, not 0.60. Section 10's conclusion is unaffected
+and in fact strengthened -- the gap it needed to explain is smaller, and the
+draw spread that explains it is larger than assumed.
+
+### What the seed does and does not buy
+
+`--score-seed` (default 12345) is re-applied before every rollout, so every
+evaluation in a run faces the same 64 task draws: verified bitwise on `qpos` and
+`target_xy`. What it cannot buy is a reproducible number. **mujoco_warp is not
+bitwise deterministic run to run** -- its solver accumulates with atomics, so
+reduction order varies -- and 600 chaotic steps amplify the last bits. Repeating
+the identical call five times moved the score with sd 0.0375 (0.808-0.894),
+statistically indistinguishable from the 0.0231 measured across different seeds
+at this sample size. So the residual noise floor of the batched score is the
+SIMULATOR, not the task draw, and the paired design is close to free rather than
+load-bearing. It was kept because it costs nothing and makes score-vs-score
+comparisons well defined; it is not what delivers the 7.6x.
+
+Practical consequence: the batched score resolves policy differences of roughly
+0.02-0.04 in fitness, not 0.005. Do not read finer differences between two
+`best.pt` files than that, and do not expect a re-run of a scoring command to
+reproduce to three decimals.
+
+### Cost, and the flags
+
+The scoring env is built ONCE next to the render env and reused, with
+`use_graph=True` -- uncaptured it is ~16x slower per step (1462 vs 92 ms/step
+measured on the dribble eval env in section 10's follow-up), which would make
+one scoring call a 15-minute stall. Captured, a 64-world 600-step rollout is
+~23 s idle and ~50 s with six trainers sharing the card: about the same as the
+render eval it sits next to, so an evaluation now costs roughly twice what it
+did. At `--video-secs 300` that is a few percent of wall clock.
+
+    --score-worlds N   worlds in the scoring env (default 64; 0 restores the
+                       old single-episode selection exactly)
+    --score-secs S     scoring cadence; 0 (default) reuses --video-secs so the
+                       two numbers in the log describe the same weights
+    --score-seed S     re-applied before every rollout (default 12345)
+
+New wandb keys: `eval/fitness_batched`, `eval/fitness_batched_sem`,
+`eval/fitness_batched_std` (the spread ACROSS worlds -- the single-episode
+sigma, logged every eval), `eval/ep_rew_batched`. The old `eval/fitness_warp`
+and `eval/ep_rew_warp` keep their names and their one-world meaning.
+
+### Per-trainer differences
+
+- **kick and shoot** share `train_kick_warp.run`, which already had a
+  `make_env_fn(args, num_worlds, seed, use_graph)`; the scoring env is one more
+  call to it. One change covers both.
+- **dribble and follow** built their eval env inline inside `make_eval`. That
+  body is now `make_eval_env(args, num_worlds, seed)`, with `make_eval` calling
+  it for the render env and `make_score_env` for the scoring env, so the two
+  cannot drift apart. Their TRAINING env construction was deliberately left
+  alone -- follow's, in particular, does not pass `arena`/`pitch_scale` while
+  its eval env does, a pre-existing discrepancy this change does not touch.
+- **follow selects on `ep_rew`, not fitness**, and still does -- now on the
+  batched `ep_rew`. Its fitness is `exp(-c*dist)` read at the final step only,
+  which grades where the creature happened to be standing when the clock ran
+  out, while `ep_rew` integrates the episode. Which statistic selects is a
+  separate question from how noisily it is measured, and only the second one
+  was in scope here.
+- The scoring env tracks the curricula: `target_cone` on the cone anneal
+  (dribble, kick) and `speed_range` on the speed curriculum (dribble, follow).
+  Without that it would grade `best.pt` at a difficulty the run had outgrown.

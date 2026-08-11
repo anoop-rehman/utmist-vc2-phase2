@@ -70,6 +70,45 @@ export CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
 `runs_v2/relaunch_all.sh` already does. To stop: `echo quit | nvidia-cuda-mps-control`.
 If the daemon dies, clients fall back to their own contexts — slower, not broken.
 
+## Postscript: the second throughput bug, found the same way
+
+*2026-08-11.* After the MPS win, `dribble_ant_v3` was running at ~1.3k fps while
+the four kick/shoot trainers held ~8.5-9k on the same card. Same creature, same
+ball, same pitch, same `worlds=2048`, same `steps/iter`. Aggregate reasoning
+again: a GPU that gives one process 1.3k and four others 8.5k each is not
+short of capacity, so the slow one is paying for something the others are not.
+
+It was the EVAL env. `train_dribble_warp.make_eval` built its one-world env with
+`use_graph=False`:
+
+| | ms/step | per 600-step video |
+|---|---|---|
+| `use_graph=False` | 1462.1 | **877 s** |
+| `use_graph=True` | 92.4 | **55 s** |
+
+`--video-secs` defaults to 300. The trainer was rendering a 877 s video every
+300 s -- spending most of its wall clock rendering rather than training.
+`train_follow_warp` had the identical bug.
+
+Two things made it survive:
+
+- **Nothing looked wrong.** Fitness, ep_rew and the videos themselves were all
+  correct. The only symptom was a number being smaller than it should be, with
+  no reference point to compare against until several trainers ran side by side.
+- **The MPS A/B could not have caught it.** That measurement used
+  `--first-video-secs 100000`, so no video was rendered inside the window. The
+  cost only appears once a run starts producing videos, which is exactly when
+  nobody is measuring throughput any more.
+
+Graph capture does not change the physics. Over 120 steps, `graph=False` vs
+`graph=True` is bitwise identical for 5 steps, 6e-8 by step 10, 1.4e-2 by step
+119 -- and `graph=True` against ITSELF on a rerun differs by 4.7e-2, the same
+magnitude. The pipeline is nondeterministic run-to-run either way; the growth
+curve is ordinary chaotic amplification of float32 noise through contact.
+
+Fix: `use_graph=True` in both trainers, plus `--video-secs 900` so a video is 6%
+of the interval rather than 290%. Measured after: **1,299 -> ~11,500 fps, 8.8x.**
+
 ## What this changes strategically
 
 The second pod is still worth buying, but **not** to relieve this card — Pod A

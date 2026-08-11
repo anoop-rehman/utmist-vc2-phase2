@@ -732,3 +732,44 @@ in miniature exactly the error the fix exists to remove.
 Means agree in both runs (0.8071 vs 0.8599 here, |diff| 0.0528 against a
 0.2658 tolerance), confirming this is a variance fix and not a change of
 metric.
+
+## 15. v9 instrumentation check: the freeze works, the unfreeze is live
+
+*Measured 2026-08-11 at v9 = 15.7M steps, comparing each arm's `best.pt`
+against the shared warm-start `runs_v2/_decoder_ant_final.pt`.*
+
+Before reading anything into v9, the prerequisite question: has the unfrozen
+decoder actually moved? Relative Frobenius change, split by which parameters
+`--freeze-decoder` is supposed to hold:
+
+| arm | DECODER + action head | expert / z_proj |
+|---|---|---|
+| v8 (frozen) | **0.00e+00** over 8 tensors | 3.55e-01 |
+| v9 (unfrozen) | **1.15e-01** | 7.41e-02 |
+
+Two things confirmed. `--freeze-decoder` really does hold those 154,632
+parameters bit-identical -- worth knowing, because every frozen-arm conclusion
+in sections 7-13 rests on it and nothing had checked. And v9's decoder HAS
+moved, 11.5% in relative norm by 15.7M steps, so the experiment is live rather
+than stalled.
+
+(First attempt at this got it wrong by lumping `expert.*` and `z_proj.*` in with
+the decoder. Those are trainable in BOTH arms -- `--freeze-decoder` holds the
+decoder and action head only -- which made the frozen arm look like it had
+drifted 0.21. Splitting by what the flag actually freezes is what produced the
+0.00e+00.)
+
+**So the early v9 result carries more weight than its step count suggests.** At
+matched steps (0-15.7M) v8 is 0.1249 and v9 is 0.1232, and by 5M block v9 runs
+0.1253 / 0.1250 / 0.1203 against v8's 0.1257 / 0.1268 / 0.1233. The decoder is
+changing substantially and the outcome is not. That is a point AGAINST the
+frozen-decoder hypothesis, not merely an absence of evidence for it.
+
+One confound to keep honest: v9 carries v8's strike-point shaping, and section
+13 showed that shaping is not the fix either. If the shaping actively
+mis-trains, unfreezing simply hands PPO more parameters to move in the wrong
+direction, and v9 would fail for a reason that says nothing about decoder
+capacity. The clean follow-up if v9 dies is `old shaping + unfrozen` -- the
+missing cell of the 2x2 -- or better, testing decoder capacity directly by
+supervised-fitting a known-good striking controller rather than inferring it
+from an RL curve.

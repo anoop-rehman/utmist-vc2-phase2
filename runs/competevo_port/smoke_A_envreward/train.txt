@@ -1,0 +1,14 @@
+=== baselines (before any training) ===
+uniform-random actions : ret=[-163.60000610351562, -164.5] len=455 win=[0.0, 0.0] games=64
+untrained net, mean act: ret=[440.70001220703125, 460.70001220703125] len=500 win=[0.0, 0.0] games=64   (their iter-0 eval reference: 490-510 per agent, win rate 0.00)
+
+=== training ===
+it    0   0.13M steps 4,358 sps | train_ret [0.0, 0.0] len 0 | EVAL ret [461.29998779296875, 478.6000061035156] win [0.0, 0.0] len 500
+it    5   0.79M steps 3,818 sps | train_ret [-107.7, -107.5] len 102 kl +4.68e-03
+it   10   1.44M steps 5,266 sps | train_ret [-358.7, -354.4] len 367 kl +4.33e-03
+it   15   2.10M steps 5,333 sps | train_ret [-265.1, -245.9] len 321 | EVAL ret [210.89999389648438, 192.10000610351562] win [0.016260162601626018, 0.0] len 207
+it   20   2.75M steps 4,171 sps | train_ret [-204.5, -189.7] len 270 kl +3.65e-03
+it   25   3.41M steps 4,471 sps | train_ret [-171.8, -163.8] len 244 kl +4.10e-03
+it   30   4.06M steps 4,156 sps | train_ret [-145.1, -145.3] len 223 | EVAL ret [92.69999694824219, 190.5] win [0.0, 0.04] len 148
+time budget reached after 31 iters
+video: /workspace/vc2-competevo-port/runs/competevo_port/smoke/eval.mp4  (90 frames, return [79.5, 37.6], winner None)

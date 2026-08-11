@@ -70,6 +70,8 @@ def main():
     p.add_argument("--eval-every", type=int, default=20)
     p.add_argument("--out", default="runs/competevo_port/smoke")
     p.add_argument("--no-video", action="store_true")
+    p.add_argument("--video-steps", type=int, default=1000,
+                   help="frames to render; spans several episodes")
     args = p.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -152,12 +154,13 @@ def main():
         vid_env = RunToGoalEnv(num_worlds=1, use_gpu=(dev == "cuda"),
                                seed=args.seed + 7)
         path = os.path.join(args.out, "eval.mp4")
-        ret, n, winner = eval_video(vid_env, ac, path,
-                                    RunToGoalRenderer(), fps=int(1 / 0.015))
-        print(f"video: {path}  ({n} frames, return {np.round(ret, 1).tolist()}, "
-              f"winner {winner})")
-        log["video"] = {"path": path, "frames": n, "return": ret.tolist(),
-                        "winner": winner}
+        eps, n = eval_video(vid_env, ac, path, RunToGoalRenderer(),
+                            fps=int(1 / 0.015), max_steps=args.video_steps)
+        print(f"video: {path}  ({n} frames, {len(eps)} episodes)")
+        for e in eps:
+            print(f"   len {e['length']:3d} return {e['return']} "
+                  f"winner {e['winner']}")
+        log["video"] = {"path": path, "frames": n, "episodes": eps}
         with open(os.path.join(args.out, "log.json"), "w") as f:
             json.dump(log, f, indent=1)
 

@@ -175,7 +175,75 @@ Throughput on the shared RTX 4000 Ada (four production trainers also resident):
 **~20k world-control-steps/s at 1024 worlds** (= 40k agent-transitions/s; each
 control step is 5 substeps of RK4).
 
-<!--SMOKE RESULTS-->
+### Baselines (measured, `--eval-worlds 64`, full episodes)
+
+| policy | per-agent episode return | ep length | win rate |
+|---|---|---|---|
+| uniform-random actions in [-1,1] | -163.6 / -164.5 | 455 | 0.00 / 0.00 |
+| untrained net, stochastic (log_std 0) | ~ -1.02 / step | ~360 | 0.00 |
+| untrained net, MEAN actions (= their eval) | 440.7 / 460.7 | 500 | 0.00 / 0.00 |
+| **their measured iter-0 eval** (REPRO_NOTES, `smoke-run-to-goal-ants-v0`) | **498.8 / 488.5** | 500 | **0.00** |
+
+The mean-action baseline is the one to compare: same task, same eval protocol,
+and it lands within ~10% of their measured 498.8 / 488.5 with the same zero win
+rate. The residual gap was diagnosed rather than waved at: their output heads run
+`init_fc_weights` (weights x0.1, bias 0), so an untrained net emits near-zero
+mean actions and the ant simply stands for 500 steps collecting the +1 survive
+bonus, giving ~499. Ours used torch's default init, whose ~0.1 mean actions are
+real torque at gear 150, so the ant drifts and loses forward reward. That init is
+now reproduced in `ppo.ActorCritic` -- **after** the run below, so the run's
+440.7 / 460.7 is the pre-fix number and is reported as measured.
+
+Note also the two random baselines are not the same thing: uniform noise costs
+0.5*E[a^2]*8 = 1.33/step in control cost, a unit-variance Gaussian clipped to
+[-1,1] costs ~2.1/step. Episode RETURN is a poor early signal for another reason
+too: it is dominated by +1/step survival, so a policy that learns to run and
+falls at t=200 scores *worse* than one that stands still for 500 steps. Mean
+forward-progress reward per step is the honest early metric and is now logged.
+
+### Run A -- 17 min, raw env reward (NOT the reward they train)
+
+1024 worlds, rollout 64, 4 optimizer epochs, minibatch 8192, Adam 3e-4/1e-3.
+31 iterations, 4.06M agent-transitions, ~978 s.
+
+| iteration | eval return (mean actions) | eval win rate | eval ep length |
+|---|---|---|---|
+| 0 | 461.3 / 478.6 | 0.00 / 0.00 | 500 |
+| 15 | 210.9 / 192.1 | **0.016** / 0.000 | 207 |
+| 30 | 92.7 / 190.5 | 0.000 / **0.040** | 148 |
+
+Read honestly: **eval return went DOWN and win rate left zero.** Both are the
+same fact. PPO gave up the trivial 500-step standing policy for one that moves,
+the ants now fall (episode length 500 -> 148), and in exchange some episodes end
+with an actual goal crossing -- 1.6% then 4% of games, from a floor of 0.00. The
+"reward improves over the random-policy baseline" gate passes on the -164
+random-action baseline and on goal-reaching, and fails on eval return against the
+stand-still baseline. That failure is a property of the metric at this budget,
+not evidence that training worked; it is why run B logs forward progress per
+step.
+
+Deviations from their hyperparameters, forced by a 17-minute budget on a GPU
+shared with four production trainers: 4 optimizer epochs instead of 10, minibatch
+8192 instead of 2048, Adam 3e-4/1e-3 instead of 5e-5/3e-4. Measured cost of their
+values at this scale: the update alone takes 27 s per iteration (640 minibatch
+launches) against 2.2 s, i.e. their settings would have bought 20 iterations
+instead of 31 while learning ~6x slower per sample. Validation-grade runs must
+use their values.
+
+**Run A also optimized the wrong objective**, discovered while it was running:
+their runner never hands the env reward to the learner. Both runners apply an
+exploration curriculum, `r = alpha*dense + (1-alpha)*parse` with alpha annealing
+1 -> 0 over `termination_epoch = 200` epochs
+(`runner/multi_agent_runner.py:150-167`, `config/run-to-goal-ants-v0.yaml`), so
+the +/-1000 goal term FADES IN and is absent at the start. Run A trained on
+`parse + dense` throughout. The curriculum is now implemented
+(`ppo.CURRICULUM_STEPS`, expressed in agent-steps -- 200 epochs x 50,000 steps --
+because our iteration is a different size than theirs) and is the default.
+
+### Run B -- 15 min, their exploration curriculum
+
+<!--RUN B-->
+
 
 ## What stage 2 needs, learned the hard way
 

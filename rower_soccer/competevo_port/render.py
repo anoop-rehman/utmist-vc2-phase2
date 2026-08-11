@@ -40,18 +40,24 @@ class RunToGoalRenderer:
 
 @torch.no_grad()
 def eval_video(env, ac, path, renderer=None, fps=40, world=0, max_steps=None):
-    """One deterministic episode of world `world`, rendered to `path`.
+    """Render a fixed window of world `world` to `path`, spanning as many
+    episodes as fit (the env auto-resets), and return one record per finished
+    episode: `(return per agent, length, winner index or None)`.
+
+    A window rather than a single episode ON PURPOSE. Early in training an ant
+    falls within a second or two, and a one-episode video is 90 frames of a
+    creature toppling -- which tells a viewer nothing about whether the race is
+    working. Several consecutive episodes show the actual behaviour distribution.
 
     Deterministic = the distribution's mean, which is their eval action
-    (`DiagGaussian.mean_sample`). Sampling here would show exploration noise, not
-    the policy. Returns (per-agent episode return, episode length, winner index
-    or None).
+    (`DiagGaussian.mean_sample`). Sampling here would show exploration noise
+    instead of the policy.
     """
     import imageio
 
     renderer = renderer or RunToGoalRenderer()
     obs = env.reset()
-    frames, rew_sum, winner = [], np.zeros(env.n_agents), None
+    frames, rew_sum, episodes, t0 = [], np.zeros(env.n_agents), [], 0
     steps = max_steps or env.max_episode_steps
     for t in range(steps):
         a = ac.mean_action(obs.reshape(-1, env.obs_dim).float()).clamp(-1, 1)
@@ -60,9 +66,11 @@ def eval_video(env, ac, path, renderer=None, fps=40, world=0, max_steps=None):
         frames.append(renderer.frame(env, w=world))
         if bool(done[world]):
             win = info["winner"][world].cpu().numpy()
-            winner = int(win.argmax()) if win.any() else None
-            break
+            episodes.append({"return": rew_sum.round(1).tolist(),
+                             "length": t + 1 - t0,
+                             "winner": int(win.argmax()) if win.any() else None})
+            rew_sum, t0 = np.zeros(env.n_agents), t + 1
     with imageio.get_writer(path, fps=fps, quality=7) as wr:
         for f in frames:
             wr.append_data(f)
-    return rew_sum, len(frames), winner
+    return episodes, len(frames)

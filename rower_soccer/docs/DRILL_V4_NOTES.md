@@ -874,3 +874,43 @@ cannot hold as designed, and the options are not equivalent:
 
 This is a real fork in the pipeline design and belongs to the user, not to an
 overnight loop. Recorded rather than chosen.
+
+## 18. Aim improved and the OUTCOME did not -- six matched blocks
+
+*Measured 2026-08-11, v9 at 28M.*
+
+Section 16 predicted, on the aim-leads-fitness principle, that v9's outcome
+would follow its aim. Over six matched 5M blocks it has not:
+
+| block | v9 (UNFROZEN, aim 74.1 deg) | v8 (frozen, aim 134.2 deg) |
+|---|---|---|
+| 0-5M | 0.1253 | 0.1257 |
+| 5-10M | 0.1250 | 0.1268 |
+| 10-15M | 0.1203 | 0.1233 |
+| 15-20M | 0.1158 | 0.1160 |
+| 20-25M | 0.1121 | 0.1124 |
+| 25-30M | 0.1068 | 0.1049 |
+
+Two arms whose aim differs by 60 degrees produce indistinguishable fitness, both
+declining monotonically. So section 17's conclusion needs a boundary drawn
+around it: **unfreezing the decoder fixed AIM, and aim alone does not produce
+the outcome.** The decoder finding stands -- it is the only thing that has ever
+moved aim off chance -- but it is not by itself the fix for the drill.
+
+The likely reason is that this is a TIMED pass and aim is only half of it. The
+ball has to be AT the target at T, so the strike SPEED has to be modulated too,
+and section 1 already measured the ant striking at a median 15.2 m/s where the
+reward surface's interior optimum is 6-9 m/s. A 15 m/s strike rolls the ball
+~10.6 m past a 3-6 m target no matter how precisely it is aimed. Perfect
+direction with triple the required speed still scores the do-nothing value.
+
+That predicts v9's strike speed is still ~15 m/s, unchanged by the decoder
+unfreeze, and that is being measured now. If so, kick needs BOTH an expressive
+controller (the decoder) and a reason to modulate power -- and the arms so far
+have supplied neither together.
+
+Method note: this is the second time the aim-leads-fitness principle has been
+invoked, once correctly (section 11, v8's positioning led nothing and the arm
+died) and once as a premature promise (section 16). A leading indicator earns
+its name only after the lag actually resolves; until then it is a hypothesis
+about a correlation, not a forecast.

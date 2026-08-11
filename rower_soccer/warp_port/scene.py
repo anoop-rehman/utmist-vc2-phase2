@@ -234,6 +234,186 @@ def creature_size(creature_xml_path):
     return mass, float((hi - lo)[2])
 
 
+def _attach_creature(spec, creature_xml_path, prefix, xy=None):
+    """Attach one copy of `creature_xml_path` under `prefix`, on a freejoint.
+
+    The sub-spec is loaded FRESH on every call: `attach_body` moves the body out
+    of the spec it came from, so re-using one loaded spec for a second copy
+    attaches an empty shell. That is the whole reason a 4-creature scene cannot
+    just call this in a loop over one parsed spec.
+    """
+    sub = mujoco.MjSpec.from_file(creature_xml_path)
+    frame = spec.worldbody.add_frame()
+    attached_root = frame.attach_body(sub.worldbody.bodies[0], prefix, "")
+    attached_root.add_freejoint()
+    if xy is not None:
+        # The root body's pos becomes qpos0 for its freejoint, i.e. the pose the
+        # compiled model sits in before anything writes qpos. Only x and y move;
+        # z stays the converter's rest height, which `creature_meta` reads as
+        # spawn_z.
+        attached_root.pos = [float(xy[0]), float(xy[1]),
+                             float(attached_root.pos[2])]
+    return attached_root
+
+
+def _add_ball(spec, ball: BallSpec, name="ball"):
+    b = spec.worldbody.add_body(name=name, pos=[0.0, 0.0, ball.radius])
+    b.add_freejoint(name=f"{name}_free")
+    g = b.add_geom(name=f"{name}_geom", type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                   size=[ball.radius, 0.0, 0.0])
+    g.density = ball.density
+    g.friction = list(ball.friction)
+    g.condim = ball.condim
+    g.priority = ball.priority
+    g.solref = list(ball.solref)
+    g.rgba = list(ball.rgba)
+    return b
+
+
+def creature_meta(model, creature_xml_path, prefix="c-", ball: BallSpec = None,
+                  ball_body=None):
+    """The proprio index plumbing for ONE prefixed creature in `model`.
+
+    Factored out of `build_creature_scene` so the 2v2 scene (four creatures in
+    one model) derives every creature's indices through the SAME code. Proprio
+    is the frozen decoder's entire input contract, and its layout is decided
+    here -- body order, joint order, sensor names. A second, parallel copy of
+    this function for the multi-creature case is precisely how a 2v2 env ends
+    up feeding a transferred decoder a permuted vector while looking healthy.
+    """
+    root_name = f"{prefix}seg0"
+    root_body = model.body(root_name).id
+    body_ids = [model.body(i).id for i in range(model.nbody)
+                if model.body(i).name.startswith(prefix)]
+
+    # Free-joint addresses. Dispatch on the joint's BODY, not just its type:
+    # with a ball in the scene there are two free joints (four creatures: five),
+    # and claiming whichever comes last would silently hand the creature's root
+    # address to the ball -- every proprio observation would be wrong.
+    root_jnt = ball_jnt = None
+    joint_qpos, joint_qvel = [], []
+    for j in range(model.njnt):
+        jnt = model.joint(j)
+        if jnt.type[0] == mujoco.mjtJoint.mjJNT_FREE:
+            if int(model.jnt_bodyid[j]) == root_body:
+                root_jnt = j
+            elif ball_body is not None and int(model.jnt_bodyid[j]) == ball_body:
+                ball_jnt = j
+        elif jnt.name.startswith(prefix):
+            # nq/nv depend on joint type: hinge/slide are 1 qpos + 1 dof;
+            # ball joints are a 4-number quaternion + 3 angular-velocity dofs.
+            # Reading only qposadr[0]/dofadr[0] (as this used to) silently
+            # truncates a ball joint's state to its quaternion's w component
+            # and one axis of its angular velocity.
+            nq = 4 if jnt.type[0] == mujoco.mjtJoint.mjJNT_BALL else 1
+            nv = 3 if jnt.type[0] == mujoco.mjtJoint.mjJNT_BALL else 1
+            joint_qpos.append((int(jnt.qposadr[0]), nq))
+            joint_qvel.append((int(jnt.dofadr[0]), nv))
+    if root_jnt is None:
+        raise RuntimeError(f"creature root freejoint not found for {prefix!r}")
+    if ball is not None and ball_jnt is None:
+        raise RuntimeError("ball freejoint not found")
+
+    # Only THIS creature's sensors. The single-creature scene has no others, so
+    # filtering is a no-op there; in the 2v2 scene it is what keeps player 2's
+    # `torso_gyro` out of player 0's proprio.
+    sensor_slices = {}
+    for s in range(model.nsensor):
+        sen = model.sensor(s)
+        if not sen.name.startswith(prefix):
+            continue
+        sensor_slices[sen.name.removeprefix(prefix)] = (int(sen.adr[0]),
+                                                        int(sen.dim[0]))
+
+    # spawn z = root body's default z in the attached frame (converter sets
+    # it so the creature rests on the floor)
+    spawn_z = float(model.body(root_name).pos[2]) or float(
+        mujoco.MjModel.from_xml_path(creature_xml_path).body("seg0").pos[2])
+
+    # nu is per creature, not the model's: in the 2v2 scene model.nu is 32 and
+    # the per-creature action width is 8.
+    nu = sum(1 for a in range(model.nu)
+             if model.actuator(a).name.startswith(prefix))
+
+    return SceneMeta(
+        root_body=root_body,
+        body_ids=body_ids,
+        qpos_root=int(model.jnt_qposadr[root_jnt]),
+        qvel_root=int(model.jnt_dofadr[root_jnt]),
+        joint_qpos=joint_qpos,
+        joint_qvel=joint_qvel,
+        sensor_slices=sensor_slices,
+        nu=nu or model.nu,
+        spawn_z=spawn_z,
+        ball_body=ball_body,
+        ball_qpos=int(model.jnt_qposadr[ball_jnt]) if ball is not None else None,
+        ball_qvel=int(model.jnt_dofadr[ball_jnt]) if ball is not None else None,
+        ball_radius=ball.radius if ball is not None else None,
+    )
+
+
+def _stiffen_warp_contacts(model, ball=None, ball_geom="ball_geom"):
+    """See the long comment in `build_creature_scene`: Warp needs its own solref."""
+    model.geom_solref[:, 0] = WARP_SOLREF_TIMECONST
+    if ball is not None:
+        model.geom_solref[model.geom(ball_geom).id, 0] = WARP_BALL_SOLREF_TIMECONST
+
+
+def default_formation(k, n_players, scale=1.0):
+    """Slot k's (x, y) in the compiled model's DEFAULT pose: a real kickoff
+    formation, mirror-symmetric between the teams.
+
+    Not cosmetic. A body's `pos` is qpos0 for its freejoint, so without this all
+    four creatures compile stacked at the origin -- and `mujoco_warp.put_data`
+    sizes nothing itself: it reads `mjd.ncon` off exactly that initial state and
+    refuses any nconmax below it. Four interpenetrating ants make 535 contacts,
+    so the whole batch would have to carry buffers for a pose that never occurs.
+    Spread out, the same measurement is ~30.
+    """
+    gx, _, _ = goal_geometry(scale)
+    per_team = max(1, n_players // 2)
+    team, i = k // per_team, k % per_team
+    sx = -1.0 if team == 0 else 1.0
+    x = sx * (0.55 - 0.30 * (i / max(1, per_team - 1))) * gx
+    y = sx * (0.35 if i % 2 == 0 else -0.35) * 36.0 * scale
+    return x, y
+
+
+def build_soccer_scene(creature_xml_path, n_players=4, ball: BallSpec = None,
+                       pitch_scale=0.3125, prefix_fmt="p{}-",
+                       topdown_cam=False, cam_height=25.0, view_half=12.0):
+    """The 2v2 scene: `n_players` creatures + one ball on the scaled pitch.
+
+    Returns (model, [SceneMeta per player], player_prefixes). Players are
+    attached in slot order, so slot k is `prefix_fmt.format(k)`; slots 0..n/2-1
+    are HOME (defending -x) and the rest AWAY, matching `game/match.py`'s
+    SLOTS = (home_1, home_2, away_1, away_2).
+
+    Everything except the creature count is `build_creature_scene`'s scene:
+    same pitch XML, same ball spec, same Warp contact stiffening, same meta
+    extraction (`creature_meta`) -- so a creature standing at a given pose here
+    produces the same proprio as it would in a drill.
+    """
+    ball = ball or BallSpec()
+    spec = mujoco.MjSpec.from_string(base_xml(pitch_scale))
+    prefixes = [prefix_fmt.format(k) for k in range(n_players)]
+    for k, p in enumerate(prefixes):
+        _attach_creature(spec, creature_xml_path, p,
+                         xy=default_formation(k, n_players, pitch_scale))
+    _add_ball(spec, ball)
+    if topdown_cam:
+        import math as _math
+        fovy = 2.0 * _math.degrees(_math.atan(view_half / cam_height))
+        spec.worldbody.add_camera(name="topdown", pos=[0.0, 0.0, cam_height],
+                                  xyaxes=[1, 0, 0, 0, 1, 0], fovy=fovy)
+    model = spec.compile()
+    _stiffen_warp_contacts(model, ball)
+    ball_body = model.body("ball").id
+    metas = [creature_meta(model, creature_xml_path, prefix=p, ball=ball,
+                           ball_body=ball_body) for p in prefixes]
+    return model, metas, prefixes
+
+
 def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
                          target_marker=False, topdown_cam=False,
                          cam_height=25.0, view_half=12.0, base_xml=None):
@@ -251,22 +431,10 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
     # base_xml overrides the soccer pitch -- e.g. the fetch arena (small walled
     # square) reuses all the creature/ball attachment + meta machinery below.
     spec = mujoco.MjSpec.from_string(base_xml or _BASE_XML)
-    sub = mujoco.MjSpec.from_file(creature_xml_path)
-    frame = spec.worldbody.add_frame()
-    attached_root = frame.attach_body(sub.worldbody.bodies[0], prefix, "")
-    attached_root.add_freejoint()
+    _attach_creature(spec, creature_xml_path, prefix)
 
     if ball is not None:
-        b = spec.worldbody.add_body(name="ball", pos=[0.0, 0.0, ball.radius])
-        b.add_freejoint(name="ball_free")
-        g = b.add_geom(name="ball_geom", type=mujoco.mjtGeom.mjGEOM_SPHERE,
-                       size=[ball.radius, 0.0, 0.0])
-        g.density = ball.density
-        g.friction = list(ball.friction)
-        g.condim = ball.condim
-        g.priority = ball.priority
-        g.solref = list(ball.solref)
-        g.rgba = list(ball.rgba)
+        _add_ball(spec, ball)
 
     if target_marker:
         # Appended LAST so creature/ball qpos addresses stay put. contype=conaffinity=0
@@ -338,70 +506,11 @@ def build_creature_scene(creature_xml_path, prefix="c-", ball: BallSpec = None,
     # This does not fully eliminate the energy injection (the ball still departs at
     # 20-30 m/s off a 0.9 m/s worm), so PPOTrainer ALSO guards against non-finite
     # states rather than trusting this to be airtight. Both are needed.
-    model.geom_solref[:, 0] = WARP_SOLREF_TIMECONST
-    if ball is not None:
-        model.geom_solref[model.geom("ball_geom").id, 0] = WARP_BALL_SOLREF_TIMECONST
+    _stiffen_warp_contacts(model, ball)
 
-    root_name = f"{prefix}seg0"
-    root_body = model.body(root_name).id
-    body_ids = [model.body(i).id for i in range(model.nbody)
-                if model.body(i).name.startswith(prefix)]
     ball_body = model.body("ball").id if ball is not None else None
-
-    # Free-joint addresses. Dispatch on the joint's BODY, not just its type:
-    # with a ball in the scene there are two free joints, and claiming
-    # whichever comes last would silently hand the creature's root address to
-    # the ball (and vice versa) -- every proprio observation would be wrong.
-    root_jnt = ball_jnt = None
-    joint_qpos, joint_qvel = [], []
-    for j in range(model.njnt):
-        jnt = model.joint(j)
-        if jnt.type[0] == mujoco.mjtJoint.mjJNT_FREE:
-            if int(model.jnt_bodyid[j]) == root_body:
-                root_jnt = j
-            elif ball_body is not None and int(model.jnt_bodyid[j]) == ball_body:
-                ball_jnt = j
-        elif jnt.name.startswith(prefix):
-            # nq/nv depend on joint type: hinge/slide are 1 qpos + 1 dof;
-            # ball joints are a 4-number quaternion + 3 angular-velocity dofs.
-            # Reading only qposadr[0]/dofadr[0] (as this used to) silently
-            # truncates a ball joint's state to its quaternion's w component
-            # and one axis of its angular velocity.
-            nq = 4 if jnt.type[0] == mujoco.mjtJoint.mjJNT_BALL else 1
-            nv = 3 if jnt.type[0] == mujoco.mjtJoint.mjJNT_BALL else 1
-            joint_qpos.append((int(jnt.qposadr[0]), nq))
-            joint_qvel.append((int(jnt.dofadr[0]), nv))
-    if root_jnt is None:
-        raise RuntimeError("creature root freejoint not found")
-    if ball is not None and ball_jnt is None:
-        raise RuntimeError("ball freejoint not found")
-
-    sensor_slices = {}
-    for s in range(model.nsensor):
-        sen = model.sensor(s)
-        name = sen.name.removeprefix(prefix)
-        sensor_slices[name] = (int(sen.adr[0]), int(sen.dim[0]))
-
-    # spawn z = root body's default z in the attached frame (converter sets
-    # it so the creature rests on the floor)
-    spawn_z = float(model.body(root_name).pos[2]) or float(
-        mujoco.MjModel.from_xml_path(creature_xml_path).body("seg0").pos[2])
-
-    meta = SceneMeta(
-        root_body=root_body,
-        body_ids=body_ids,
-        qpos_root=int(model.jnt_qposadr[root_jnt]),
-        qvel_root=int(model.jnt_dofadr[root_jnt]),
-        joint_qpos=joint_qpos,
-        joint_qvel=joint_qvel,
-        sensor_slices=sensor_slices,
-        nu=model.nu,
-        spawn_z=spawn_z,
-        ball_body=ball_body,
-        ball_qpos=int(model.jnt_qposadr[ball_jnt]) if ball is not None else None,
-        ball_qvel=int(model.jnt_dofadr[ball_jnt]) if ball is not None else None,
-        ball_radius=ball.radius if ball is not None else None,
-    )
+    meta = creature_meta(model, creature_xml_path, prefix=prefix, ball=ball,
+                         ball_body=ball_body)
     return model, meta
 
 

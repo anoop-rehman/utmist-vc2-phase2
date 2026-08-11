@@ -18,6 +18,7 @@ and `proprio_indices`/`task_indices` are contiguous everywhere. The target is
 represented in 3-D across all tasks (`_to_ego3`).
 """
 import json
+from dataclasses import dataclass
 
 import mujoco
 import numpy as np
@@ -64,6 +65,96 @@ def fetch_ball():
     """The quadruped-fetch ball (r=.15, its friction), not the soccer ball."""
     return BallSpec(radius=0.15, mass=0.35, friction=(0.7, 0.005, 0.005),
                     solref=(0.01, 1.0))
+
+
+# ----------------------------------------------------------------------------
+# Proprio: ONE definition, shared by the single-creature drills and the 2v2
+# self-play env (soccer2v2_env.py).
+#
+# Proprio is the frozen decoder's entire input contract. A drill and the 2v2 env
+# that fine-tunes on top of it must produce the SAME 65 numbers in the SAME
+# order for the same creature state, or the decoder is being fed a permuted
+# vector -- which trains happily and transfers nothing. Making them literally
+# call one function is the only version of that guarantee that cannot rot;
+# tests/test_soccer2v2.py then measures it.
+# ----------------------------------------------------------------------------
+@dataclass
+class ProprioIndex:
+    """Where one creature's proprio inputs live in a batched state tensor."""
+    root_body: int
+    body_ids: torch.Tensor        # long [nbody], root first
+    jq: torch.Tensor              # long [njq]  non-free joint qpos columns
+    jv: torch.Tensor              # long [njv]
+    touch: list                   # [(start, dim)] in segment order
+    vel: tuple                    # (start, dim) velocimeter
+    gyro: tuple
+    accel: tuple
+
+    @property
+    def width(self):
+        return (3 * len(self.body_ids) + 1 + len(self.jq) + len(self.jv)
+                + 9 + sum(d for _, d in self.touch) + 3)
+
+
+def proprio_index(meta, device):
+    """Build the proprio index bundle from a `SceneMeta`."""
+    jq_idx = [i for start, n in meta.joint_qpos for i in range(start, start + n)]
+    jv_idx = [i for start, n in meta.joint_qvel for i in range(start, start + n)]
+    ss = meta.sensor_slices
+    # NOTE: lexicographic, NOT scene.touch_slices' numeric sort. The two agree
+    # for every creature that exists (worm 3 / ant 9 / rower 9 segments, all
+    # single-digit) and this is the order every trained checkpoint was fed, so
+    # it is kept verbatim rather than quietly "fixed" -- see touch_slices'
+    # docstring for the 10+-segment case that would diverge.
+    touch_keys = sorted(k for k in ss if k.endswith("_touch"))
+    return ProprioIndex(
+        root_body=meta.root_body,
+        body_ids=torch.as_tensor(meta.body_ids, device=device, dtype=torch.long),
+        jq=torch.as_tensor(jq_idx, device=device, dtype=torch.long),
+        jv=torch.as_tensor(jv_idx, device=device, dtype=torch.long),
+        touch=[ss[k] for k in touch_keys],
+        vel=ss["torso_vel"], gyro=ss["torso_gyro"], accel=ss["torso_accel"])
+
+
+def proprio_obs(qpos, qvel, xpos, xmat, sensordata, idx):
+    """The proprio block for the creature described by `idx`, as [n, width].
+
+    Layout (widths for the ant/rower in brackets; all derived, never hardcoded):
+        bodies_ego (3*nbody) | body_height (1) | joints_pos | joints_vel
+        | accel(3) gyro(3) velocimeter(3) | touch (n_touch) | world_zaxis (3)
+    """
+    n = qpos.shape[0]
+    pos = xpos[:, idx.root_body, :]
+    rot = xmat[:, idx.root_body]
+    bp = xpos[:, idx.body_ids, :] - pos.unsqueeze(1)
+    bodies_ego = torch.einsum("nij,nbj->nbi",
+                              rot.transpose(1, 2), bp).reshape(n, -1)
+    touch = torch.cat([sensordata[:, s:s + d] for s, d in idx.touch], -1) / 10000.0
+    sv, sg, sa = (sensordata[:, s:s + d]
+                  for s, d in (idx.vel, idx.gyro, idx.accel))
+    # Accelerometer is the ONLY unbounded input (contact spikes ~5,700 m/s^2);
+    # /100 + clamp is part of the obs contract any deployment body must apply.
+    sa = (sa / 100.0).clamp(-50.0, 50.0)
+    world_zaxis = rot.reshape(n, 9)[:, 6:9]
+    return torch.cat([
+        bodies_ego,                 # creature/bodies_pos       (3*nbody)
+        pos[:, 2:3],                # creature/body_height      (1)
+        qpos[:, idx.jq],            # creature/joints_pos       (len jq)
+        qvel[:, idx.jv],            # creature/joints_vel       (len jv)
+        sa, sg, sv,                 # accel, gyro, velocimeter  (9)
+        touch,                      # creature/touch_sensors    (n touch)
+        world_zaxis,                # creature/world_zaxis      (3)
+    ], -1)
+
+
+def to_ego3(pos, rot, world_xyz):
+    """Rotate a world-frame POSITION (relative to `pos`) into the root frame."""
+    return torch.einsum("nij,nj->ni", rot.transpose(1, 2), world_xyz - pos)
+
+
+def vec_to_ego3(rot, world_vec):
+    """Rotate a world-frame VECTOR (no translation) into the root frame."""
+    return torch.einsum("nij,nj->ni", rot.transpose(1, 2), world_vec)
 
 
 # ----------------------------------------------------------------------------
@@ -277,10 +368,8 @@ class WormEnv:
 
         # 3. proprio index plumbing (creature-generic; ball-joint aware).
         m = self.meta
-        jq_idx = [i for start, n in m.joint_qpos for i in range(start, start + n)]
-        jv_idx = [i for start, n in m.joint_qvel for i in range(start, start + n)]
-        self.jq = torch.as_tensor(jq_idx, device=self.device, dtype=torch.long)
-        self.jv = torch.as_tensor(jv_idx, device=self.device, dtype=torch.long)
+        self._pidx = proprio_index(m, self.device)
+        self.jq, self.jv = self._pidx.jq, self._pidx.jv
         # `w` slot of any 4-wide (ball) creature joint quaternion -- must be reset
         # to the identity quat, else forward() normalizes 0/0 = NaN. Empty for the
         # hinge-only worm; kept for generality.
@@ -288,12 +377,10 @@ class WormEnv:
             [start for start, n in m.joint_qpos if n == 4],
             device=self.device, dtype=torch.long)
         self.body_ids = torch.as_tensor(m.body_ids, device=self.device)
-        ss = m.sensor_slices
-        touch_keys = sorted(k for k in ss if k.endswith("_touch"))
-        self.sl_touch = [ss[k] for k in touch_keys]
-        self.sl_vel, self.sl_gyro, self.sl_accel = (ss["torso_vel"],
-                                                    ss["torso_gyro"],
-                                                    ss["torso_accel"])
+        self.sl_touch = self._pidx.touch
+        self.sl_vel, self.sl_gyro, self.sl_accel = (self._pidx.vel,
+                                                    self._pidx.gyro,
+                                                    self._pidx.accel)
         self.bq, self.bv = m.ball_qpos, m.ball_qvel
         self.ball_radius, self.ball_body = m.ball_radius, m.ball_body
         self.rv = m.qvel_root
@@ -301,8 +388,7 @@ class WormEnv:
         self._spawn_z = m.spawn_z
 
         # 4. dims (all derived, proprio-first + contiguous).
-        n_proprio = (3 * len(m.body_ids) + 1 + len(self.jq) + len(self.jv)
-                     + 9 + len(touch_keys) + 3)
+        n_proprio = self._pidx.width
         self.obs_dim = n_proprio + self._task_dim()
         self.act_dim = m.nu
         self.proprio_indices = np.arange(0, n_proprio)
@@ -402,12 +488,12 @@ class WormEnv:
     def _to_ego3(self, world_xyz):
         """Rotate a world-frame POSITION (relative to root) into the root frame."""
         pos, rot = self._root_frames()
-        return torch.einsum("nij,nj->ni", rot.transpose(1, 2), world_xyz - pos)
+        return to_ego3(pos, rot, world_xyz)
 
     def _vec_to_ego3(self, world_vec):
         """Rotate a world-frame VECTOR (no translation) into the root frame."""
         _, rot = self._root_frames()
-        return torch.einsum("nij,nj->ni", rot.transpose(1, 2), world_vec)
+        return vec_to_ego3(rot, world_vec)
 
     def _ball_xy(self):
         return self.qpos[:, self.bq:self.bq + 2]
@@ -490,28 +576,11 @@ class WormEnv:
 
     # -- proprio obs block (29 dims for the worm; widths derived) ----------
     def _proprio_obs(self):
-        n = self.n
-        pos, rot = self._root_frames()
-        bp = self.xpos[:, self.body_ids, :] - pos.unsqueeze(1)
-        bodies_ego = torch.einsum("nij,nbj->nbi",
-                                  rot.transpose(1, 2), bp).reshape(n, -1)
-        touch = torch.cat([self.sensordata[:, s:s + d]
-                           for s, d in self.sl_touch], -1) / 10000.0
-        sv, sg, sa = (self.sensordata[:, s:s + d] for s, d in
-                      (self.sl_vel, self.sl_gyro, self.sl_accel))
-        # Accelerometer is the ONLY unbounded input (contact spikes ~5,700 m/s^2);
-        # /100 + clamp is part of the obs contract any deployment body must apply.
-        sa = (sa / 100.0).clamp(-50.0, 50.0)
-        world_zaxis = rot.reshape(n, 9)[:, 6:9]
-        return torch.cat([
-            bodies_ego,                 # creature/bodies_pos       (3*nbody)
-            pos[:, 2:3],                # creature/body_height      (1)
-            self.qpos[:, self.jq],      # creature/joints_pos       (len jq)
-            self.qvel[:, self.jv],      # creature/joints_vel       (len jv)
-            sa, sg, sv,                 # accel, gyro, velocimeter  (9)
-            touch,                      # creature/touch_sensors    (n touch)
-            world_zaxis,                # creature/world_zaxis      (3)
-        ], -1)
+        """Delegates to the module-level `proprio_obs`, which the 2v2 self-play
+        env calls too -- one definition, so the decoder's input contract cannot
+        drift between the drills and the env that fine-tunes on them."""
+        return proprio_obs(self.qpos, self.qvel, self.xpos, self.xmat,
+                           self.sensordata, self._pidx)
 
     # -- obs / reset / step templates --------------------------------------
     def _obs(self):

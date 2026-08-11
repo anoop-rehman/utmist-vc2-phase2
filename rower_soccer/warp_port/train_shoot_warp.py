@@ -41,6 +41,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
         out_of_play_dist=args.out_of_play,
         speed_clip=args.speed_clip, w_strike=args.w_strike,
         goal_bonus=args.goal_bonus, reward_coef=args.reward_coef,
+        goal_time_coef=args.goal_time_coef,
         w_player_to_ball=args.w_player_to_ball, w_ball_to_cmd=args.w_ball_to_cmd,
         approach_scale=args.approach_scale, reward_mode=args.reward_mode,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
@@ -125,13 +126,23 @@ def main():
                         "at contact-break")
     p.add_argument("--goal-bonus", type=float, default=5.0,
                    help="paid once, on the step the ball crosses the line "
-                        "between the posts and under the bar. Sized to dominate "
-                        "a good strike (0.5 * 8 = 4) without saturating "
-                        "rew_clip, so scoring beats striking hard at nothing.")
+                        "between the posts and under the bar, DISCOUNTED by "
+                        "exp(-goal_time_coef * t_score). Sized to dominate a "
+                        "good strike (0.5 * 8 = 4) without saturating rew_clip, "
+                        "so scoring beats striking hard at nothing.")
+    p.add_argument("--goal-time-coef", type=float, default=0.4,
+                   help="k in the urgency factor exp(-k * t_score) that the "
+                        "goal bonus is multiplied by, and the same k the "
+                        "fitness scores a goal with (drill v4). At 0.4 a 1 s "
+                        "goal keeps 0.67 of the bonus, a 3 s goal 0.30, a 5 s "
+                        "goal 0.14 -- so burying it beats escorting it over the "
+                        "line, which is the only version of shoot a 2v2 match "
+                        "rewards. 0 restores v3's flat bonus.")
     p.add_argument("--speed-clip", type=float, default=8.0)
     p.add_argument("--reward-coef", type=float, default=0.5,
-                   help="c in the fitness exp(-c * d), d = closest the ball got "
-                        "to the goal MOUTH (0 anywhere inside it)")
+                   help="c in the MISS branch of fitness, 0.5*exp(-c * d), "
+                        "d = closest the ball got to the goal MOUTH (0 anywhere "
+                        "inside it)")
     p.add_argument("--w-player-to-ball", type=float, default=0.15)
     p.add_argument("--w-ball-to-cmd", type=float, default=0.1)
     p.add_argument("--approach-scale", type=float, default=0.5)

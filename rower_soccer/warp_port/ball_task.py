@@ -431,32 +431,124 @@ class KickToPointReward(_StrikeReward):
                            torch.where(env.prev_n_segments > 0, prev, cur))
 
 
-class ShootReward(_StrikeReward):
-    """kick's reward with the command pinned at the goal, plus the goal bonus.
+class TimedKickReward(_StrikeReward):
+    """A PASS: the ball at the target AT A GIVEN TIME (drill v4).
 
-    reward = w_strike * (banked strike speed toward the goal)
-             + goal_bonus * (a goal was scored this step)
-             + shaping_scale * shaping
+    reward = w_arrive * exp(-c * ||ball(T) - target||_3D)   [paid once, at T]
+             + w_strike * (banked strike speed)             [w_strike = 0 by default]
+             + shaping_scale * (me->ball approach only)
+             all multiplied by upright
 
-    fitness = mean over this episode's segments (including the one in flight) of
-    exp(-reward_coef * d), where d is the closest the ball got to the GOAL MOUTH
-    RECTANGLE, not to a point: d is 0 anywhere between the posts and under the
-    bar, so a goal scores 1.0 whether it goes in dead centre or off the post.
-    Measuring to the mouth centre instead would score a 10 m-wide goal as a miss.
+    What changed from KickToPointReward and why. That reward scored the CLOSEST
+    the ball came to the target at ANY moment in a 2-6 s window, which a
+    creature satisfies perfectly well by walking the ball over -- the small
+    w_strike term was a patch discouraging exactly that, i.e. a property of the
+    weights rather than of the objective. Here the segment ends at a deadline
+    `T = d_spawn / v_pace` and the only thing measured is WHERE THE BALL IS
+    THEN. Dribbling is now excluded by arithmetic, not by a penalty: the
+    slowest pace in the band still needs the ball moving faster than the ant
+    can run. Striking too hard is punished as symmetrically as striking too
+    soft, because the ball sails past the target before T -- v3 punished
+    neither, and rolling friction (~4 m/s^2 on this ball) means the required
+    strike is genuinely a modulated one, not "as hard as possible".
+
+    DENSE, never a ring test. Grading "did the ball pass within r of the target
+    at T" is a gate random exploration essentially never opens, so the gradient
+    is flat everywhere and the run learns nothing; exp(-c * d_at_T) always
+    points somewhere.
+
+    Shaping: the me->ball approach term is kept (reaching the ball is a
+    prerequisite and it is what makes early exploration work at all), the
+    ball->cmd_dir velocity term is DROPPED -- it pays monotonically for "faster
+    toward the target", which is precisely the pace modulation this objective
+    exists to teach. It is forced to zero here rather than left to a flag, so
+    no launch command can quietly reintroduce it.
+
+    fitness = mean over the episode's COMPLETED segments of exp(-c * d_at_T),
+    falling back to the previous episode's mean in a world that has not closed
+    one yet. Same shape and scale as shoot's, so the two drills stay
+    comparable. The segment in flight is deliberately excluded: its arrival is
+    undefined until the deadline.
     """
 
-    def __init__(self, goal_bonus=5.0, reward_coef=0.5, w_upright=1.0, **kw):
+    def __init__(self, w_arrive=3.0, reward_coef=0.5, w_upright=1.0, **kw):
         super().__init__(**kw)
-        self.goal_bonus = goal_bonus
+        self.w_arrive = w_arrive
         self.reward_coef = reward_coef
         self.w_upright = w_upright
+        self.w_b2c = 0.0   # see docstring: fights pace modulation
 
     def __call__(self, env):
-        r = (self.w_strike * env.credit
-             + self.goal_bonus * env.scored_now.float()
+        # env.last_arrival is the deadline snapshot taken before the respawn,
+        # zero on every other step -- see kick_env._update_task.
+        r = (self.w_arrive * env.last_arrival + self.w_strike * env.credit
              + env.shaping_scale * self._shaping(env))
         return r * upright(env) ** self.w_upright
 
     def fitness(self, env):
-        cur = torch.exp(-self.reward_coef * env.seg_goal_best)
-        return (env.goal_fit_sum + cur) / (env.n_segments + 1.0)
+        cur = env.target_fit_sum / env.n_segments.clamp(min=1.0)
+        prev = env.prev_target_fit_sum / env.prev_n_segments.clamp(min=1.0)
+        return torch.where(env.n_segments > 0, cur,
+                           torch.where(env.prev_n_segments > 0, prev,
+                                       torch.zeros_like(cur)))
+
+
+class ShootReward(_StrikeReward):
+    """kick's reward with the command pinned at the goal, plus a TIMED goal bonus.
+
+    reward = w_strike * (banked strike speed toward the goal)
+             + goal_bonus * exp(-k * t_score) * (a goal was scored this step)
+             + shaping_scale * shaping
+
+    The `exp(-k * t_score)` factor (drill v4) is what makes this drill *shoot*
+    rather than *walk the ball in*. A flat bonus pays the same for a goal at
+    0.5 s and a goal at 5 s, so the cheapest policy is to escort the ball over
+    the line -- which in a match is intercepted every time. `t_score` is the
+    time within the SEGMENT (the creature is respawned in front of the mouth at
+    every segment start, so it is "time since this attempt began"). At the
+    default k=0.4: 1 s -> 0.67 of the bonus, 3 s -> 0.30, 5 s -> 0.14.
+
+    fitness (drill v4) = mean over the episode's segments of
+
+        scored ?  0.5 + 0.5 * exp(-k * t_score)  :  0.5 * exp(-c * d_mouth_best)
+
+    computed by the env (`env.seg_fitness`, which is also where the deviation
+    from the spec's exact scored branch is argued) so the reward and the
+    accumulator can never drift apart. Before v4 this was
+    `exp(-c * d_mouth_best)` alone -- accuracy only -- so best.pt was SELECTED
+    on something the reward did not pay for, and a timid ant that trickled the
+    ball to the line outranked one that buried it. Goals live in the upper half
+    of [0, 1] and misses in the lower, so any goal outranks any miss.
+
+    `d_mouth_best` is the closest the ball came to the GOAL MOUTH RECTANGLE, not
+    to a point: 0 anywhere between the posts and under the bar, so a goal scores
+    at the top of the miss branch whether it goes in dead centre or off the
+    post. Measuring to the mouth centre would score a 7 m-wide goal as a miss.
+    """
+
+    def __init__(self, goal_bonus=5.0, reward_coef=0.5, goal_time_coef=0.4,
+                 w_upright=1.0, **kw):
+        super().__init__(**kw)
+        self.goal_bonus = goal_bonus
+        self.reward_coef = reward_coef
+        # k in exp(-k * t_score). The env holds the same number (it needs it for
+        # the fitness accumulator); shoot_env passes one value into both.
+        self.goal_time_coef = goal_time_coef
+        self.w_upright = w_upright
+
+    def __call__(self, env):
+        # env.last_score_t, NOT env.seg_score_t: a goal ENDS the segment, so by
+        # the time the reward runs the env has already respawned and zeroed the
+        # per-segment clock -- reading it here would pay exp(0) = the full flat
+        # bonus for every goal, silently undoing the urgency term. Same
+        # snapshot discipline as kick's last_arrival.
+        urgency = torch.exp(-self.goal_time_coef * env.last_score_t)
+        r = (self.w_strike * env.credit
+             + self.goal_bonus * urgency * env.scored_now.float()
+             + env.shaping_scale * self._shaping(env))
+        return r * upright(env) ** self.w_upright
+
+    def fitness(self, env):
+        # Includes the segment in flight, which is why the denominator is
+        # n_segments + 1: PPOTrainer samples fitness wherever its rollout lands.
+        return (env.goal_fit_sum + env.seg_fitness()) / (env.n_segments + 1.0)

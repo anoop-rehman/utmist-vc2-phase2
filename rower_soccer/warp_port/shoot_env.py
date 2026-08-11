@@ -43,7 +43,7 @@ import torch
 
 from rower_soccer.warp_port.ball_task import SegmentedBallTask, ShootReward
 from rower_soccer.warp_port.scene import BallSpec, base_xml, goal_geometry
-from rower_soccer.warp_port.worm_env_base import WormEnv
+from rower_soccer.warp_port.worm_env_base import CONTROL_DT, WormEnv
 
 
 class WarpShootEnv(SegmentedBallTask, WormEnv):
@@ -53,6 +53,7 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
                  shoot_dist_range=(2.0, 5.0), ball_spawn_range=(1.5, 3.0),
                  shoot_y_frac=0.4, spawn_cone=np.pi / 3, out_of_play_dist=20.0,
                  speed_clip=8.0, w_strike=0.5, goal_bonus=5.0,
+                 goal_time_coef=0.4,
                  w_player_to_ball=0.15, w_ball_to_cmd=0.1, approach_scale=0.5,
                  reward_coef=0.5, reward_mode="paper", device=None, seed=0,
                  use_graph=True, ball: BallSpec = None, nconmax=64, njmax=512,
@@ -68,6 +69,10 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self._segment_seconds = segment_seconds
         self._speed_clip = speed_clip
         self._reward_coef = reward_coef
+        # k in the urgency factor exp(-k * t_score), shared by the reward's goal
+        # bonus and this env's fitness -- one number, so the thing checkpoints
+        # are SELECTED on is the thing the reward pays for (drill v4).
+        self._goal_time_coef = goal_time_coef
         # Goal geometry must follow the PITCH SCALE. These were module constants
         # (42.6667 / 11.88 / 5.3333), which are the goal's position on the
         # unscaled 96x72 m pitch. At pitch_scale 0.3125 the real goal sits at
@@ -77,9 +82,10 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
             goal_geometry(pitch_scale)
         self.shaping_scale = 1.0
         self.fixed_start = fixed_start
-        reward = reward or ShootReward(w_upright=w_upright, 
+        reward = reward or ShootReward(w_upright=w_upright,
             mode=reward_mode, w_strike=w_strike, goal_bonus=goal_bonus,
-            reward_coef=reward_coef, w_player_to_ball=w_player_to_ball,
+            reward_coef=reward_coef, goal_time_coef=goal_time_coef,
+            w_player_to_ball=w_player_to_ball,
             w_ball_to_cmd=w_ball_to_cmd, approach_scale=approach_scale)
         super().__init__(num_worlds=num_worlds, creature_xml=creature_xml,
                          episode_seconds=episode_seconds, use_gpu=use_gpu,
@@ -121,6 +127,13 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self.goals = torch.zeros(n, device=dev)
         self.goal_fit_sum = torch.zeros(n, device=dev)
         self.seg_goal_best = torch.full((n,), float(self.goal_x), device=dev)
+        # Drill v4 timing. seg_scored/seg_score_t describe the segment IN
+        # FLIGHT and are cleared on every respawn; last_score_t is the snapshot
+        # the reward reads, taken before the respawn and zero on every step
+        # except the one a goal is scored on.
+        self.seg_scored = torch.zeros(n, dtype=torch.bool, device=dev)
+        self.seg_score_t = torch.zeros(n, device=dev)
+        self.last_score_t = torch.zeros(n, device=dev)
 
     def _task_obs(self):
         return torch.cat([self._ball_ego6(),
@@ -158,6 +171,17 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self.seg_goal_best = torch.minimum(self.seg_goal_best, d_goal)
         self.scored_now = self._scored()
         self.goals += self.scored_now.float()
+        # WHEN the goal went in, in seconds since this attempt started. A goal
+        # also ends the segment (`out` fires the same step), so at most one
+        # scoring step per segment and seg_scored can only latch once.
+        t_seg = self.seg_t * CONTROL_DT
+        first_goal = self.scored_now & ~self.seg_scored
+        self.seg_score_t = torch.where(first_goal, t_seg, self.seg_score_t)
+        self.seg_scored |= self.scored_now
+        # Snapshot for the reward, which runs AFTER the respawn has zeroed
+        # seg_score_t (see ShootReward.__call__).
+        self.last_score_t = torch.where(self.scored_now, self.seg_score_t,
+                                        torch.zeros_like(self.seg_score_t))
 
         timeout = self.seg_t >= self.segment_steps
         # Out of play: past the goal line (scored or wide), off the touchline, or
@@ -169,11 +193,38 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         # A segment that ends without the release test ever firing (creature
         # still standing over the ball) still banks its strike.
         self._bank(end)
+        # Bank the segment's fitness BEFORE _close_segments respawns and
+        # overwrites seg_goal_best / seg_scored with the next attempt's state.
         if bool(end.any()):
             idx = end.nonzero(as_tuple=True)[0]
-            self.goal_fit_sum[idx] += torch.exp(
-                -self._reward_coef * self.seg_goal_best[idx])
+            self.goal_fit_sum[idx] += self.seg_fitness()[idx]
         self._close_segments(end)
+
+    def seg_fitness(self):
+        """Per-segment fitness (drill v4), bounded [0, 1]:
+
+            scored ?  0.5 + 0.5 * exp(-k * t_score)
+                   :  0.5 * exp(-c * d_mouth_best)
+
+        One definition, read by both the episode accumulator above and
+        ShootReward.fitness, so checkpoint selection and the reward can never
+        again be grading different things. Goals occupy (0.5, 1], misses
+        [0, 0.5]: ANY goal outranks ANY miss, sooner beats later within goals,
+        closer beats wider within misses.
+
+        DEVIATION FROM DRILL_V4_SPEC, deliberate. The spec writes the scored
+        branch as bare `exp(-k * t_score)` and then justifies the miss branch's
+        0.5 ceiling with "any goal outranks any miss" -- but at k = 0.4 the bare
+        form crosses 0.5 at t = ln(2)/k = 1.73 s, so a goal scored in 3 s (0.30)
+        would rank BELOW a shot that merely grazed the post (0.5). That is the
+        same class of mistake this fitness exists to remove, so the scored
+        branch is affinely mapped into the upper half instead. Ordering within
+        each branch, the bound, and the calibration of k are all unchanged.
+        """
+        return torch.where(
+            self.seg_scored,
+            0.5 + 0.5 * torch.exp(-self._goal_time_coef * self.seg_score_t),
+            0.5 * torch.exp(-self._reward_coef * self.seg_goal_best))
 
     # -- spawning -----------------------------------------------------------
     def _spawn_worlds(self, idx, root_xy=None, yaw=None):
@@ -218,6 +269,9 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
             torch.stack([(self.goal_x - ball_xy[:, 0]).clamp(min=0.0),
                          (ball_xy[:, 1].abs() - self.goal_half_width).clamp(min=0.0)],
                         -1), dim=-1)
+        # Fresh attempt: nothing scored yet, clock back to zero.
+        self.seg_scored[idx] = False
+        self.seg_score_t[idx] = 0.0
 
     def _reset_state(self):
         idx = torch.arange(self.n, device=self.device)
@@ -227,6 +281,7 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self.goals.zero_()
         self.goal_fit_sum.zero_()
         self.scored_now.fill_(False)
+        self.last_score_t.zero_()
 
     def _sanitize_task(self, idx):
         self._spawn_worlds(idx)

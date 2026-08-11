@@ -980,3 +980,40 @@ The cheap sanity check first: v3 (point reward, w_strike=0.1) reached fitness
 0.376 on ITS metric while every timed arm sits near 0.10 on its own. Those two
 numbers are not comparable (section 7), but "the arm that paid for strikes
 struck, and the arms that did not, did not" is not a subtle signal.
+
+## 20. Section 12's prediction: RESOLVED, and it failed
+
+*Measured 2026-08-11, v8 at 189M steps and v9 at 95.7M.*
+
+Section 12 recorded a falsifiable prediction before the data existed: if the
+strike point removed the anti-learning, **v8 at ~98M should sit materially above
+v6's 0.0974 and above the 0.105 do-nothing baseline.**
+
+| arm | steps | fitness mean | vs 0.105 baseline |
+|---|---|---|---|
+| v8 (strike point, frozen) | 189M | **0.075** | below |
+| v9 (strike point, UNFROZEN) | 95.7M | **0.084** | below |
+
+At nearly twice the step count in the prediction, v8 is at 0.075. **The
+prediction failed.** Recording that plainly is the point of having written it
+down; the alternative is a note that quietly stops being mentioned.
+
+The more informative half is v9. The unfrozen decoder **fixed aim** — the only
+arm ever to beat the random baseline (74.1 deg against v8's 134.2 at three times
+the training) — and it still converges below do-nothing. That is exactly what
+section 19's diagnosis predicts: with `w_strike = 0` nothing ever pays for a
+strike, so both arms find the same attractor regardless of what the controller
+is capable of expressing. Capability without incentive changes nothing.
+
+This closes the kick investigation. Every arm is accounted for:
+
+| arm | shaping | decoder | outcome |
+|---|---|---|---|
+| v3 | point, `w_strike 0.1` | frozen | struck at 15.2 m/s, fitness 0.376 on its own metric |
+| v4 | timed, coef 0.5 | frozen | declined to ~0.12 |
+| v6 | timed, coef 0.2 | frozen | declined 0.1288 → 0.0974 |
+| v7 | + spawn anchor | frozen | null vs v6 at matched steps |
+| v8 | + strike point | frozen | positioning fixed transiently, declined to 0.075 |
+| v9 | strike point | **unfrozen** | **aim fixed**, still declined to 0.084 |
+
+The one arm that ever worked is the one that paid for striking.

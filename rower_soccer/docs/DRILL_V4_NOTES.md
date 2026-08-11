@@ -914,3 +914,69 @@ invoked, once correctly (section 11, v8's positioning led nothing and the arm
 died) and once as a premature promise (section 16). A leading indicator earns
 its name only after the lag actually resolves; until then it is a hypothesis
 about a correlation, not a forecast.
+
+## 19. The timed arms do not strike AT ALL -- and section 2 caused it
+
+*Measured 2026-08-11, v9 at 28M, 2703 closed segments, per-segment PEAK ball
+speed (the hardest the ball was hit that segment).*
+
+| v9 peak ball speed | |
+|---|---|
+| median | **0.00 m/s** |
+| mean | 1.15 |
+| p90 | 3.97 |
+| max | 8.69 |
+| **never really struck (<1 m/s)** | **63.6%** |
+| soft (1-6) | 35.1% |
+| in the 6-9 optimum | 1.3% |
+| **overshoot (>9)** | **0.0%** |
+
+**The prediction in section 18 was wrong, and wrong in the opposite direction.**
+It expected ~15 m/s overshoot. In fact nothing overshoots at all and in almost
+two thirds of segments the ball never moves. Section 1's whole "the ant must
+learn to strike softer" framing describes v3, not the timed arms.
+
+### Why: section 2 removed the only thing paying for a strike
+
+v3 used `reward_kind=point` with `w_strike=0.1` -- an explicit payment for ball
+speed -- and struck at a median 15.2 m/s. Every timed arm has `w_strike` forced
+to **0**, by a decision recorded in section 2 of this document:
+
+> "power is a consequence of the deadline, and paying for it separately prices
+> the same thing twice and in one direction only."
+
+That reasoning does not survive contact with the measurement. The arrival term
+is paid ONCE, at T. The approach shaping is paid EVERY step. A per-step payment
+for walking at the ball outweighs a single terminal payment for where the ball
+ended, so the policy converges on standing near the ball without hitting it --
+which is exactly the "contact solved, direction random" picture of section 8,
+now with a mechanism: there was never a gradient toward striking in the first
+place.
+
+It also explains the monotone DECLINE rather than a plateau (sections 12-13).
+Not striking is an attractor: the approach shaping keeps paying, the arrival
+term is nearly indifferent between "ball did not move" and "ball moved a little
+in a random direction", and every step of training walks further into it.
+
+### What this means for the decoder result
+
+Section 17 stands but its scope narrows again. Unfreezing the decoder is still
+the only thing that has ever moved aim off chance (74.1 vs 134.2 deg). But an
+arm that strikes the ball in 36% of segments and reaches the useful power band
+in 1.3% cannot express its aim as an outcome no matter how good that aim is.
+Aim was necessary; a reason to strike is also necessary; the arms so far have
+never had both at once.
+
+### Recommendation, NOT applied
+
+Restore a strike-speed term under `timed` -- i.e. reverse section 2's
+`w_strike = 0` -- and re-run the decoder comparison with it. This is a
+recommendation rather than a launched arm because it reverses a documented
+design decision and because the NPMP fork (section 17) is already waiting on the
+user; adding a seventh arm before that fork is resolved risks answering a
+question about a pipeline we may be about to change.
+
+The cheap sanity check first: v3 (point reward, w_strike=0.1) reached fitness
+0.376 on ITS metric while every timed arm sits near 0.10 on its own. Those two
+numbers are not comparable (section 7), but "the arm that paid for strikes
+struck, and the arms that did not, did not" is not a subtle signal.

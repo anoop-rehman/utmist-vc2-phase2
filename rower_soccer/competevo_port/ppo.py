@@ -27,6 +27,22 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+# THE REWARD THEY OPTIMIZE IS NOT THE ENV REWARD. Both runners wrap it in an
+# exploration curriculum (`runner/multi_agent_runner.py:150-167`, and the evo
+# runner's copy at 147-164):
+#     r = alpha * dense + (1 - alpha) * parse,
+#     alpha = max((termination_epoch - epoch) / termination_epoch, 0)
+# with `use_exploration_curriculum: true, termination_epoch: 200` in
+# `config/run-to-goal-ants-v0.yaml`. So early training sees ONLY the dense
+# forward-progress reward -- the +/-1000 goal term fades IN, it is not there at
+# the start -- and the numbers their TB logs show are this curriculum reward.
+#
+# Their "epoch" is `min_batch_size = 50,000` env steps per agent, so the schedule
+# is expressed here in agent-steps rather than iterations: our iteration is a
+# different size and tying alpha to an iteration counter would silently change
+# the schedule.
+CURRICULUM_STEPS = 200 * 50_000        # 10M agent-steps == their 200 epochs
+
 
 class RunningNorm(nn.Module):
     """Their `lib/rl/core/running_norm.py`: an observation whitener whose
@@ -133,12 +149,16 @@ class SelfPlayPPO:
     def __init__(self, env, ac, rollout_len=64, gamma=0.995, gae_lambda=0.95,
                  clip=0.2, epochs=10, minibatch_size=2048, policy_lr=5e-5,
                  value_lr=3e-4, max_grad_norm=40.0, value_l2=1e-3,
-                 ent_coef=0.0, device="cuda"):
+                 ent_coef=0.0, curriculum_steps=CURRICULUM_STEPS,
+                 device="cuda"):
         self.env, self.ac = env, ac.to(device)
         self.T, self.N, self.A = rollout_len, env.n, env.n_agents
         self.gamma, self.lam, self.clip = gamma, gae_lambda, clip
         self.epochs, self.mb = epochs, minibatch_size
         self.ent_coef, self.max_grad_norm = ent_coef, max_grad_norm
+        # None (or 0) => optimize the raw env reward parse + dense. Any positive
+        # value runs their curriculum over that many agent-steps.
+        self.curriculum_steps = curriculum_steps
         self.device = device
         # Their two optimizers with two learning rates (dev_learner.py:129-140);
         # the critic's weight decay is their `l2_reg` on the value net only.
@@ -165,7 +185,16 @@ class SelfPlayPPO:
         self.total_steps = 0
         self.n_bad_grads = 0
 
+    def alpha(self):
+        """Their curriculum weight on the dense reward: 1 at the start, linearly
+        to 0 over `curriculum_steps` agent-steps, then pinned at 0."""
+        if not self.curriculum_steps:
+            return None
+        return max(1.0 - self.total_steps / (self.A * self.curriculum_steps), 0.0)
+
     def collect(self):
+        alpha = self.alpha()
+        self.ep_fwd = 0.0
         for t in range(self.T):
             # .float(): the CPU backend runs float64 for the parity gate, the
             # networks are fp32 everywhere.
@@ -177,8 +206,15 @@ class SelfPlayPPO:
             self.logp_buf[t] = logp.reshape(self.N, self.A)
             self.val_buf[t] = v.reshape(self.N, self.A)
             self._obs, rew, done, info = self.env.step(a)
+            if alpha is not None:
+                rew = alpha * info["dense"] + (1.0 - alpha) * info["parse"]
             self.rew_buf[t] = rew.float()
             self.mask_buf[t] = (~info["terminated"]).float().unsqueeze(-1)
+            # Mean forward-progress reward per agent-step. The honest early
+            # training signal: episode RETURN is dominated by the +1/step survive
+            # bonus, so a policy that learns to run but falls at t=200 scores
+            # WORSE than one that stands still for 500 steps. This does not.
+            self.ep_fwd += float(info["forward"].mean()) / self.T
         self.total_steps += self.T * self.N * self.A
         with torch.no_grad():
             last_v = self.ac.value(self._obs.reshape(-1, self.env.obs_dim).float())

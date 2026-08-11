@@ -61,6 +61,10 @@ def main():
     p.add_argument("--value-lr", type=float, default=3e-4)
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--minibatch", type=int, default=2048)
+    p.add_argument("--curriculum-steps", type=int, default=None,
+                   help="agent-steps over which their exploration curriculum "
+                        "anneals alpha 1->0; default is their 200 epochs x 50k "
+                        "steps, 0 disables it and optimizes the raw env reward")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--eval-worlds", type=int, default=64)
     p.add_argument("--eval-every", type=int, default=20)
@@ -79,10 +83,12 @@ def main():
     eval_env = RunToGoalEnv(num_worlds=args.eval_worlds,
                             use_gpu=(dev == "cuda"), seed=args.seed + 1000)
     ac = ActorCritic(env.obs_dim, env.act_dim).to(dev)
+    kw = ({} if args.curriculum_steps is None
+          else {"curriculum_steps": args.curriculum_steps})
     trainer = SelfPlayPPO(env, ac, rollout_len=args.rollout,
                           epochs=args.epochs, minibatch_size=args.minibatch,
                           policy_lr=args.policy_lr, value_lr=args.value_lr,
-                          device=dev)
+                          device=dev, **kw)
 
     log = {"args": vars(args), "iters": []}
     print("=== baselines (before any training) ===")
@@ -110,6 +116,7 @@ def main():
         row = {"iter": it, "steps": trainer.total_steps, "sec": elapsed,
                "train_ret": env.last_return.float().mean(0).cpu().numpy().tolist(),
                "train_len": float(env.last_len.float().mean()),
+               "fwd_per_step": trainer.ep_fwd, "alpha": trainer.alpha(),
                "log_std": float(ac.log_std.mean()), **stats}
         if it % args.eval_every == 0 or time.time() >= deadline:
             ev = evaluate(eval_env, ac)
@@ -121,12 +128,14 @@ def main():
                   f"{np.round(row['train_ret'], 1).tolist()} len "
                   f"{row['train_len']:.0f} | EVAL ret "
                   f"{np.round(ev['ret'], 1).tolist()} win "
-                  f"{ev['win_rate'].tolist()} len {ev['ep_len']:.0f}")
+                  f"{ev['win_rate'].tolist()} len {ev['ep_len']:.0f} "
+                  f"| fwd/step {row['fwd_per_step']:+.3f}")
         elif it % 5 == 0:
             print(f"it {it:4d} {trainer.total_steps/1e6:6.2f}M steps "
                   f"{sps:,.0f} sps | train_ret "
                   f"{np.round(row['train_ret'], 1).tolist()} len "
-                  f"{row['train_len']:.0f} kl {stats['kl']:+.2e}")
+                  f"{row['train_len']:.0f} fwd/step {row['fwd_per_step']:+.3f} "
+                  f"alpha {row['alpha']} kl {stats['kl']:+.2e}")
         log["iters"].append(row)
         with open(os.path.join(args.out, "log.json"), "w") as f:
             json.dump(log, f, indent=1)

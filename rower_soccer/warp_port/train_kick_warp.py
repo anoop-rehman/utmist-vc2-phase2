@@ -46,6 +46,8 @@ def make_env(args, num_worlds, seed, use_graph=True):
         reward_kind=args.reward_kind, w_upright=args.w_upright, w_arrive=args.w_arrive,
         segment_seconds_range=tuple(args.segment_secs_range),
         target_dist_range=tuple(args.target_dist_range),
+        pace_range=tuple(args.pace_range),
+        deadline_range=tuple(args.deadline_range),
         time_coef=args.time_coef,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         floor_half=args.floor_half, fixed_start=args.fixed_start,
@@ -133,11 +135,17 @@ def main():
 
     # -- reward -------------------------------------------------------------
     p.add_argument("--reward-mode", default="paper", choices=["paper", "progress"])
-    p.add_argument("--w-strike", type=float, default=0.5,
-                   help="weight on the banked strike speed. THE task reward: it "
-                        "is paid on exactly one step per segment, so at the "
-                        "default a good 6 m/s strike is worth 3.0 against a "
-                        "shaping trickle of ~0.1/step.")
+    p.add_argument("--w-strike", type=float, default=None,
+                   help="weight on the banked strike speed. Under "
+                        "--reward-kind direction/point it defaults to 0.5 and "
+                        "is THE task reward, paid on exactly one step per "
+                        "segment, so a good 6 m/s strike is worth 3.0 against "
+                        "a shaping trickle of ~0.1/step. Under 'timed' it "
+                        "defaults to 0: power is now a CONSEQUENCE of the "
+                        "deadline (a far target must be struck hard, a near "
+                        "one gently or it overshoots), so paying for it "
+                        "separately would price the same thing twice and in "
+                        "one direction only.")
     p.add_argument("--speed-clip", type=float, default=8.0,
                    help="cap (m/s) on the credited strike speed. The warp ball "
                         "occasionally leaves a bad contact at 20-30 m/s (see "
@@ -164,8 +172,15 @@ def main():
                    help="stage 1: ball dead ahead and the command colinear with "
                         "it, so walking forward strikes it at the target")
     p.add_argument("--reward-kind", default="direction",
-                   choices=["direction", "point"],
-                   help="'direction' scores max(ball_vel . command) -- a "
+                   choices=["direction", "point", "timed"],
+                   help="'timed' (drill v4) is a PASS: a deadline "
+                        "T = target_dist / v_pace is drawn per attempt, the "
+                        "segment ends at exactly T, and the reward is "
+                        "exp(-c * ||ball(T) - target||). Early and late are "
+                        "punished alike and dribbling is excluded by "
+                        "arithmetic rather than by a penalty term -- but the "
+                        "task obs grows to 14 (see kick_env). "
+                        "'direction' scores max(ball_vel . command) -- a "
                         "projection, so it cannot distinguish a hard wild kick "
                         "from a gentle accurate one, and RL climbs the easier "
                         "'hit harder' gradient (kick_ant_v1: median aim error "
@@ -182,6 +197,23 @@ def main():
     p.add_argument("--target-dist-range", type=float, nargs=2, default=[4.0, 8.0],
                    help="Table S2 calls the kick target DISTANT; randomized per "
                         "attempt so the policy cannot memorise one range")
+    p.add_argument("--pace-range", type=float, nargs=2, default=[1.5, 3.0],
+                   help="--reward-kind timed: band the pass pace v_pace is "
+                        "drawn from (m/s), where the deadline is "
+                        "T = target_dist / v_pace. MEASURED, not chosen: "
+                        "probe_strike_speed on kick_ant_v3/best.pt gives a "
+                        "realised pace (approach + flight, which is what T "
+                        "covers) of median 1.6 m/s over 3 m and 2.9 m/s over "
+                        "6 m, p90 2.7 and 4.4. The spec's U(2,6) would put "
+                        "most of the band beyond the body -- at 6 m/s a 3 m "
+                        "pass is due in 0.5 s and the ant needs 1.4 s just to "
+                        "REACH the ball -- and an unreachable band is a flat "
+                        "gradient, not a hard task.")
+    p.add_argument("--deadline-range", type=float, nargs=2, default=[0.5, 4.0],
+                   help="--reward-kind timed: clamp on T (s). With the default "
+                        "pace band and a 3-6 m target this spans 1.0-4.0 s, so "
+                        "the clamp is a guard rail rather than the thing "
+                        "setting the difficulty.")
     p.add_argument("--time-coef", type=float, default=0.0,
                    help="decay arrival by exp(-k*t) at closest approach, so a "
                         "fast pass beats a slow trickle. 0 = paper-faithful")
@@ -239,6 +271,10 @@ def main():
     p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--no-wandb", action="store_true")
     args = p.parse_args()
+    if args.w_strike is None:
+        # Resolved here, not in the parser, so the value that lands in
+        # config.json is the one the run actually used.
+        args.w_strike = 0.0 if args.reward_kind == "timed" else 0.5
     run(args, task="kick", make_env_fn=make_env, make_eval_fn=make_eval)
 
 

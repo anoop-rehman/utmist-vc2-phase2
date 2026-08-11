@@ -28,14 +28,40 @@ Obs (proprio-first, contiguous task block -- the contract every drill shares):
 
 Task width is 12, identical to dribble's, so a dribble checkpoint warm-starts
 kick with its task encoder AND critic input layer intact -- not just the decoder.
+
+DRILL V4: `--reward-kind timed` appends a deadline block and the task width
+becomes 14:
+
+    proprio(P) | ball_ego(6) | target_ego3(3) | cmd_dir_ego3(3)
+               | t_remaining(1) | required_pace(1)              = P + 14
+
+  * t_remaining is seconds to the segment's deadline T, and required_pace is
+    ||ball - target|| / t_remaining capped at REQ_PACE_CAP. Both are load-
+    bearing, not conveniences: under the timed objective the segment ENDS at T
+    and only the ball's position at that instant is scored, so two states with
+    identical geometry and different remaining time call for opposite actions.
+    A policy blind to the clock cannot represent both.
+  * The other twelve entries and their order are unchanged, so a v3 (or
+    dribble) checkpoint still transfers its decoder, and the two new columns
+    are the only re-initialised part of the task encoder.
+  * Consequence for adoption: `rower_soccer/skills/registry.py` pins kick to
+    kick_ant_v3/best.pt at width 12, and a fields.py entry plus a game-side
+    pace/deadline command are needed before a timed checkpoint can be swapped
+    in. Until then both widths are live and the reward kind selects.
 """
 import numpy as np
 import torch
 
 from rower_soccer.warp_port.ball_task import (KickReward, KickToPointReward,
-                                              SegmentedBallTask)
+                                              SegmentedBallTask,
+                                              TimedKickReward)
 from rower_soccer.warp_port.scene import BallSpec
 from rower_soccer.warp_port.worm_env_base import CONTROL_DT, WormEnv
+
+# Cap on the `required pace` obs (m/s). It is d_target / t_remaining, which
+# diverges at the deadline; 10 sits above the whole sampled pace band and well
+# below ppo.OBS_SANITY_LIMIT.
+REQ_PACE_CAP = 10.0
 
 
 class WarpKickEnv(SegmentedBallTask, WormEnv):
@@ -52,8 +78,19 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                  reward_coef=0.5, out_of_play_dist=12.0,
                  reward_kind="direction", w_arrive=3.0,
                  segment_seconds_range=(2.0, 6.0), target_dist_range=(4.0, 8.0),
-                 target_z=None, time_coef=0.0, arena="fenced", pitch_scale=0.3125, w_upright=1.0):
+                 target_z=None, time_coef=0.0, arena="fenced", pitch_scale=0.3125,
+                 w_upright=1.0, pace_range=(1.5, 3.0), deadline_range=(0.5, 4.0)):
         self._ball = ball
+        # -- drill v4: the TIMED kick -------------------------------------
+        # reward_kind "timed" makes the segment a deadline rather than a
+        # window: at spawn a pace v_pace ~ U(pace_range) is drawn, the deadline
+        # is T = d_spawn / v_pace clamped to deadline_range, the segment ends at
+        # exactly T, and the only thing scored is where the ball is then. This
+        # changes the OBS WIDTH (12 -> 14, see _task_dim) because a policy
+        # cannot hit a deadline it cannot see.
+        self._timed = reward_kind == "timed"
+        self._pace_range = tuple(pace_range)
+        self._deadline_range = tuple(deadline_range)
         self.ball_spawn_range = ball_spawn_range
         self.target_dist = target_dist
         self._segment_seconds = segment_seconds
@@ -93,9 +130,14 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
                           w_player_to_ball=w_player_to_ball,
                           w_ball_to_cmd=w_ball_to_cmd,
                           approach_scale=approach_scale)
-            reward = (KickToPointReward(w_upright=w_upright, w_arrive=w_arrive,
-                                        reward_coef=reward_coef, **common)
-                      if reward_kind == "point" else KickReward(**common))
+            arrive = dict(w_upright=w_upright, w_arrive=w_arrive,
+                          reward_coef=reward_coef, **common)
+            if self._timed:
+                reward = TimedKickReward(**arrive)
+            elif reward_kind == "point":
+                reward = KickToPointReward(**arrive)
+            else:
+                reward = KickReward(**common)
         super().__init__(num_worlds=num_worlds, creature_xml=creature_xml,
                          episode_seconds=episode_seconds, use_gpu=use_gpu,
                          device=device, seed=seed, use_graph=use_graph,
@@ -110,11 +152,18 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
 
     # -- task ---------------------------------------------------------------
     def _task_dim(self):
-        return 12  # ball_ego(6) + target_ego3(3) + cmd_dir_ego3(3)
+        # 12 for the v3 contract (direction / point), 14 for the v4 timed kick.
+        # The extra two are the deadline block; see _task_obs. This stays
+        # CONDITIONAL rather than becoming the new width for everyone because
+        # rower_soccer/skills/registry.py pins kick to kick_ant_v3/best.pt,
+        # whose task encoder is 12 wide -- widening it unconditionally would
+        # break the checkpoint the game currently loads.
+        return 14 if self._timed else 12
 
     def _task_init(self):
         self._init_segments(segment_seconds=max(self._segment_seconds,
-                                                self._segment_seconds_range[1]),
+                                                self._segment_seconds_range[1],
+                                                self._deadline_range[1]),
                             speed_clip=self._speed_clip)
         self.ball_spawn_range = self._clamped_spawn_range(self.ball_spawn_range)
         dev = self.device
@@ -144,6 +193,13 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         # is exactly why the training curve looked fine while the objective was
         # empty.
         self.last_arrival = torch.zeros(self.n, device=dev)
+        # v4: this segment's deadline, in SECONDS and already discretized to
+        # whole control steps (seg_limit * CONTROL_DT), so the remaining-time
+        # obs reaches exactly 0.0 on the step the segment ends and never
+        # disagrees with the step counter that ends it.
+        self.seg_T = torch.full((self.n,), float(self._seg_hi) * CONTROL_DT,
+                                device=dev)
+        self.seg_pace = torch.zeros(self.n, device=dev)   # diagnostic only
         self.target_fit_sum = torch.zeros(self.n, device=dev)
         self.prev_target_fit_sum = torch.zeros(self.n, device=dev)
         self.prev_n_segments = torch.zeros(self.n, device=dev)
@@ -156,10 +212,30 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         """3-D ball-to-target distance (see _target_z on why not xy)."""
         return torch.linalg.norm(self._ball_xyz() - self._target_xyz(), dim=-1)
 
+    def _time_left(self):
+        """Seconds from now to this segment's deadline, >= 0."""
+        return (self.seg_T - self.seg_t * CONTROL_DT).clamp(min=0.0)
+
     def _task_obs(self):
-        return torch.cat([self._ball_ego6(),
-                          self._xy_ego3(self.target_xy),
-                          self._dir_ego3(self.cmd_dir)], -1)
+        obs = [self._ball_ego6(),
+               self._xy_ego3(self.target_xy),
+               self._dir_ego3(self.cmd_dir)]
+        if self._timed:
+            # The deadline block (v4). Without it the task is not merely hard
+            # but ILL-POSED: two states with identical ball/target geometry and
+            # different remaining time want different actions (strike now vs
+            # wait), and no policy that cannot see the clock can produce both.
+            #   t_rem      seconds left, in [0, deadline_range[1]]
+            #   req_pace   how fast the ball must average FROM NOW to arrive,
+            #              d_target / t_rem -- the quantity the ant actually has
+            #              to reason about, offered pre-divided rather than
+            #              asking a 2-layer expert to learn division. Capped at
+            #              REQ_PACE_CAP because it diverges as t_rem -> 0 and an
+            #              unbounded obs trips ppo's OBS_SANITY_LIMIT check.
+            t_rem = self._time_left()
+            req = (self._target_dist_now() / t_rem.clamp(min=CONTROL_DT))
+            obs += [t_rem.unsqueeze(-1), req.clamp(max=REQ_PACE_CAP).unsqueeze(-1)]
+        return torch.cat(obs, -1)
 
     def _update_task(self):
         _, released = self._strike_update()
@@ -180,10 +256,18 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         self.seg_target_best = torch.minimum(self.seg_target_best, d_now)
 
         timeout = self.seg_t >= self.seg_limit
-        # Out of play: the ball has rolled so far past the target that the
-        # segment cannot be rescued, so holding it open only wastes steps.
-        out = self._target_dist_now() > self.out_of_play_dist
-        end = timeout | out
+        if self._timed:
+            # The deadline IS the segment: ending early on an out-of-play ball
+            # would grade its position at some other time than T, and "the ball
+            # was already 12 m away" is not a different outcome from "the ball
+            # is 12 m away at T" -- both score exp(-0.5*12) ~ 0. The deadline is
+            # at most a few seconds, so nothing runs away far.
+            end = timeout
+        else:
+            # Out of play: the ball has rolled so far past the target that the
+            # segment cannot be rescued, so holding it open only wastes steps.
+            out = self._target_dist_now() > self.out_of_play_dist
+            end = timeout | out
         # A segment that ends without release ever firing (creature still
         # standing over the ball) still banks whatever strike it made.
         self._bank(end)
@@ -199,13 +283,24 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         self._close_segments(end)
 
     def arrival(self):
-        """exp(-c*d) at closest approach, optionally decayed by how long it took.
+        """exp(-c*d): AT THE DEADLINE under reward_kind 'timed', at closest
+        approach otherwise.
 
         The paper's kick-to-target fitness is exp(-1/2 ||x_ball - x_target||)
-        (Table S3). Same form here; `time_coef` (default 0, i.e. paper-faithful)
-        is the only addition, for when a fast pass should beat a slow one by
-        more than the window alone enforces.
+        (Table S3). Same form in both branches -- what differs is WHEN d is
+        measured, and that is the whole of drill v4's kick change. Closest
+        approach is a maximum over the window, so it forgives a ball that
+        rolled through the target and away, and it is satisfiable by walking
+        the ball over; distance at T is a single instant, so early and late are
+        punished alike. Only the caller in _update_task, which runs on the step
+        the segment closes, evaluates the timed branch meaningfully.
+
+        `time_coef` (default 0, i.e. paper-faithful) applies to the untimed
+        branch only: under 'timed' the deadline already prices time, and
+        decaying by it twice would double-count.
         """
+        if self._timed:
+            return torch.exp(-self._reward_coef * self._target_dist_now())
         a = torch.exp(-self._reward_coef * self.seg_target_best)
         if self._time_coef:
             a = a * torch.exp(-self._time_coef * self.seg_best_t * CONTROL_DT)
@@ -263,8 +358,29 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
             t0, t1 = self._target_dist_range
             dist = t0 + (t1 - t0) * self._rand(k)
             self.target_xy[idx] = ball_xy + cmd * dist.unsqueeze(-1)
-            self.seg_limit[idx] = torch.randint(
-                self._seg_lo, self._seg_hi + 1, (k,), device=self.device).float()
+            if self._timed:
+                # v4: draw a PACE, derive the deadline from it. Pace rather
+                # than a raw time so the demand scales with distance -- a fixed
+                # deadline is trivial at 3 m and impossible at 6 m, and the
+                # policy would just learn the mean. d_spawn is the ball->target
+                # separation, i.e. the ground the PASS has to cover; the ant's
+                # own walk to the ball is inside T too, which is why the band
+                # is measured, not guessed (see probe_strike_speed).
+                p0, p1 = self._pace_range
+                pace = p0 + (p1 - p0) * self._rand(k)
+                lo, hi = self._deadline_range
+                T = (dist / pace).clamp(lo, hi)
+                steps = torch.round(T / CONTROL_DT).clamp(min=1.0)
+                self.seg_limit[idx] = steps
+                # Store the DISCRETIZED deadline: it is what the env enforces,
+                # so it must also be what the obs advertises.
+                self.seg_T[idx] = steps * CONTROL_DT
+                self.seg_pace[idx] = pace
+            else:
+                self.seg_limit[idx] = torch.randint(
+                    self._seg_lo, self._seg_hi + 1, (k,),
+                    device=self.device).float()
+                self.seg_T[idx] = self.seg_limit[idx] * CONTROL_DT
             # Baseline arrival at the spawn separation, so a segment that never
             # touches the ball scores exp(-c*d0) rather than a free 1.0.
             ball_xyz = torch.cat(

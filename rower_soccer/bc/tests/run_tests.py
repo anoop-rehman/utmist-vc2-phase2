@@ -6,11 +6,15 @@ has no pytest), so the suite runs today and drops into a real runner unchanged.
     PYTHONPATH=. .venv/bin/python -m rower_soccer.bc.tests.run_tests            # fast
     MUJOCO_GL=egl PYTHONPATH=. .venv/bin/python -m rower_soccer.bc.tests.run_tests --slow
 
-`--slow` adds `test_mirror_physics`, which builds a 4-ant dm_soccer env and is
-the module that actually PROVES the mirror: it steps MuJoCo on a mirrored state
-and compares against the mirror of the unmirrored rollout, and it checks every
-one of dm_soccer's 47 observation keys against the env's own answer. Nothing in
-this package should be trusted for a training run without it passing.
+`--slow` adds the two modules that build a real 4-ant dm_soccer env:
+
+  * `test_mirror_physics` actually PROVES the mirror — it steps MuJoCo on a
+    mirrored state and compares against the mirror of the unmirrored rollout,
+    and it checks every one of dm_soccer's 47 observation keys against the env's
+    own answer. Nothing in this package should be trusted for a training run
+    without it passing.
+  * `test_eval_rollout` checks the behavioural half of the eval harness: the 2v2
+    env, the BC and scripted agents driving their slots, and the video writer.
 """
 
 import argparse
@@ -78,8 +82,8 @@ def _install_pytest_shim():
     return True
 
 
-FAST = ["test_dataset", "test_augment"]
-SLOW = ["test_mirror_physics"]
+FAST = ["test_dataset", "test_augment", "test_model", "test_train", "test_eval"]
+SLOW = ["test_mirror_physics", "test_eval_rollout"]
 
 
 def run(modules):

@@ -773,3 +773,40 @@ capacity. The clean follow-up if v9 dies is `old shaping + unfrozen` -- the
 missing cell of the 2x2 -- or better, testing decoder capacity directly by
 supervised-fitting a known-good striking controller rather than inferring it
 from an RL curve.
+
+## 16. v9's AIM leaves the random baseline -- the first arm ever to do so
+
+*Measured 2026-08-11, v9 at 21M steps, 17,776 ball-moving samples.*
+
+| arm | decoder | steps | positioning | **aim** | aim within 30 deg |
+|---|---|---|---|---|---|
+| v6 | frozen | 88M | 123.9 deg | 124.6 deg | 9.2% |
+| v7 | frozen | 35M | 103.9 deg | 93.2 deg | 15.7% |
+| v8 | frozen | 9.2M | 84.0 deg | 94.4 deg | 16.5% |
+| **v9** | **UNFROZEN** | **21M** | **74.5 deg** | **74.1 deg** | **22.3%** |
+| random | -- | -- | 90 deg | 90 deg | 16.7% |
+
+Every frozen arm sat at 93-125 deg aim -- at or worse than chance. v9 is at
+74.1 deg with 22.3% of strikes inside 30 deg against a 16.7% baseline. **This is
+the first time any arm has aimed better than random.**
+
+The frozen-decoder hypothesis of section 8 is SUPPORTED. The decoder that
+`follow` trained to track a target velocity apparently could not represent a
+directed strike, and unfreezing it let the aim move within 21M steps -- fewer
+steps than three of the four frozen arms ever ran.
+
+**Correction to section 15.** That section read v9's fitness tracking v8 as "a
+point AGAINST the decoder hypothesis". That inference was wrong. Aim moves
+BEFORE fitness -- which is the same leading/lagging relationship argued for in
+section 11 when v8's POSITIONING improved ahead of its outcome. The principle
+was applied to v8 and then forgotten for v9. Fitness still tracks: v9 0.1158 vs
+v8 0.1160 over 15-20M. Aim leads; the outcome has not followed yet.
+
+**Confound not yet excluded.** v9's aim is measured at 21M and v8's at 9.2M, so
+part of the gap could be training time rather than the decoder. v8 is now at
+64M -- three times v9's age -- and is being re-probed. If v8 at 64M is still at
+~94 deg while v9 at 21M is at 74 deg, training time is excluded and the decoder
+is the only remaining explanation. If v8 has also drifted toward 74, the credit
+belongs to the strike-point shaping and v9 gets none of it.
+
+Until that lands this is a strong signal, not a conclusion.

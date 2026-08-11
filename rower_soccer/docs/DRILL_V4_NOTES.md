@@ -274,3 +274,60 @@ remaining suspect is the timed formulation itself, not its shaping terms.
 Do NOT read v3's 0.376-0.395 as "the untimed kick works better": v3's fitness is
 `exp(-c * closest approach over the window)` while v4/v6/v7 grade distance AT the
 deadline. Different measures; the numbers are not comparable.
+
+## 8. What is actually wrong with kick: it contacts the ball and cannot aim
+
+*Measured 2026-08-11 on `kick_ant_v7_anchor/best.pt`, deterministic actions,
+~1800 closed segments per probe.*
+
+Three hypotheses were tested and two died.
+
+**"The task is unreachable."** No. Over 1837 closed segments the median
+ball-to-target distance at the deadline is 4.40 m -- exactly the do-nothing
+outcome, since targets spawn 3-6 m from the ball (mean 4.5). But the tail is
+0.26 m at best, 1.53 m at pct99, 3.09 m at pct90, and a ball that never moves
+can NEVER score below 3.0 m. So real passes do happen; the distribution is
+bimodal, not flat. (Sanity check that probe and trainer agree:
+`exp(-0.5 * 4.40) = 0.111`, which is the reported fitness.)
+
+**"Most segments end with no contact."** No. **93.7% of segments are touched.**
+
+**"Longer deadlines are worse."** This one LOOKED true and was a confound worth
+recording. Raw medians by deadline fell monotonically -- 3.60 / 4.66 / 5.08 /
+5.71 m as T went 1.5-2.5 / 2.5-3.5 / 3.5-4.5 / 4.5-6 s, i.e. fitness 0.165 down
+to 0.058 -- which reads as "more time to touch the ball is worse". But
+`T = target_dist / pace`, so long-T buckets have farther targets BY
+CONSTRUCTION and each bucket was simply sitting at its own do-nothing baseline.
+Normalising to gain = (start distance) - (distance at T) flattens it completely:
+
+| T | start | gain | % closer |
+|---|---|---|---|
+| 1.5-2.5 s | 3.63 m | +0.00 m | 44.7% |
+| 2.5-3.5 s | 4.55 m | -0.01 m | 46.3% |
+| 3.5-4.5 s | 5.09 m | -0.08 m | 44.6% |
+| 4.5-6.0 s | 5.57 m | -0.00 m | 49.2% |
+
+**What is left is the answer: the strike direction is uncorrelated with the
+target.** Median gain -0.00 m; the ball ends closer in 45.8% of segments and
+farther in 54.2%. A coin flip, marginally worse than chance. The policy has
+learned to locomote to the ball and make contact, and has learned nothing about
+where to send it.
+
+This is the same deficit `shoot` shows. Shoot's goal subtends +/-37 to 62 deg
+from 2-5 m, so its post hits imply ~40 deg strike-direction error, and kick v1
+measured a median aim error of 35 deg. One underlying problem, both drills:
+**contact is solved, direction is not.**
+
+Consequences for the arms already run: v4 -> v6 (reward curve) and v6 -> v7
+(anchor) were both tuning the wrong thing. No reward-shaping variant can fix a
+policy whose strike direction carries no information about the target; shaping
+changes what is rewarded, not what the controller is able to express.
+
+The open question -- whether the ant fails to POSITION itself on the far side of
+the ball, or positions correctly and mis-strikes -- is what to measure next, and
+it splits the fix. Bad positioning is a task/exploration problem. Correct
+positioning with a bad strike points at the FROZEN DECODER: it was trained by
+`follow` to track a target velocity, so its action repertoire is "walk in
+direction X at speed Y", and a directed strike may simply be outside what
+154,632 frozen parameters can express. That would predict an unfrozen kick run
+gains aim where every frozen variant has not -- a cheap and decisive experiment.

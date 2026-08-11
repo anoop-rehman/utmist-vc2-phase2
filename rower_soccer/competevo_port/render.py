@@ -54,8 +54,8 @@ def eval_video(env, ac, path, renderer=None, fps=40, world=0, max_steps=None):
     frames, rew_sum, winner = [], np.zeros(env.n_agents), None
     steps = max_steps or env.max_episode_steps
     for t in range(steps):
-        a = ac.mean_action(obs.reshape(-1, env.obs_dim)).clamp(-1, 1)
-        obs, rew, done, info = env.step(a.reshape(env.n, env.n_agents, -1))
+        a = ac.mean_action(obs.reshape(-1, env.obs_dim).float()).clamp(-1, 1)
+        obs, rew, done, info = env.step(a.reshape(env.n, env.n_agents, -1).to(env.dtype))
         rew_sum += rew[world].float().cpu().numpy()
         frames.append(renderer.frame(env, w=world))
         if bool(done[world]):

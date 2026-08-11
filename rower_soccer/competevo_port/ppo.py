@@ -85,6 +85,16 @@ class ActorCritic(nn.Module):
         self.vf, dvf = _mlp(obs_dim, critic_hidden)
         self.action_net = nn.Linear(dpi, act_dim)
         self.value_net = nn.Linear(dvf, 1)
+        # Their `init_fc_weights` (custom/utils/tools.py:19-21) on both output
+        # heads: weights x0.1, bias 0. Not cosmetic -- it is why their iter-0
+        # eval reward is ~499 and not ~440. A default-initialized head emits mean
+        # actions around 0.1, which at gear 150 is real torque, so the untrained
+        # ant drifts and loses forward reward; theirs starts almost still and
+        # collects the +1 survive bonus for all 500 steps. Reproducing the init
+        # is what makes the iter-0 number comparable to their measured one.
+        for head in (self.action_net, self.value_net):
+            head.weight.data.mul_(0.1)
+            head.bias.data.mul_(0.0)
         self.log_std = nn.Parameter(torch.ones(act_dim) * log_std_init)
 
     @staticmethod
@@ -157,10 +167,12 @@ class SelfPlayPPO:
 
     def collect(self):
         for t in range(self.T):
-            flat = self._obs.reshape(-1, self.env.obs_dim)
+            # .float(): the CPU backend runs float64 for the parity gate, the
+            # networks are fp32 everywhere.
+            flat = self._obs.reshape(-1, self.env.obs_dim).float()
             a, logp, v = self.ac.act(flat)
             a = a.reshape(self.N, self.A, self.env.act_dim)
-            self.obs_buf[t] = self._obs
+            self.obs_buf[t] = self._obs.float()
             self.act_buf[t] = a
             self.logp_buf[t] = logp.reshape(self.N, self.A)
             self.val_buf[t] = v.reshape(self.N, self.A)
@@ -169,7 +181,7 @@ class SelfPlayPPO:
             self.mask_buf[t] = (~info["terminated"]).float().unsqueeze(-1)
         self.total_steps += self.T * self.N * self.A
         with torch.no_grad():
-            last_v = self.ac.value(self._obs.reshape(-1, self.env.obs_dim))
+            last_v = self.ac.value(self._obs.reshape(-1, self.env.obs_dim).float())
         return self._gae(last_v.reshape(self.N, self.A))
 
     def _gae(self, last_v):
@@ -247,9 +259,9 @@ def evaluate(env, ac, max_steps=None, mean_action=True):
     env.reset_win_stats()
     rets, lens = [], []
     for _ in range(max_steps):
-        flat = obs.reshape(-1, env.obs_dim)
+        flat = obs.reshape(-1, env.obs_dim).float()
         a = (ac.mean_action(flat) if mean_action else ac.act(flat)[0])
-        obs, rew, done, info = env.step(a.reshape(env.n, env.n_agents, -1))
+        obs, rew, done, info = env.step(a.reshape(env.n, env.n_agents, -1).to(env.dtype))
         if bool(done.any()):
             idx = done.nonzero(as_tuple=True)[0]
             rets.append(env.last_return[idx].float().cpu().numpy())

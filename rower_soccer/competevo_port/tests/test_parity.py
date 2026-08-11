@@ -141,6 +141,32 @@ def t_obs_and_reward_parity(n_cases, seed):
     return f"worst obs {max(v for k, v in rep.items() if k.startswith('obs/')):.2e}"
 
 
+def t_reset_distribution():
+    """The post-reset STATE distribution, which no obs/reward check can see.
+    Theirs: qpos = qpos0 + U(-0.1, 0.1) elementwise with the free-joint quats
+    renormalized by mj_forward, and qvel exactly zero (their `set_xyz` overwrites
+    the qvel their own `reset_model` had just randomized)."""
+    n = 24
+    theirs = parity.query_their_env({"resets": n})["resets"]
+    tq = np.array([x["qpos"] for x in theirs])
+    tv = np.array([x["qvel"] for x in theirs])
+    env = _cpu_env(n)
+    env.reset()
+    oq, ov = env.qpos.numpy(), env.qvel.numpy()
+    q0 = np.asarray(env.model.qpos0)
+    assert np.abs(tv).max() == 0.0 and np.abs(ov).max() == 0.0, "qvel not zero"
+    # Same support and same spread; the draws themselves cannot match (different
+    # RNGs), so this is a distribution check, not a value check.
+    for name, d in (("theirs", tq - q0), ("ours", oq - q0)):
+        assert np.abs(d).max() < 0.12, f"{name} qpos noise out of range"
+        assert 0.045 < d.std() < 0.065, f"{name} qpos noise std {d.std()}"
+    for a in range(env.n_agents):
+        s = slice(a * 15 + 3, a * 15 + 7)
+        assert np.abs(np.linalg.norm(oq[:, s], axis=1) - 1).max() < 1e-9
+    return (f"qvel==0 both; qpos noise std theirs {(tq - q0).std():.4f} / "
+            f"ours {(oq - q0).std():.4f} (U(-.1,.1) => 0.0577)")
+
+
 def t_contact_parity():
     """Same gate on states forced into floor contact -- the regime where the two
     solvers disagree most. State-derived quantities must still match, because
@@ -191,6 +217,7 @@ def main():
         check("obs + reward parity vs their env",
               lambda: t_obs_and_reward_parity(args.cases, args.seed))
         check("obs + reward parity in contact", t_contact_parity)
+        check("reset state distribution matches theirs", t_reset_distribution)
         if args.diverge:
             check("solver divergence diagnostic", t_solver_divergence)
 

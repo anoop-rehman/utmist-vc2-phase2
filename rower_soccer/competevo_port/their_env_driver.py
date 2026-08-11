@@ -134,6 +134,19 @@ def run_rollout(env, spec):
     return traj
 
 
+def run_resets(env, n):
+    """Their post-reset state, `n` draws. Their `_reset` randomizes qpos twice
+    (once in `env_scene.reset()`, again inside `reset_model()`) and then
+    `set_xyz` zeroes qvel, so only the last draw survives -- this samples the
+    distribution our `reset_idx` has to reproduce."""
+    out = []
+    for _ in range(n):
+        env.reset()
+        out.append({"qpos": env.env_scene.data.qpos.tolist(),
+                    "qvel": env.env_scene.data.qvel.tolist()})
+    return out
+
+
 def main():
     req = json.load(sys.stdin)
     env = build_env()
@@ -151,6 +164,8 @@ def main():
         out["cases"] = [run_case(env, c) for c in req["cases"]]
     if "rollout" in req:
         out["rollout"] = run_rollout(env, req["rollout"])
+    if "resets" in req:
+        out["resets"] = run_resets(env, int(req["resets"]))
     # Their env prints during construction; keep stdout clean by writing the
     # payload with a sentinel the caller splits on.
     sys.stdout.write("\n@@JSON@@" + json.dumps(out))

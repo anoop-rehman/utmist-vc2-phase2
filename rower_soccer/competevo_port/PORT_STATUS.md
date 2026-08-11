@@ -10,6 +10,11 @@ scene, batched over worlds) plus a shared-policy PPO smoke run. Evolution
 (`run-to-goal-devants-v0`), the design-action stage flag, the per-world
 model-field writer and faithful opponent sampling are NOT here yet.
 
+Numbering: this covers the port map's **Stage 0** (fixed-morph harness), split
+into an env-parity gate and a PPO smoke. The port map's Stage 1 (the design ->
+model-fields writer) is the next unit and is referred to below as "stage 2"
+where the task's numbering is used.
+
 ## What exists
 
 | file | what |

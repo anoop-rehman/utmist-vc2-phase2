@@ -96,7 +96,7 @@ def _fmt(*v):
     return " ".join(f"{x:g}" for x in v)
 
 
-def _ant_body_xml(agent_id, pos, euler, rgb):
+def _ant_body_xml(agent_id, pos, euler):
     """One agent's `<body>` subtree, already name-prefixed and class-tagged.
 
     Their `add_prefix(..., force_set=True)` invents `agent{i}/anon<random>` names
@@ -160,7 +160,7 @@ def run_to_goal_xml(n_agents=2, solver="Newton", iterations=100,
     documented in this module's docstring; pass solver="PGS", iterations=1000 to
     get their exact options for a CPU-MuJoCo cross-check."""
     bodies = "\n".join(
-        _ant_body_xml(i, INIT_POS[i], INIT_EULER[i], AGENT_RGB[i])
+        _ant_body_xml(i, INIT_POS[i], INIT_EULER[i])
         for i in range(n_agents))
     defaults = "\n".join(_agent_default_xml(i, AGENT_RGB[i])
                          for i in range(n_agents))
@@ -239,7 +239,7 @@ class SceneMeta:
     act_dim: int
 
 
-def _agent_slices(model, agent_id, n_agents):
+def _agent_slices(model, agent_id):
     prefix = f"agent{agent_id}/"
     body_ids = [i for i in range(model.nbody)
                 if model.body(i).name.startswith(prefix)]
@@ -276,7 +276,7 @@ def _agent_slices(model, agent_id, n_agents):
 def build_run_to_goal_scene(n_agents=2, **xml_kwargs):
     """Compile the merged scene and resolve the per-agent index plumbing."""
     model = mujoco.MjModel.from_xml_string(run_to_goal_xml(n_agents, **xml_kwargs))
-    agents = [_agent_slices(model, i, n_agents) for i in range(n_agents)]
+    agents = [_agent_slices(model, i) for i in range(n_agents)]
     a0 = agents[0]
     obs_dim = (a0.qpos[1] - a0.qpos[0]) + (a0.qvel[1] - a0.qvel[0]) + 2
     return model, SceneMeta(n_agents, model.nq, model.nv, model.nu, agents,

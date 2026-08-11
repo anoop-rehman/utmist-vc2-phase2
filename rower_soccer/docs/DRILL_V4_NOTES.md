@@ -477,3 +477,49 @@ over single-episode evals. That is fine here -- an angular median over 40k-126k
 samples is not something one lucky episode can manufacture, and the ordering is
 monotone across three arms -- but it is another reason not to read fine
 differences between two `best.pt` files.
+
+## 12. The control arm UNLEARNS, monotonically -- and v8's falsifiable prediction
+
+*Measured 2026-08-11. Fitness quoted as block means, per section 10's rule.*
+
+v6 (the old shaping, no strike offset) over its whole life, in 20M-step blocks:
+
+| steps | fitness mean |
+|---|---|
+| 0-20M | 0.1288 |
+| 20-40M | 0.1204 |
+| 40-60M | 0.1129 |
+| 60-80M | 0.1045 |
+| 80-100M | **0.0974** |
+
+Five consecutive blocks, each lower than the last, passing straight through the
+0.105 do-nothing baseline and out the bottom. **The old kick drill makes the
+policy worse the longer it trains.** This is the outcome-metric shadow of
+section 11's angular measurement (v7 103.9 deg at 35M -> v6 123.9 deg at 88M):
+two independent metrics, same direction, same story.
+
+That reframes every earlier "the arms are flat at ~0.12" observation in sections
+7-9. They were not flat. They were DECLINING, and averaging over a whole run
+hid it.
+
+**Where v8 actually stands.** At matched steps (0-19M, v8's full life so far):
+
+| arm | n | mean | median |
+|---|---|---|---|
+| v6 control | 29 | 0.1290 | 0.1290 |
+| v8 strike point | 29 | 0.1232 | 0.1240 |
+
+Indistinguishable, if anything marginally behind. So v8 has fixed POSITIONING
+(84.0 deg vs v6's 123.9, the only arm better than random) and has NOT yet
+improved the OUTCOME. A leading indicator is not a result, and v8 is not yet a
+win.
+
+**The prediction, recorded before the data exists so it cannot be
+rationalised afterwards:** if the strike point genuinely removes the
+anti-learning, v8's fitness should stay flat or rise while v6's continues to
+fall. Concretely, at ~98M steps v6 sits at 0.0974; v8 at ~98M should be
+materially above that, and above the 0.105 baseline. If instead v8 also decays
+to ~0.097, the strike offset has fixed an angle that does not matter and the
+frozen-decoder hypothesis (section 8) becomes the live one.
+
+Both arms run on. v8 needs ~80M more steps, a few hours at ~7k fps.

@@ -86,6 +86,23 @@ slots). The deviation is that a world's opponent can change at an iteration
 boundary in the MIDDLE of an episode, which theirs never does. With `blocks=4`
 and a 64-step rollout against ~150-step episodes that is roughly one swap per
 episode. It is recorded in PORT_STATUS as a deviation rather than hidden.
+
+### And the slots are ONE forward pass, not `blocks` of them
+
+The first version of this ran `blocks` separate `DevActorCritic.act` calls per
+side per step and gathered the answers -- 640 tiny forward passes per 64-step
+rollout against 64, which the stage-3 profile measured at 11.0 s of a 28.4 s
+iteration. That cost is call COUNT, not arithmetic: these nets are 38k
+parameters. All 2 x `blocks` opponents share an architecture and differ only in
+weights, so `dev_ppo.StackedDevActors` holds the whole set as stacked weight
+tensors and evaluates them in one broadcasting `matmul` per layer. The gather
+then happens on the DISTRIBUTION rather than on a sample, so a row is drawn once
+instead of `blocks` times and discarded `blocks - 1` times -- the same
+distribution, fewer variates.
+
+`batched_opponents=False` restores the per-slot path; it is the reference the
+gate measures the batched one against, and the two agree to fp32 on the
+assembled action (`tests/test_selfplay.py`, first two checks).
 """
 
 import collections
@@ -94,7 +111,9 @@ import math
 import numpy as np
 import torch
 
-from rower_soccer.competevo_port.dev_ppo import DevActorCritic, DevSelfPlayPPO
+from rower_soccer.competevo_port.dev_ppo import (DevActorCritic,
+                                                 DevSelfPlayPPO,
+                                                 StackedDevActors)
 
 # Their `delta` for every `*-devants-*` config (`run-to-goal-devants-v0.yaml:48`,
 # `robo-sumo-devants-v0.yaml:48`). Their fixed-morph ants use 0 (full history).
@@ -260,6 +279,7 @@ class CoEvoPPO:
     def __init__(self, env, acs=None, delta=DEV_DELTA,
                  ring_capacity=RING_CAPACITY, checkpoint_every=CHECKPOINT_EVERY,
                  blocks=OPPONENT_BLOCKS, use_opponent_sample=True,
+                 batched_opponents=True,
                  rollout_len=64, seed=0, device="cuda", **ppo_kw):
         assert env.n % 2 == 0, "the ego split needs an even world count"
         assert env.n_agents == 2, "their co-evolution loop is two-agent"
@@ -305,6 +325,14 @@ class CoEvoPPO:
                 self.opp_nets[e][k].load_state_dict(self.acs[1 - e].state_dict())
                 for p in self.opp_nets[e][k].parameters():
                     p.requires_grad_(False)
+        # All 2 x `blocks` opponents share an architecture and differ only in
+        # weights, so they are one batched forward, not 2 x `blocks` of them.
+        # `opp_nets` stays the source of truth (it is what `resample_opponents`
+        # loads into and what the gate inspects); the stack is re-synced from it
+        # at the top of every rollout, so it can never be stale.
+        self.batched_opponents = bool(batched_opponents)
+        self.opp_stack = StackedDevActors(self.opp_nets[0][0], 2,
+                                          self.blocks).to(device)
         # Which sampled epoch each slot currently holds, and the epoch the draw
         # was made AT (the two differ by the lag, and `train_iter` increments
         # `self.epoch` after the draw, so the lag must not be measured against
@@ -353,32 +381,56 @@ class CoEvoPPO:
             self.rings[e].push(self.epoch, self.acs[e])
 
     # -- rollout -------------------------------------------------------------
-    def _opponent_actions(self, e, obs_half):
-        """One forward pass per slot over the whole ego-`e` half, gathered by
-        slot. Running every slot on every row wastes `blocks - 1` of the compute
-        but keeps the shapes static (no boolean indexing, no host sync), which
-        on this batch size is the cheaper of the two."""
+    def _opponent_actions(self, e, obs_half, noise=None):
+        """REFERENCE path: one forward pass per slot over the whole ego-`e`
+        half, gathered by slot. This is what stage 3 shipped and what the
+        equivalence gate measures the batched path against; it is still
+        reachable with `batched_opponents=False`.
+
+        Running every slot on every row wastes `blocks - 1` of the compute but
+        keeps the shapes static (no boolean indexing, no host sync), which on
+        this batch size is the cheaper of the two."""
         slots = self.slot[self.ego_worlds[e]]
-        outs = torch.stack([net.act(obs_half)[0]
+        outs = torch.stack([net.act(obs_half, noise=noise)[0]
                             for net in self.opp_nets[e]])      # [K, M, act]
         idx = slots.view(1, -1, 1).expand(1, outs.shape[1], outs.shape[2])
         return outs.gather(0, idx).squeeze(0)
+
+    def _opponent_actions_batched(self, obs, noise=None):
+        """Both sides' `blocks` opponents in ONE forward. `obs` is the full
+        `[N, A, obs_dim]` observation; returns `[2, n_ego, act_dim]`, group 0
+        being lane 1 of the ego-0 worlds and group 1 lane 0 of the ego-1
+        worlds. The ego halves are contiguous by construction, so the two
+        groups are slices."""
+        M = self.n_ego
+        half = torch.stack([obs[:M, 1], obs[M:, 0]])           # [2, M, obs]
+        return self.opp_stack.act(half, self.slot.view(2, M), noise=noise)
 
     def collect(self):
         env, T = self.env, self.T
         alphas = [lr.alpha() for lr in self.learners]
         self.ep_fwd = [0.0, 0.0]
+        if self.batched_opponents:
+            # `opp_nets` is the source of truth; re-syncing here (a few hundred
+            # tiny copies, once per rollout) means a test or a caller that pokes
+            # an opponent net directly cannot leave the stack behind.
+            self.opp_stack.sync_from(self.opp_nets)
         for t in range(T):
             obs = self._obs.float()
             act = torch.zeros(self.N, self.A, env.act_dim, device=env.device,
                               dtype=obs.dtype)
+            if self.batched_opponents:
+                opp = self._opponent_actions_batched(obs)
+                act[:self.n_ego, 1] = opp[0]
+                act[self.n_ego:, 0] = opp[1]
             for e in range(2):
                 w = self.ego_worlds[e]
                 lr = self.learners[e]
                 a, logp, v = lr.ac.act(obs[w, e])
                 act[w, e] = a
-                # The opponent occupies lane 1 - e of the SAME worlds.
-                act[w, 1 - e] = self._opponent_actions(e, obs[w, 1 - e])
+                if not self.batched_opponents:
+                    # The opponent occupies lane 1 - e of the SAME worlds.
+                    act[w, 1 - e] = self._opponent_actions(e, obs[w, 1 - e])
                 lr.obs_buf[t, :, 0] = obs[w, e]
                 lr.act_buf[t, :, 0] = a
                 lr.logp_buf[t, :, 0] = logp

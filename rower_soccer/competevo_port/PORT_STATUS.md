@@ -1,4 +1,4 @@
-# CompetEvo -> mujoco_warp port: status (unit 2d, stages 0-3)
+# CompetEvo -> mujoco_warp port: status (unit 2d, stages 0-3b)
 
 *Worktree `competevo-port`. Reference: `/workspace/competevo` (read-only).
 Plan: `rower_soccer/docs/repro/COMPETEVO_PORT_MAP.md`, section 5.5.
@@ -9,12 +9,15 @@ Scope: **`run-to-goal-ants-v0`** (fixed morphology, stages 0-1),
 **`run-to-goal-devants-v0`** (stage 2: per-world morphology, the 52-dim dev
 observation, the 28-dim design+motor action, the two-head dev policy), and
 **stage 3: their two-learner co-evolution loop with opponent-checkpoint
-sampling**.
+sampling**, and **stage 3b: the opponent forwards batched into one call**.
 
 Numbering: "stage 0/1" is the port map's Stage 0 (fixed-morph harness), split
 into an env-parity gate and a PPO smoke. "Stage 2" is the port map's Stage 1
 (the design -> model-fields writer) plus the dev env and policy around it.
-"Stage 3" is the port map's section 4.3.
+"Stage 3" is the port map's section 4.3. "Stage 3b" is not in the port map:
+it is the throughput fix the stage-3 profile asked for, and it changes no
+semantics -- its gate is that the batched opponent forward computes what the
+per-slot one computed.
 
 ## What exists
 
@@ -25,9 +28,9 @@ into an env-parity gate and a PPO smoke. "Stage 2" is the port map's Stage 1
 | `run_to_goal_env.py` | batched fixed-morph env: obs, their three reward/termination layers, per-world auto-reset, win counters |
 | `design.py` | **stage 2**: genome -> model fields (geoms, body pos, gears, and analytic capsule mass/inertia/ipos), plus exact `mj_setConst` constants |
 | `dev_env.py` | **stage 2**: `run-to-goal-devants-v0` batched -- stage flags, the design step, the 52-dim obs, the dev standing band |
-| `dev_ppo.py`, `train_dev.py` | **stage 2**: their `DevPolicy`/`DevValue` as one stage-masked module, and the smoke trainer |
+| `dev_ppo.py`, `train_dev.py` | **stage 2**: their `DevPolicy`/`DevValue` as one stage-masked module, and the smoke trainer; **stage 3b**: `StackedDevActors`, the `blocks` opponents as one stacked-weight forward |
 | `selfplay.py`, `train_selfplay.py` | **stage 3**: `OpponentRing` (their `delta` rule over a bounded in-memory checkpoint history), `CoEvoPPO` (two independent learners over one batched env, ego-split worlds), `evaluate_pair`, and the smoke trainer |
-| `profile_loop.py` | **stage 3**: where an iteration's wall clock goes -- env vs policy forward vs update vs design write, one-learner and two-learner, interleaved |
+| `profile_loop.py` | **stage 3**: where an iteration's wall clock goes -- env vs policy forward vs update vs design write, one-learner and two-learner, interleaved (`--mode stages`); **stage 3b**: the per-slot vs batched opponent A/B (`--mode opponents`) |
 | `parity.py`, `their_env_driver.py`, `their_dev_driver.py` | JSON-over-subprocess harnesses driving their CPU envs in their venv |
 | `tests/test_parity.py`, `tests/test_design_parity.py`, `tests/test_selfplay.py` | the stage-0/1, stage-2 and stage-3 gates |
 | `ppo.py`, `train_run_to_goal.py`, `render.py` | shared-policy PPO with their hyperparameters, eval pass, video |
@@ -767,17 +770,26 @@ terminated/truncated at `:299`. The checkpoint IS redrawn every episode.
 | `delta` | 0.5 | `run-to-goal-devants-v0.yaml:48` (and every other `*dev*` config). 0 reproduces their fixed-morph ants |
 | `ring_capacity` | 512 | their window at epoch E needs `ceil(E/2)` entries and `max_epoch_num: 1000`, so 512 covers their entire schedule with zero clamping. Measured cost: 152 kB per checkpoint, so **78 MB of host RAM** at full occupancy |
 | `checkpoint_every` | 1 | their `save_model_interval: 1` |
-| `blocks` | 4 | distinct sampled opponents live per side per iteration. Not theirs -- theirs is effectively (workers x episodes). This is the throughput knob; see the profile below, where it is the dominant stage-3 cost |
+| `blocks` | 4 | distinct sampled opponents live per side per iteration. Not theirs -- theirs is effectively (workers x episodes). It was the dominant stage-3 cost until the forward passes were batched (stage 3b below). Before: 112.75 ms per step for 4 blocks, i.e. ~28 ms per extra block. After: an extra block is one more row of an already-launched matmul, and the whole batched set is 3.37 ms |
 | `use_opponent_sample` | True | their `use_opponent_sample: true` |
+| `batched_opponents` | True | all `2 x blocks` opponents in ONE stacked forward instead of `2 x blocks` of them (stage 3b). `False` restores the per-slot path, which is the reference the equivalence gate measures against |
 
-## Gate 3 -- `tests/test_selfplay.py` (7/7 PASS)
+## Gate 3 -- `tests/test_selfplay.py`
 
-Run in this session: `--draws 200000 --gpu`, full log at
-`runs/competevo_port/stage3_gate/gate.txt`. Every line below is that run's
+The stage-3 gate was 7 checks (6 CPU + 1 GPU); stage 3b added 8 more (the first
+five rows below, three of them repeated on GPU) and the suite is now **15/15
+PASS** with `--draws 200000 --gpu` -- 11 CPU checks and 4 GPU ones. The
+stage-3 rows below are from `runs/competevo_port/stage3_gate/gate.txt`; the
+stage-3b rows and the re-run of everything are in
+`runs/competevo_port/stage3b_batched/gate.txt`. Every line is that run's
 output, not a description of what the test intends to do.
 
 | check | result |
 |---|---|
+| batched == per-slot, module level (**stage 3b**) | **PASS** -- 8 slots x 512 rows, on observations carrying both stage flags, past-the-clip values and NaN/+-inf. Production weights: max diff **1.49e-07** abs / 1.6e-07 rel on the distribution mean (CPU), **4.17e-07** / 4.4e-07 (GPU). Weights and normalizer statistics spread far apart: 4.77e-06 / 2.7e-07 (CPU), **1.50e-05 / 9.1e-07** (GPU). `std` bit-equal on all four; two slots differ by ~1.1-20 on the same input, so the check bites. NOT bit-exact -- fp32 reassociation, quantified above |
+| batched == per-slot, `CoEvoPPO`'s own methods (**stage 3b**) | **PASS** -- `_opponent_actions` vs `_opponent_actions_batched` with the same injected noise: **0.00e+00** on CPU (8 worlds), **5.25e-06** on GPU (64 worlds), over both sides x all worlds x 28 action dims |
+| the opponent MIXTURE is unchanged (**stage 3b**) | **PASS** -- with a distinct constant per slot, both paths hand every world exactly its assigned slot's action; the slot draw is uniform over `blocks` (chi2 **1.9** on 3 dof, 5-sigma crit 15, n = 200,000); after 6 batched epochs every live slot is still inside the epoch-5 window `[2, 4]`, 0 diverged |
+| both opponent paths close a training loop (**stage 3b**) | **PASS** -- 4 epochs each way, both learners moved, every parameter finite, **0 diverged worlds** on both |
 | two learners are independent | **PASS** -- 33 tensors each, parameter/buffer id sets disjoint, each optimizer owns exactly its own net; a full `update()` on learner 0 moved 33 of its tensors and left **all** of learner 1's bit-identical (`torch.equal`), and the symmetric direction holds after the ring is populated. Opponent nets have `requires_grad=False` and alias nothing |
 | per-agent obs/action slicing | **PASS** -- 4 ego worlds per learner; a per-`(world, agent)` marker in the obs, the ego action's lane, and the action the learner recorded all agree, and the swapped assignment fails all three |
 | ring samples THEIR distribution | **PASS** -- delta=0.5 at epoch 100: support exactly `[50, 99]`, chi2 **44.9** on 49 dof (5-sigma crit 98), worst bin 4.4% off uniform, **P(current) = 0** over 200k draws. delta=0: `[1, 99]`, chi2 107.8/98. `start==end -> current` at epoch 1 (delta 0.5) and at every epoch (delta 1). Through a populated 200-entry ring: mean opponent lag **50.07** against the predicted E/4 = 50.0, 0 clamps |
@@ -876,15 +888,21 @@ Listed because the alternative is that someone later assumes it was.
   smoke, which is why the profile above matters more than another short run.
 * **`blocks` as a diversity knob.** 4 was chosen and measured for COST. Nobody
   has measured what value of `blocks` is enough for the opponent mixture to
-  behave like theirs (which is effectively workers x episodes wide).
+  behave like theirs (which is effectively workers x episodes wide). Stage 3b
+  made the cost of raising it nearly zero; the diversity question is still open.
 * **Sumo, and everything at 2v2.** Unchanged from stage 2.
 
 ## Stage-3 profile: where the iteration actually goes
 
-`profile_loop.py`, 1024 worlds, rollout 64, one-learner and two-learner
-**interleaved** (the card is shared with six other trainers, so all-of-A then
-all-of-B compares two different machines), medians of 7, full log at
-`runs/competevo_port/stage3_gate/profile.txt`.
+`profile_loop.py --mode stages`, 1024 worlds, rollout 64, one-learner and
+two-learner **interleaved** (the card is shared with six other trainers, so
+all-of-A then all-of-B compares two different machines), medians of 7, full log
+at `runs/competevo_port/stage3_gate/profile.txt`.
+
+*This section is the BEFORE. It measures the per-slot opponent path; the stage-3b
+section below replaces the `policy.act` line and is the current state of the
+loop. Kept as measured, because the diagnosis it supports is what the fix was
+built from.*
 
 | | isolated | one learner (stage 2) | two learners + ring (stage 3) |
 |---|---|---|---|
@@ -919,6 +937,10 @@ launch and synchronisation overhead by three orders of magnitude -- these nets
 are ~38k parameters. The two obvious levers, neither taken here (the brief says
 measure, do not refactor): drop `blocks`, or stack the slot parameters and run
 the opponents as one batched `bmm` instead of `blocks` separate modules.
+**The second one was taken in stage 3b below, and this diagnosis held: 640 calls
+became 192 and the section went from 112.75 ms to 3.37 ms per step.** The third
+cause the diagnosis missed is in that section -- `RunningNorm.forward` calls
+`self.n.item()`, so each of those forwards was also a device->host sync.
 
 **3. The physics is NOT 1.6% of the iteration, and this contradicts the
 profiling note that prompted this section.** Measured here, `env.step` is
@@ -948,6 +970,162 @@ section holds the sync. The iteration TOTAL and the call COUNTS are exact; the
 per-section split has an error bar, and the clearest evidence of it is that
 `env.step` read 10.06 s in one run and 7.53 s in the other for identical work,
 with `policy.act` moving the other way.
+
+## Stage 3b -- the opponent forwards, batched
+
+The profile above named two levers for the 11.0 s of `policy.act`: drop
+`blocks`, or stack the slot parameters and run all the opponents as one batched
+matmul. The second one was taken, because the first changes the opponent
+mixture and the second does not. `blocks` is untouched at 4.
+
+**What changed.** `dev_ppo.StackedDevActors` holds all `2 x blocks` opponents as
+stacked weight tensors -- `[slots, out, in]` per layer -- and evaluates them
+with one broadcasting `matmul` per layer over a leading `[side, slot]` axis.
+`CoEvoPPO._opponent_actions_batched` calls it once per step for BOTH sides;
+`_opponent_actions` (the per-slot path stage 3 shipped) is still there, is the
+reference the gate measures against, and is reachable with
+`batched_opponents=False` / `train_selfplay.py --per-slot-opponents`.
+
+Three things go away with it, and only the first is the headline:
+
+1. **`2 x blocks` launches per step become 1.** 640 `policy.act` calls per
+   iteration become 192 -- exactly `64 x (2 ego + 1 stacked)` against
+   `64 x (2 ego + 2 x 4 opponents)`.
+2. **The opponent critic.** `_opponent_actions` took `net.act(...)[0]` and threw
+   the value away, so a third of every opponent forward was dead. The stacked
+   module has no critic at all: `policy.value` goes 674 -> 162 calls, and the
+   512 that vanished are exactly `64 x 2 x 4`.
+3. **A device->host sync per normalizer.** `RunningNorm.forward` branches on
+   `self.n.item()`. Each `DevActorCritic.act` runs three normalizers (scale,
+   control, value), so the 8 opponent forwards were **24 device->host stalls per
+   env step** on a card shared with six other trainers. The stacked normalizer
+   computes the same branch as a `torch.where` on the device, and drops all 24.
+   This is the most likely reason the per-slot arm is so much more
+   contention-sensitive than the batched one (its median is 4x its own best
+   case; the batched one's is 1.5x).
+
+The sampled action is also drawn ONCE per row from the gathered distribution
+instead of `blocks` times with `blocks - 1` discarded. Same distribution, fewer
+variates -- and the gate checks the gather routes each world to the slot it was
+assigned.
+
+### Equivalence, which is the gate
+
+`tests/test_selfplay.py`, first five checks, three of them repeated on GPU. Both paths
+are fp32 and associate their sums differently (`F.linear`'s `addmm` against a
+broadcasting `matmul`), so **bit-equality is not claimed and does not hold**.
+What holds, measured over 8 slots x 512 rows of observations that include both
+stage flags, values past `RunningNorm`'s clip, and NaN/+-inf entries:
+
+| weights | device | max abs / rel diff, distribution mean | max abs / rel diff, assembled action |
+|---|---|---|---|
+| production init | CPU | 1.49e-07 / 1.6e-07 | 1.19e-07 / 3.5e-08 |
+| production init | GPU | 4.17e-07 / 4.4e-07 | 4.17e-07 / 1.2e-07 |
+| spread far apart | CPU | 4.77e-06 / 2.7e-07 | 1.91e-06 / 1.2e-07 |
+| spread far apart | GPU | 1.50e-05 / 9.1e-07 | 1.14e-05 / 8.0e-07 |
+
+The `std` tensors are bit-equal on all four. The gate is 1e-5 *relative*
+(~100 fp32 ulps on a chain of four dot products up to 128 wide); the worst
+measured is 9.1e-07 relative, and it is on deliberately hostile weights -- in
+the regime the trainer actually runs in it is 4.4e-07. For scale, the port
+already carries 1.9e-07 of fp32 representation error in the observation itself
+and 3.0e-05 in the reward (gate 0c), and the control action's own sampling noise
+is sigma = 1.0. An earlier revision of this gate asserted 1e-5 *absolute* and
+FAILED on GPU at 2.2e-05 with means of magnitude 17; the tolerance was wrong,
+not the code, and the number is above.
+
+`CoEvoPPO`'s own two methods agree to 0.00e+00 on CPU (8 worlds) and 5.25e-06 on
+GPU (64 worlds), driven with the same injected noise through the production
+call.
+
+### Measured cost, before and after
+
+All A/B interleaved (arm A, arm B, arm A, ...) on ONE trainer with the flag
+flipped between iterations -- same env, same nets, same ring -- because this
+card's load drifts by more than the effect over minutes. Two independent runs,
+`runs/competevo_port/stage3b_batched/profile_ab.txt` (7 reps) and
+`profile_ab2.txt` (11 reps + the isolated section).
+
+**The isolated section** -- one step's worth of opponent forwards at the
+production shape, 512 rows per side, `blocks=4`, median of 200 interleaved reps:
+
+| | per-slot | batched |
+|---|---|---|
+| median | **112.75 ms** | **3.37 ms** |
+| min | 27.69 ms | 2.32 ms |
+| p90 | 288.46 ms | 74.32 ms |
+
+**33.5x on the median, 11.9x comparing the two arms' best cases** -- the honest
+range, and the gap between the two ratios is contention, not measurement error:
+the per-slot arm's 30 host syncs per step are what queue behind the other
+trainers. Per 64-step rollout that is 7.2 s -> 0.2 s.
+
+**The whole iteration, uninstrumented** (no timing wrappers at all, so nothing
+is serialised by a profiler sync), 1024 worlds, rollout 64:
+
+| | per-slot | batched | speedup |
+|---|---|---|---|
+| run 1, median of 7 | 30.40 s | 22.50 s | **1.35x** |
+| run 2, median of 11 | 36.47 s | 19.03 s | **1.92x** |
+| **pooled, median of 18** | **33.34 s** | **21.22 s** | **1.57x** |
+
+Median of the 18 *paired* ratios is 1.52x, and the pairs run from 0.60x to
+8.12x. That spread is the card, not the change: a single per-slot iteration read
+15.4 s at one moment and 125.1 s at another, and a single batched one 13.4 s and
+71.5 s. **1.57x is the number to quote**, with the caveat that anything measured
+on this machine in under ~20 interleaved pairs has an error bar of tens of
+percent.
+
+**The instrumented split** (medians; the wrappers sync on both edges, so the
+total is inflated and the section split over-attributes -- the CALL COUNTS
+however are exact):
+
+| | per-slot (run 1 / run 2) | batched (run 1 / run 2) |
+|---|---|---|
+| total iteration | 35.68 / 42.01 s | 18.32 / 22.70 s |
+| `env.step` (64 calls) | 15.82 / 15.62 s | 10.39 / 14.53 s |
+| **`policy.act`** | **16.29 / 16.58 s (640 calls)** | **3.40 / 4.11 s (192 calls)** |
+| `policy.value` | 3.04 / 3.30 s (674 calls) | 0.75 / 0.76 s (162 calls) |
+| everything else | 0.53 / 6.50 s | 3.78 / 3.31 s |
+
+`policy.act` is **4.0-4.8x** cheaper and is no longer the largest line in a
+two-learner iteration -- `env.step` is, which is where the next 3-4x has to come
+from. Note the `env.step` rows differ between arms by more than the change can
+explain (nothing in `env.step` was touched); that is the contention this whole
+section keeps warning about, and it is why the uninstrumented table above is the
+one that counts.
+
+Two comparisons NOT to make from these tables:
+
+* the stage-3 profile's 28.40 s two-learner iteration and this section's
+  35.7-42.0 s per-slot arm are the SAME code. The card was busier today. Only
+  the within-run A/B is meaningful.
+* the 33.5x on the isolated section does not become 33.5x on the iteration:
+  the opponent forwards were ~11-16 s of a ~30-42 s iteration, so Amdahl caps
+  the whole-iteration win at roughly 1.6-1.9x, which is what was measured.
+
+### What stage 3b did NOT verify
+
+* **That the batched and per-slot paths produce the same TRAJECTORY.** They do
+  not, and cannot: they consume the RNG differently (one draw per row instead of
+  `blocks`, and the opponent block now runs before the ego block rather than
+  interleaved with it). What is gated is the distribution and, with the
+  randomness pinned, the action.
+* **Any learning claim.** Both paths were run for 4-12 epochs in the gate and
+  11-18 iterations in the benchmark; nothing here says a co-evolution run
+  learns anything, which is unchanged from stage 3.
+* **`blocks` as a diversity knob** -- still nobody has measured what value is
+  wide enough. What HAS changed is that it is nearly free now (each extra block
+  is one more row in an already-launched matmul), so raising it toward their
+  effective (workers x episodes) is a cheap experiment where before it was the
+  dominant cost.
+* **Batching the two EGO actors as well.** They are the remaining 128 of the 192
+  `policy.act` calls. Not done: unlike the opponents they are optimized every
+  iteration and their value and log-prob are both used, so the stack would have
+  to carry the critic too and be re-synced after every update -- more surface
+  for exactly the kind of bug this section's gate exists to catch -- and the
+  whole batched `policy.act` line is only 3.4-4.1 s now, of which the two ego
+  forwards are a part.
 
 ## Stage-3 deviations (all deliberate, all recorded)
 
@@ -1046,7 +1224,14 @@ Item 3b's prediction is now measured and was wrong about which cost matters.
    the bare-env ceiling, the PPO update is not the dominant term at these
    hyperparameters, and stage 3's own overhead is `blocks x 2` extra tiny
    forward passes per step (11.0 s of a 28.4 s iteration) which should be one
-   batched `bmm`. Scoped separately, deliberately not touched here.
+   batched matmul. ~~Scoped separately, deliberately not touched here.~~
+   **DONE in stage 3b** (`dev_ppo.StackedDevActors`): the opponent forwards are
+   one call per step, measured **1.57x** on the whole iteration over 18
+   interleaved pairs and **33.5x** on the section itself. What is left is
+   `env.step`, which is now the largest line in a two-learner iteration; the
+   remaining named levers are the two EGO forwards (128 of the 192 surviving
+   `policy.act` calls), the per-step `float(info["forward"].mean())` host sync,
+   and the physics itself.
 3b. **The design write was predicted to hurt next. Measured, it does not** --
    After the fused-D2H fix a write costs 3.7 ms for one world and 208 ms for all
    1024, against a ~54 ms step -- i.e. it is dominated by a fixed per-call cost

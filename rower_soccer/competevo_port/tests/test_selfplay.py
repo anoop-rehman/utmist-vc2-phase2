@@ -31,9 +31,22 @@ The gate, in the order the things it protects were added:
   5. BOUNDEDNESS -- the ring evicts, its host footprint stops growing, and the
      clamp counter fires when a draw names an evicted epoch (so a run that has
      stopped sampling their distribution says so instead of pretending).
+  6. BATCHED == PER-SLOT -- the `blocks` opponent networks are evaluated as one
+     stacked-weight forward instead of `blocks` separate ones. That is a pure
+     speedup only if it computes the same function, so the equivalence is
+     checked before anything else about it: the same weights and the same
+     observations must give the same distributions and, given the same
+     randomness, the same actions. Checked at the module level (many rows,
+     hostile inputs) AND through `CoEvoPPO`'s own two methods, so the wiring is
+     covered too.
+  7. THE MIXTURE IS UNCHANGED -- the speedup must not quietly narrow the set of
+     opponents a learner faces. Two claims: the per-world slot assignment is
+     still uniform over `blocks` (chi-square), and the batched gather hands each
+     world the action of exactly the slot it was assigned (checked with a
+     distinct constant per slot, so a mis-gather names the wrong slot out loud).
 
-1, 2 and the end-to-end check build a real 8-world CPU dev env; 3, 4, 5 are pure
-and take milliseconds. Nothing here needs CompetEvo's venv.
+1, 2, 6b, 7 and the end-to-end check build a real 8-world CPU dev env;
+3, 4, 5, 6a are pure and take milliseconds. Nothing here needs CompetEvo's venv.
 """
 
 import argparse
@@ -53,7 +66,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from rower_soccer.competevo_port.dev_env import RunToGoalDevEnv
-from rower_soccer.competevo_port.dev_ppo import DevActorCritic
+from rower_soccer.competevo_port.dev_ppo import (DevActorCritic,
+                                                 StackedDevActors)
 from rower_soccer.competevo_port.selfplay import (CoEvoPPO, DEV_DELTA,
                                                   OpponentRing)
 
@@ -471,12 +485,276 @@ def t_loop_end_to_end(use_gpu=False):
             f"epoch-{E} draw), mean lag {lag:.1f}, {env.n_diverged} diverged")
 
 
+# ---------------------------------------------------------------------------
+# 6a. the batched opponent forward computes the same thing (MODULE level)
+# ---------------------------------------------------------------------------
+def _spread_out(net, gen, live_stats=True):
+    """Move a freshly built net off its initialization and, optionally, give
+    its RunningNorms live statistics. Both matter: with `n == 0` the normalizer
+    is the identity and the hardest branch never runs, and with the shipped
+    initialization the two heads are nearly linear."""
+    with torch.no_grad():
+        for p in net.parameters():
+            p.add_(torch.randn(p.shape, generator=gen).to(p) * 0.5)
+        for norm, dim in ((net.scale_norm, net.design_dim),
+                          (net.control_norm, net.sim_obs_dim)):
+            if live_stats:
+                norm.n.fill_(float(torch.randint(1, 500, (1,),
+                                                 generator=gen).item()))
+                norm.mean.copy_(torch.randn(dim, generator=gen).to(norm.mean))
+                norm.var.copy_((torch.rand(dim, generator=gen).to(norm.var)
+                                * 4.0 + 0.05))
+    return net
+
+
+def _hostile_obs(g, m, obs_dim, gen, device):
+    """Observations that exercise every branch of the action path: both stage
+    flags, values large enough to hit `RunningNorm`'s clip, and the non-finite
+    entries `DevActorCritic._clean` exists for."""
+    obs = (torch.randn(g, m, obs_dim, generator=gen) * 3.0)
+    obs[..., 0] = (torch.rand(g, m, generator=gen) < 0.5).float()
+    obs[0, 0, 5] = float("nan")
+    obs[0, min(1, m - 1), 6] = float("inf")
+    obs[-1, -1, 7] = -float("inf")
+    obs[-1, -2 if m > 1 else -1, 8] = 1e6
+    return obs.to(device)
+
+
+# Both paths are fp32 and they associate their sums differently -- `F.linear`'s
+# `addmm` against a broadcasting `matmul` over a leading [groups, slots] axis --
+# so BIT-equality is not the right gate and claiming it would be a lie. The
+# gate is relative: 1e-5 of the largest value in the tensor, i.e. ~100 fp32 ulps
+# on a chain of four 64-to-128-wide dot products. Measured worst case is an
+# order of magnitude inside it (see the strings the checks return), and it is
+# two orders below the fp32 representation error the port already carries
+# through mujoco_warp (PORT_STATUS gate 0c: obs 1.9e-07, reward 3.0e-05).
+_EQUIV_RTOL = 1e-5
+
+
+def t_batched_equals_per_slot(use_gpu=False, rows=512, blocks=4,
+                              spread=True):
+    dev = "cuda" if use_gpu else "cpu"
+    gen = torch.Generator().manual_seed(11)
+    if not spread:
+        # Production weights: their `init_fc_weights` heads, RunningNorms that
+        # have never advanced. This is the regime the trainer actually runs in.
+        nets = [[DevActorCritic().to(dev).eval() for _ in range(blocks)]
+                for _ in range(2)]
+    else:
+        nets = [[_spread_out(DevActorCritic(), gen,
+                         # slot (1, 0) keeps n == 0, i.e. a checkpoint whose
+                         # normalizer has never been updated: the stacked
+                         # normalizer's identity branch is per-slot, so a mix of
+                         # n == 0 and n > 0 slots is the case that breaks a
+                         # naive implementation.
+                         live_stats=not (e == 1 and k == 0)).to(dev).eval()
+             for k in range(blocks)] for e in range(2)]
+    stack = StackedDevActors(nets[0][0], 2, blocks).to(dev)
+    stack.sync_from(nets)
+
+    obs = _hostile_obs(2, rows, nets[0][0].obs_dim, gen, dev)
+    s_mean, s_std, c_mean, c_std = stack.slot_dists(obs)
+
+    # (a) the distributions themselves: every slot, every row.
+    dm = ds = 0.0
+    for e in range(2):
+        for k in range(blocks):
+            d_s, d_c = nets[e][k].dists(obs[e])
+            dm = max(dm, float((d_s.mean - s_mean[e, k]).abs().max()),
+                     float((d_c.mean - c_mean[e, k]).abs().max()))
+            ds = max(ds, float((d_s.stddev[0] - s_std[e, k]).abs().max()),
+                     float((d_c.stddev[0] - c_std[e, k]).abs().max()))
+    scale = float(torch.cat([s_mean.abs().max().view(1),
+                             c_mean.abs().max().view(1)]).max())
+    assert dm <= _EQUIV_RTOL * scale, (
+        f"mean differs by {dm:.3e} = {dm / scale:.1e} relative to the largest "
+        f"value in the tensor ({scale:.2f}), over the {_EQUIV_RTOL:.0e} gate")
+    assert ds == 0.0, f"std differs by {ds:.3e}"
+
+    # (b) the ACTIONS, with the randomness held fixed on both sides. Both paths
+    #     take `mean + std * eps`, which is what `Normal.sample()` is, so this
+    #     compares the whole assembled 28-dim action including the design
+    #     clamp and the stage mask -- not just the network output.
+    slots = torch.randint(0, blocks, (2, rows), generator=gen).to(dev)
+    eps = (torch.randn(2, rows, nets[0][0].design_dim, generator=gen).to(dev),
+           torch.randn(2, rows, nets[0][0].n_motor, generator=gen).to(dev))
+    got = stack.act(obs, slots, noise=eps)
+    ref = torch.zeros_like(got)
+    for e in range(2):
+        outs = torch.stack([nets[e][k].act(obs[e], noise=(eps[0][e], eps[1][e]))[0]
+                            for k in range(blocks)])
+        ref[e] = outs.gather(0, slots[e].view(1, -1, 1)
+                             .expand(1, rows, got.shape[-1]))[0]
+    da = float((got - ref).abs().max())
+    a_scale = max(float(ref.abs().max()), 1.0)
+    assert da <= _EQUIV_RTOL * a_scale, (
+        f"action differs by {da:.3e} = {da / a_scale:.1e} relative to the "
+        f"largest action ({a_scale:.2f}), over the {_EQUIV_RTOL:.0e} gate")
+    n_exact = bool((got == ref).all().item())
+
+    # (c) the equivalence must be a real claim, not a tautology: two different
+    #     slots have to actually disagree, or (b) would pass on a broken gather.
+    apart = float((ref[0] - stack.act(obs, (slots + 1) % blocks,
+                                      noise=eps)[0]).abs().max())
+    assert apart > 1e-3, "the slots are indistinguishable; (b) proves nothing"
+    return (f"{2 * blocks} {'spread' if spread else 'as-initialized'} slots x "
+            f"{rows} rows on {dev}: max |batched - per-slot| = {dm:.2e} abs / "
+            f"{dm / max(scale, 1e-30):.1e} rel on the distribution mean "
+            f"(max |mean| {scale:.2f}), {da:.2e} abs / "
+            f"{da / a_scale:.1e} rel on the assembled action "
+            f"({'BIT-EXACT' if n_exact else 'fp32 reassociation'}; std "
+            f"bit-exact; two slots differ by {apart:.2f} so the check bites)")
+
+
+# ---------------------------------------------------------------------------
+# 6b. ... and so does CoEvoPPO's own pair of methods
+# ---------------------------------------------------------------------------
+def t_batched_equals_per_slot_in_trainer(use_gpu=False):
+    worlds = 64 if use_gpu else 8
+    env, tr = _tiny_trainer(worlds=worlds, rollout=1, use_gpu=use_gpu, blocks=3)
+    tr.collect()                       # leave the design stage; sync the stack
+    gen = torch.Generator().manual_seed(3)
+    for e in range(2):
+        for net in tr.opp_nets[e]:
+            _spread_out(net, gen)
+    tr.opp_stack.sync_from(tr.opp_nets)
+
+    obs = tr._obs.float()
+    M, A = tr.n_ego, env.act_dim
+    eps = (torch.randn(2, M, tr.acs[0].design_dim).to(obs),
+           torch.randn(2, M, tr.acs[0].n_motor).to(obs))
+    ref = torch.stack([
+        tr._opponent_actions(e, obs[tr.ego_worlds[e], 1 - e],
+                             noise=(eps[0][e], eps[1][e])) for e in range(2)])
+    got = tr._opponent_actions_batched(obs, noise=eps)
+    d = float((got - ref).abs().max())
+    assert got.shape == (2, M, A), f"batched path returned {tuple(got.shape)}"
+    assert d <= 1e-5, f"CoEvoPPO's two opponent paths differ by {d:.3e}"
+
+    # And the two paths drive a whole iteration to the same place when the
+    # weights and the world are the same -- checked on the ACTION the env is
+    # actually handed, lane by lane, not on a summary statistic.
+    return (f"{worlds} worlds, blocks {tr.blocks}: "
+            f"CoEvoPPO._opponent_actions vs ._opponent_actions_batched differ "
+            f"by {d:.2e} over both sides x {M} worlds x {A} action dims")
+
+
+# ---------------------------------------------------------------------------
+# 7. the opponent MIXTURE is unchanged by the batching
+# ---------------------------------------------------------------------------
+def t_opponent_mixture_unchanged(use_gpu=False):
+    worlds, blocks = (64 if use_gpu else 8), 4
+    env, tr = _tiny_trainer(worlds=worlds, rollout=1, use_gpu=use_gpu,
+                            blocks=blocks)
+    tr.collect()
+
+    # (a) each slot gets a distinct constant action, so the action a world
+    #     receives NAMES the slot it was routed to.
+    def _pin(net, c):
+        with torch.no_grad():
+            net.control_mean.weight.zero_(); net.control_mean.bias.fill_(c)
+            net.scale_mean.weight.zero_(); net.scale_mean.bias.fill_(c)
+            net.control_log_std.fill_(-20.0); net.scale_log_std.fill_(-20.0)
+
+    for e in range(2):
+        for k, net in enumerate(tr.opp_nets[e]):
+            _pin(net, 1.0 + 10 * e + k)          # 1,2,3,4 / 11,12,13,14
+    tr.opp_stack.sync_from(tr.opp_nets)
+
+    obs = tr._obs.float()
+    got = tr._opponent_actions_batched(obs)[..., -env.n_motor:]
+    slots = tr.slot.view(2, tr.n_ego)
+    want = (1.0 + 10 * torch.arange(2, device=slots.device).view(2, 1)
+            + slots).to(got.dtype).unsqueeze(-1).expand_as(got)
+    assert torch.allclose(got, want, atol=1e-3), (
+        "the batched gather routed a world to the wrong slot: wanted "
+        f"{want[0, :4, 0].tolist()}, got {got[0, :4, 0].tolist()}")
+    # the per-slot path agrees, on the same slot assignment
+    per = torch.stack([tr._opponent_actions(e, obs[tr.ego_worlds[e], 1 - e])
+                       for e in range(2)])[..., -env.n_motor:]
+    assert torch.allclose(per, want, atol=1e-3), \
+        "the per-slot path and the slot table disagree"
+
+    # (b) the slot assignment itself is still uniform over `blocks`. It is drawn
+    #     by `torch.randint` at each world's episode reset; draw it many times
+    #     the way `collect` does and chi-square it. This is the distribution the
+    #     batching must not narrow -- the CHECKPOINT distribution behind it is
+    #     `sample_epoch`, gated separately above.
+    n = 200_000
+    draws = torch.randint(0, blocks, (n,), generator=tr.gen,
+                          device=tr.slot.device).cpu().numpy()
+    counts = np.bincount(draws, minlength=blocks)
+    exp = n / blocks
+    chi2 = float(((counts - exp) ** 2 / exp).sum())
+    crit = (blocks - 1) + 5.0 * math.sqrt(2 * (blocks - 1))
+    assert chi2 < crit, f"slot draws are not uniform: chi2 {chi2:.1f} > {crit:.1f}"
+
+    # (c) and every live slot still holds a checkpoint the ring chose: the
+    #     batching touched the forward pass, not `resample_opponents`.
+    for _ in range(6):
+        tr.train_iter()
+    E = tr.opp_sample_epoch
+    lo, hi = max(math.floor(E * DEV_DELTA), 1), E - 1
+    for e in range(2):
+        for ep in tr.opp_epoch[e]:
+            assert lo <= ep <= hi, f"opponent epoch {ep} outside [{lo}, {hi}]"
+    assert env.n_diverged == 0, f"{env.n_diverged} worlds diverged"
+    return (f"slot -> action routing exact on both paths; slot draws uniform "
+            f"over {blocks} (chi2 {chi2:.1f}/{blocks - 1} dof, crit "
+            f"{crit:.0f}, n={n:,}); after 6 batched epochs every live slot is "
+            f"inside the epoch-{E} window [{lo},{hi}], {env.n_diverged} "
+            f"diverged")
+
+
+# ---------------------------------------------------------------------------
+# 8. a short training loop closes on BOTH paths
+# ---------------------------------------------------------------------------
+def t_both_paths_close(use_gpu=False, epochs=4):
+    out = []
+    for batched in (False, True):
+        worlds = 64 if use_gpu else 8
+        env, tr = _tiny_trainer(worlds=worlds, rollout=4, use_gpu=use_gpu,
+                                blocks=3, batched_opponents=batched)
+        start = [_snapshot(ac) for ac in tr.acs]
+        t0 = time.perf_counter()
+        for _ in range(epochs):
+            tr.train_iter()
+        dt = time.perf_counter() - t0
+        assert tr.batched_opponents is batched
+        assert env.n_diverged == 0, \
+            f"batched={batched}: {env.n_diverged} worlds diverged"
+        for e in range(2):
+            assert not _bit_equal(start[e], _snapshot(tr.acs[e]))[0], \
+                f"batched={batched}: learner {e} never moved"
+            for t in tr.acs[e].parameters():
+                assert torch.isfinite(t).all(), \
+                    f"batched={batched}: learner {e} has a non-finite parameter"
+        out.append(f"batched={batched}: {dt:.1f}s, {env.n_diverged} diverged")
+    return (f"{epochs} epochs each, both learners moved, all parameters "
+            f"finite -- " + "; ".join(out))
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--draws", type=int, default=200_000)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--gpu", action="store_true")
     args = p.parse_args()
+
+    # The headline: the batched opponent forward is only a speedup if it is the
+    # same function, so it is checked first and on the hardest inputs.
+    check("batched opponents == per-slot opponents (module level, "
+          "production weights)",
+          lambda: t_batched_equals_per_slot(spread=False))
+    check("batched opponents == per-slot opponents (module level, weights and "
+          "normalizers spread far apart)",
+          lambda: t_batched_equals_per_slot(spread=True))
+    check("batched opponents == per-slot opponents (CoEvoPPO's own methods)",
+          t_batched_equals_per_slot_in_trainer)
+    check("the opponent mixture is unchanged by the batching",
+          t_opponent_mixture_unchanged)
+    check("a short training loop closes on BOTH opponent paths, 0 diverged",
+          t_both_paths_close)
 
     check("two learners are independent (a step on one leaves the other "
           "bit-identical)", t_learners_independent)
@@ -490,6 +768,14 @@ def main():
           t_ring_is_bounded)
     check("the co-evolution loop closes on CPU", t_loop_end_to_end)
     if args.gpu:
+        check("batched opponents == per-slot opponents ON GPU (module level, "
+              "production weights)",
+              lambda: t_batched_equals_per_slot(use_gpu=True, spread=False))
+        check("batched opponents == per-slot opponents ON GPU (module level, "
+              "spread apart)",
+              lambda: t_batched_equals_per_slot(use_gpu=True, spread=True))
+        check("batched opponents == per-slot opponents ON GPU (CoEvoPPO)",
+              lambda: t_batched_equals_per_slot_in_trainer(use_gpu=True))
         check("the co-evolution loop closes on the batched GPU env",
               lambda: t_loop_end_to_end(use_gpu=True))
 

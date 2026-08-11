@@ -54,6 +54,11 @@ def main():
                    help="their save_model_interval; 1 is theirs")
     p.add_argument("--blocks", type=int, default=OPPONENT_BLOCKS,
                    help="distinct sampled opponents live per side per iteration")
+    p.add_argument("--per-slot-opponents", action="store_true",
+                   help="run the `blocks` opponents as separate forward passes "
+                        "instead of one stacked batched one. Same actions to "
+                        "fp32 (gated), measurably slower; kept as the "
+                        "reference path")
     p.add_argument("--no-opponent-sample", action="store_true",
                    help="their use_opponent_sample: false -- always the "
                         "opponent's CURRENT weights (the stage-2 behaviour, "
@@ -82,6 +87,7 @@ def main():
                        ring_capacity=args.ring_capacity,
                        checkpoint_every=args.checkpoint_every,
                        blocks=args.blocks,
+                       batched_opponents=not args.per_slot_opponents,
                        use_opponent_sample=not args.no_opponent_sample,
                        rollout_len=args.rollout, epochs=args.epochs,
                        minibatch_size=args.minibatch, policy_lr=args.policy_lr,

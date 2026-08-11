@@ -67,9 +67,12 @@ class Acc:
         self.t, self.n = {}, {}
 
 
-def _instrument(env, acs, acc):
+def _instrument(env, acs, acc, extra=()):
     """Wrap the three things a rollout does: step the world, write designs,
-    run a network. Returns the undo list."""
+    run a network. `extra` is a list of (module, method) pairs charged to
+    `policy.act` as well -- the stacked opponent forward is one call that stands
+    in for `blocks` of them, and it has to be counted in the same bucket for the
+    before/after to mean anything."""
     undo = []
     env.step = acc.wrap("env.step", env.step)
     undo.append(lambda: None)
@@ -77,6 +80,8 @@ def _instrument(env, acs, acc):
     for ac in acs:
         ac.act = acc.wrap("policy.act", ac.act)
         ac.value = acc.wrap("policy.value", ac.value)
+    for mod, name in extra:
+        setattr(mod, name, acc.wrap("policy.act", getattr(mod, name)))
     return undo
 
 
@@ -114,6 +119,112 @@ def _report(rows, label, iters):
     return med
 
 
+def _ab_opponents(args, acc, dev, cuda):
+    """Interleaved A/B of the two opponent forward paths on ONE trainer.
+
+    Same env, same nets, same ring, same iteration count -- the only thing that
+    moves between the arms is `batched_opponents`, flipped between iterations.
+    That is the strongest form of the interleave this card needs: a separate
+    trainer per arm would also differ in its world states, and running all of A
+    then all of B would compare two different machines (the stage-3 profile read
+    10.06 s and 7.53 s for identical work minutes apart)."""
+    env = RunToGoalDevEnv(num_worlds=args.worlds, use_gpu=cuda, seed=3)
+    acs = [DevActorCritic(design_dim=env.design_dim,
+                          sim_obs_dim=env.sim_obs_dim,
+                          n_motor=env.n_motor).to(dev) for _ in range(2)]
+    tr = CoEvoPPO(env, acs, rollout_len=args.rollout, epochs=args.epochs,
+                  minibatch_size=args.minibatch, blocks=args.blocks,
+                  device=dev)
+
+    # -- phase 0: the changed section, isolated -----------------------------
+    # A whole iteration on this card swings 4x minute to minute (env.step and
+    # the PPO update dominate it and both are at the mercy of six other
+    # trainers), so the iteration-level A/B below needs a lot of reps to say
+    # anything. This times ONLY the thing that changed -- one step's worth of
+    # opponent forwards at the production batch -- alternating A/B/A/B so the
+    # drift is shared, and it is the number with the small error bar.
+    tr.train_iter()                               # populate obs / warm kernels
+    obs = tr._obs.float()
+    tr.opp_stack.sync_from(tr.opp_nets)
+    for _ in range(5):
+        [tr._opponent_actions(e, obs[tr.ego_worlds[e], 1 - e]) for e in range(2)]
+        tr._opponent_actions_batched(obs)
+    micro = {"per-slot": [], "batched": []}
+    for _ in range(args.micro_reps):
+        for name, fn in (("per-slot",
+                          lambda: [tr._opponent_actions(
+                              e, obs[tr.ego_worlds[e], 1 - e])
+                              for e in range(2)]),
+                         ("batched",
+                          lambda: tr._opponent_actions_batched(obs))):
+            acc.sync()
+            t0 = time.perf_counter()
+            fn()
+            acc.sync()
+            micro[name].append((time.perf_counter() - t0) * 1e3)
+    ma, mb = (statistics.median(micro["per-slot"]),
+              statistics.median(micro["batched"]))
+    print(f"\n--- ONE STEP of opponent forwards, {args.worlds // 2} rows per "
+          f"side, blocks={args.blocks} (median of {args.micro_reps}, "
+          f"interleaved) ---")
+    for name, med in (("per-slot", ma), ("batched", mb)):
+        v = sorted(micro[name])
+        print(f"  {name:9s} {med:7.2f} ms   "
+              f"(min {v[0]:.2f}, p90 {v[int(0.9 * len(v))]:.2f}, "
+              f"max {v[-1]:.2f})")
+    print(f"  speedup   {ma / mb:7.2f}x   "
+          f"= {(ma - mb) * args.rollout / 1e3:.2f} s per {args.rollout}-step "
+          f"rollout")
+
+    # -- phase 1: wall clock with NO wrappers -------------------------------
+    # The instrumented split below over-attributes, because it synchronises on
+    # both edges of every wrapped call and so serialises work that would
+    # otherwise pipeline. The headline speedup has to be measured without it.
+    for b in (False, True):                       # warm up BOTH paths
+        tr.batched_opponents = b
+        tr.train_iter()
+    clean = {False: [], True: []}
+    for i in range(args.iters):
+        for b in (False, True):
+            tr.batched_opponents = b
+            acc.sync()
+            t0 = time.perf_counter()
+            tr.train_iter()
+            acc.sync()
+            clean[b].append(time.perf_counter() - t0)
+        print(f"  clean [{i + 1}/{args.iters}] per-slot {clean[False][-1]:.1f}s"
+              f"  batched {clean[True][-1]:.1f}s", flush=True)
+    ca, cb = (statistics.median(clean[False]), statistics.median(clean[True]))
+    print(f"\n--- UNINSTRUMENTED iteration wall (median of {args.iters}, "
+          f"interleaved) ---")
+    print(f"  per-slot opponents  {ca:8.2f} s   {sorted(clean[False])}")
+    print(f"  batched opponents   {cb:8.2f} s   {sorted(clean[True])}")
+    print(f"  speedup             {ca / cb:8.2f}x")
+
+    # -- phase 2: the same A/B with the section timers on -------------------
+    _instrument(env, acs + [n for s in tr.opp_nets for n in s], acc,
+                extra=[(tr.opp_stack, "act")])
+    for b in (False, True):
+        tr.batched_opponents = b
+        tr.train_iter()
+    rows = {False: [], True: []}
+    for i in range(args.iters):
+        for b in (False, True):
+            tr.batched_opponents = b
+            rows[b].append(_timed_iter(tr, acc))
+        print(f"  [{i + 1}/{args.iters}] per-slot {rows[False][-1]['total']:.1f}s"
+              f"  batched {rows[True][-1]['total']:.1f}s", flush=True)
+    a = _report(rows[False], f"PER-SLOT opponents (blocks={args.blocks})",
+                args.iters)
+    b = _report(rows[True], f"BATCHED opponents (blocks={args.blocks})",
+                args.iters)
+    print(f"\nbatched / per-slot iteration wall: {b['total'] / a['total']:.2f}x"
+          f"  ({a['total'] / b['total']:.2f}x speedup)")
+    print(f"policy.act: {a.get('policy.act', 0):.2f} s -> "
+          f"{b.get('policy.act', 0):.2f} s "
+          f"({a.get('policy.act', 1) / max(b.get('policy.act', 1e-9), 1e-9):.2f}x)")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--worlds", type=int, default=1024)
@@ -122,11 +233,19 @@ def main():
     p.add_argument("--epochs", type=int, default=4)
     p.add_argument("--minibatch", type=int, default=8192)
     p.add_argument("--blocks", type=int, default=4)
+    p.add_argument("--micro-reps", type=int, default=100)
+    p.add_argument("--mode", choices=("stages", "opponents"), default="stages",
+                   help="'stages' = one-learner vs two-learner (the stage-3 "
+                        "profile); 'opponents' = per-slot vs batched opponent "
+                        "forward, interleaved on one trainer")
     args = p.parse_args()
 
     cuda = torch.cuda.is_available()
     dev = "cuda" if cuda else "cpu"
     acc = Acc(cuda)
+
+    if args.mode == "opponents":
+        return _ab_opponents(args, acc, dev, cuda)
 
     # -- 1. the env on its own, no policy, no learning ----------------------
     env = RunToGoalDevEnv(num_worlds=args.worlds, use_gpu=cuda, seed=0)

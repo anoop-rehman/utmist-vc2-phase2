@@ -1,0 +1,4 @@
+# Docs site build dependencies (Read the Docs installs these).
+mkdocs-material>=9.5
+mkdocs-include-markdown-plugin>=6.0
+pymdown-extensions>=10.7

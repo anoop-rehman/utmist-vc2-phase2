@@ -168,10 +168,15 @@ class SelfPlayPPO:
         self.device = device
         # Their two optimizers with two learning rates (dev_learner.py:129-140);
         # the critic's weight decay is their `l2_reg` on the value net only.
-        pi_params, vf_params = self._param_groups()
-        self.opt_pi = torch.optim.Adam(pi_params, lr=policy_lr)
-        self.opt_vf = torch.optim.Adam(vf_params, lr=value_lr,
-                                       weight_decay=value_l2)
+        self.pi_params, self.vf_params = self._param_groups()
+        self.value_l2 = value_l2
+        self.opt_pi = torch.optim.Adam(self.pi_params, lr=policy_lr)
+        # NOT `weight_decay=value_l2`. Theirs adds `sum(p^2) * l2_reg` to the
+        # value LOSS (`dev_learner.py:177-178`), whose gradient is `2 * l2_reg *
+        # p`, while Adam's non-decoupled weight_decay adds `l2_reg * p` -- so the
+        # optimizer form is exactly half strength. Corrected 2026-08-12; see
+        # M2E_VALIDATION section 8.
+        self.opt_vf = torch.optim.Adam(self.vf_params, lr=value_lr)
 
         shape = (self.T, self.N, self.A)
         z = lambda *tail: torch.zeros(*shape, *tail, device=device)
@@ -273,12 +278,25 @@ class SelfPlayPPO:
                 if self.ent_coef:
                     pi_loss = pi_loss - self.ent_coef * ent.mean()
                 vf_loss = (self.ac.value(obs[i]) - ret[i]).pow(2).mean()
+                # Their explicit L2 penalty, in the loss where they put it.
+                vf_total = vf_loss
+                if self.value_l2:
+                    vf_total = vf_total + self.value_l2 * sum(
+                        p.pow(2).sum() for p in self.vf_params)
                 self.opt_pi.zero_grad(set_to_none=True)
                 self.opt_vf.zero_grad(set_to_none=True)
-                (pi_loss + vf_loss).backward()
-                gn = nn.utils.clip_grad_norm_(self.ac.parameters(),
+                (pi_loss + vf_total).backward()
+                # `dev_learner.py:196` clips `policy_net.parameters()` ONLY --
+                # the critic's gradient is never clipped. Clipping it too (which
+                # this did until 2026-08-12) rescales the policy gradient by a
+                # norm that includes the critic's, so the two nets were coupled
+                # through the clip.
+                gn = nn.utils.clip_grad_norm_(self.pi_params,
                                               self.max_grad_norm)
-                if not torch.isfinite(gn):
+                # Theirs has no finiteness guard; keep ours, but measure the
+                # critic's norm without scaling it (max_norm=inf never clips).
+                gn_vf = nn.utils.clip_grad_norm_(self.vf_params, float("inf"))
+                if not (torch.isfinite(gn) and torch.isfinite(gn_vf)):
                     self.n_bad_grads += 1
                     continue
                 self.opt_pi.step()

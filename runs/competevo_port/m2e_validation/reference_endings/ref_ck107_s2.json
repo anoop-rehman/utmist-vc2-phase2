@@ -1,0 +1,18 @@
+{
+  "run_dir": "tmp/run-to-goal-devants-v0/20260810_211247",
+  "ckpt": 107,
+  "seed": 2,
+  "episodes": 48,
+  "endings": {
+    "timeout": 16,
+    "fell": 16,
+    "goal": 16
+  },
+  "mean_len": 330.125,
+  "wins": [
+    0,
+    16
+  ],
+  "both_reached": 0,
+  "goal_and_fall": 0
+}

@@ -648,3 +648,60 @@ Still missing, and still the gate for task #25: the same three-way breakdown on
 THEIR side. Their runner logs win rate only, so it needs a short instrumented
 reference run. Until that exists, "ours time out more than theirs" is an
 inference from our side alone.
+
+## 7. The reference's endings, and what the win-rate gap actually is
+
+Section 6 measured our side and said the comparison was still missing. It is no
+longer missing. `/workspace/competevo/endings_eval.py` drives THEIR runner,
+THEIR env and THEIR `epoch_0107.p` checkpoints through their `mean_action=True`
+eval branch and classifies each episode the same three ways. 7 seeds x 48
+episodes = 336 games. Nothing in `competevo/` was modified; the script subclasses
+their runner to skip the `render_mode="human"` that `training=False` forces, and
+the branch it substitutes is the one TRAINING uses.
+
+| ending | theirs (336 games) | ours (381 games) |
+|---|---|---|
+| reached the goal | **42.6%** | **6.6%** |
+| fell over | **32.1%** | **31.8%** |
+| ran out of time | **25.3%** | **61.7%** |
+| mean episode length | 303.9 / 500 | 381.5 / 500 |
+
+**The fall rates agree to 0.3 percentage points.** Our ants fall over exactly as
+often as theirs do. Every point of the gap sits between "goal" and "timeout":
+theirs score 42.6% of games, ours time out instead.
+
+That kills the stability reading of the physics hypothesis. Section 6 guessed
+"a contact/friction discrepancy that makes our ants slower" over "one that makes
+them less stable", and the measurement takes the first and rules out the second
+about as cleanly as a measurement can. **Our ants are not more fragile. They are
+slower.** They do not cover the 4 m to the goal line inside 500 steps.
+
+Sample sizes make this unambiguous: 143/336 = 42.6% +/- 2.7% against 25/381 =
+6.6% +/- 1.3%. Per-seed goal rates on their side run 29.2-54.2%, so the spread
+never approaches ours.
+
+Two things this does NOT settle, and neither should be glossed:
+
+* **These are two different training runs**, not one policy evaluated twice —
+  their reference run and our port's 2e run, each at their own epoch-107
+  checkpoint. So the comparison answers "does our port reach their result", not
+  "does our env behave like theirs given the same policy". A cross-evaluation
+  (their weights in our env) would separate those, and it is the obvious next
+  probe.
+* **The agent asymmetry is far starker on their side.** Their win rate splits
+  [0.0000, 0.4256] — agent 0 never wins a single one of 336 games. Ours splits
+  [0.0026, 0.0630]. Both runs have agent 1 dominant, which is reproduced
+  behaviour, but their winner is much more dominant than ours.
+
+Their 0.4256 summed win rate here is also well above the 0.1667 their runner
+logged over epochs 78-106. Same caveat as section 6: their logged rate is a
+per-epoch training-eval number and this is 336 mean-action games at one
+checkpoint. The two are not interchangeable and neither replaces the other.
+
+### The next probe, now well-posed
+
+"Slower" is measurable directly and cheaply: per-episode com_x displacement and
+peak forward velocity, on both sides, at the same checkpoint. If ours travels
+less far per unit of control effort, the candidates narrow to friction,
+actuator gear, or the dense forward-reward scale — and the first two are
+gateable against their model fields without training anything.

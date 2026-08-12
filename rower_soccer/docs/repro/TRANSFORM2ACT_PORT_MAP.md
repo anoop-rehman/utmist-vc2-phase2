@@ -1,0 +1,249 @@
+# Transform2Act port map (D3 unit 3b)
+
+*Written 2026-08-12, from a read of `/workspace/Transform2Act` at the commit the
+`hopper_gpu` run is training from. Companion to `COMPETEVO_PORT_MAP.md`.
+Every claim here is either a file:line reference or a number measured by
+`rower_soccer/t2a_port/gnn_playground.py` (unit 3c) — nothing is from the paper.*
+
+The whole of `design_opt/` is **2,360 lines**. This is a small codebase with one
+genuinely hard idea in it, and the port difficulty is concentrated in a single
+place (topology changes mid-episode), not spread out.
+
+## 1. What an episode is
+
+Not an RL episode in the usual sense — it is a *design* followed by a *rollout*,
+and the design steps go through the same policy and the same PPO buffer as the
+control steps.
+
+| stage | steps | physics? | action slice used | reward |
+|---|---|---|---|---|
+| `skeleton_transform` | `cfg.skel_transform_nsteps` (5 for hopper) | **no** | `a[:, -1]`, one categorical per node | 0 |
+| `attribute_transform` | 1 | **no** | `a[:, control_dim:-1]`, continuous per node | 0 |
+| `execution` | up to `done_condition.max_nsteps` (1000) | yes | `a[:, :control_dim]` | the locomotion reward |
+
+`hopper.py:105-172`. The two design stages **do not step MuJoCo at all** — they
+edit an XML, call `reload_sim_model`, and return an observation. That single
+fact is what makes this portable: the expensive part of the episode is a
+fixed-topology rollout, and the topology only changes at six known points.
+
+Each skeleton step is a per-node choice from `{no-op, add child, remove}`
+(`skel_num_action = 3 if cfg.enable_remove else 2`, `hopper.py:38`), gated by
+`allow_add_body` / `allow_remove_body` (depth and child-count limits from
+`cfg.add_body_condition`). The attribute step writes continuous parameters —
+geom size, offsets, actuator gear — through `body.set_params`.
+
+## 2. The observation is a graph, per node
+
+`hopper._get_obs` (`hopper.py:258-274`) returns a **list**, not an array:
+
+```
+[ obs [N, attr_fixed + sim_obs + attr_design],   # per-node features
+  edges [2, E],                                  # both directions, tree edges
+  use_transform_action [1],                      # which of the 3 stages
+  num_nodes [1],
+  body_index [N] ]                               # only if use_body_ind
+```
+
+Three details that a port gets wrong silently:
+
+* **Edges are the robot tree, not fully connected.** `robot.get_gnn_edges()` is
+  the default; `get_graph_fc_edges` is only used when `obs_specs.fc_graph` is
+  set, and `hopper_gpu.yml` does not set it. A port that assumes fully-connected
+  will train fine and be a different algorithm.
+* **`body_index = int(body.name, base=max_nchild+1)`** (`hopper.py:250-256`).
+  Body names are numerals in base `max_nchild+1`, so the index encodes the
+  body's *path from the root*. This is what lets per-body-type weights be shared
+  across morphologies: "second child of the first child of the root" has the
+  same parameters in every body plan that has such a node. `max_index=256` caps
+  it, so deep or wide trees silently collide.
+* **`design_cur_params` is the projected parameter**, not the action, when
+  `use_projected_params` (default true, and set for hopper). The observation
+  reports what the XML actually got after clipping to `lb`/`ub`, not what the
+  policy asked for.
+
+## 3. The policy: three towers, one per stage
+
+`transform2act_policy.py`. Each stage has its own, independent:
+
+```
+RunningNorm -> [pre_mlp] -> GNNSimple -> [mlp] -> JSMLP(indexed by body_index)
+```
+
+and they share nothing but the observation layout. Input dims differ:
+
+| tower | input | output per node |
+|---|---|---|
+| `skel_*` | `attr_fixed + attr_design` | `skel_action_dim` logits |
+| `attr_*` | `attr_fixed + attr_design` | `attr_design_dim` Gaussian mean |
+| `control_*` | `attr_fixed + sim_obs + attr_design` | `control_action_dim` Gaussian mean |
+
+Only the control tower sees `sim_obs` — the design towers are blind to the
+physical state, which makes sense (there is no meaningful state yet) and matters
+for a port that would otherwise feed them the full vector.
+
+`forward` splits a mixed batch by stage, runs only the towers that have rows,
+and reassembles into one `[total_nodes, control_dim + attr_dim + 1]` action
+tensor with the unused slices left at zero (`policy:207-224`). The env asserts
+those zeros (`hopper.py:146`).
+
+**`GNNSimple`** (`models/gnn.py`) is `torch_geometric.nn.GraphConv` layers with
+optional residual and `cat_input`. For hopper: `hdims [64,64,64]`, `aggr: add`,
+`bias: true`, relu, no residual, no cat_input.
+
+**`JSMLP`** (`models/jsmlp.py`) is an MLP whose every layer is an `IndexLinear`:
+a `[256, out, in]` weight bank selected per node by `body_index`. Its forward is
+**a Python loop over `ind.unique()`** with one `addmm` per distinct index.
+
+## 4. The critic
+
+`transform2act_critic.py`: one tower (`RunningNorm -> GNN -> MLP [512,256] ->
+Linear(…,1)`), and the value for a graph is **read off its first node**
+(`critic.py:78-81`), not pooled. The one-hot stage flag is concatenated to the
+observation (`design_flag_in_state: true`, `onehot_design_flag: true`), so the
+critic knows which stage it is valuing — necessary, since design steps pay 0 and
+execution steps do not.
+
+## 5. The per-graph log-prob, and why the whole codebase is float64
+
+`policy.get_log_prob` needs a per-graph sum of per-node log-probs. It does this
+by `cumsum` over the entire batch, indexing at each graph boundary, and
+**differencing consecutive boundaries** (`policy:238-241`, and again for each of
+the three stages).
+
+That is catastrophic cancellation by construction: on a 50,000-step batch the
+running cumsum reaches ~1e5 while the wanted quantity is ~1e1. Measured in
+`gnn_playground.py`:
+
+| reduction | max abs error vs fp64 segment sum |
+|---|---|
+| fp64 cumsum-and-difference (theirs) | 1.7e-10 |
+| **fp32 cumsum-and-difference** | **1.3e-1  (0.18% of a typical log-prob)** |
+| fp32 segment sum (`index_add`) | 2.0e-5 |
+
+**So float64 is load-bearing only for their choice of reduction.** Swap
+`cumsum`-and-difference for `index_add` and fp32 is accurate to 2e-5 — five
+orders of magnitude better than fp32 with their reduction, and good enough for a
+PPO ratio. This is the single cheapest correctness-preserving change in the
+port, and it halves memory and bandwidth for everything else.
+
+A 0.18% error on a log-prob is not cosmetic: PPO exponentiates it into the
+importance ratio and clips at 1±0.2, so it perturbs exactly the quantity the
+clip is meant to bound.
+
+## 6. Where the wall-clock actually goes
+
+From the live `hopper_gpu` run (32 workers, this pod), per epoch:
+
+| phase | seconds | share |
+|---|---|---|
+| `T_sample` | ~100 | 49% |
+| `T_update` | ~52 | 26% |
+| `T_eval` | ~51 | 25% |
+
+`T_eval` is also rollouts (`agent.optimize_policy` calls `self.sample(...,
+mean_action=True)`), so **74% of wall-clock is environment rollout** and 26% is
+the PPO update. A batched-physics port attacks the 74%; the update is already on
+the GPU and is not where the time is. Amdahl's ceiling for a physics-only port
+is therefore ~3.8x, and that is the honest number to plan against — not the
+raw env-step ratio, which is the mistake made in D2 (see
+`COMPETEVO_PORT_MAP.md`; the measured end-to-end speedup there was ~3x against a
+~19x raw ratio).
+
+## 7. The one genuinely hard problem: topology changes mid-episode
+
+Batched GPU physics compiles one model for all worlds. Transform2Act changes the
+model six times per episode, and after the skeleton stage different worlds have
+**different numbers of bodies**. Three approaches, ranked:
+
+### A. Superset model with an activation mask (recommended)
+
+Compile the maximal tree once — for hopper, `max_body_depth 4` and
+`max_nchild 3` bound it at 1+3+9+27 = 40 bodies — and let each world activate a
+subtree. Deactivation means: zero the actuator gear, freeze the joint, and
+shrink the geom to epsilon *inside its parent* so it cannot collide or add
+inertia.
+
+Pros: one compiled model, fixed `[W, N, F]` tensors, the adjacency becomes a
+per-world mask, and the whole ragged-batching problem disappears.
+
+Cons, and they are the dangerous kind: a "disabled" body that still has mass,
+contact geometry, or a live degree of freedom changes the physics of a body plan
+that should not contain it. **This is precisely the failure mode this project
+has shipped twice — an env that is numerically fine and physically wrong.** The
+gate must be: build morphology M as a subset of the superset, build M as its own
+compiled model, and assert the trajectories agree to machine epsilon over
+several hundred steps from a shared initial state. Not the observation — the
+trajectory.
+
+### B. Group worlds by topology after the design stages
+
+Skeleton actions are discrete and heavily constrained, so many worlds land on
+the same tree. Compile one model per distinct topology per generation and run
+each group as its own batch.
+
+Pros: exact by construction, no masking risk. Cons: the number of distinct
+topologies is unbounded in principle, compile cost lands inside the training
+loop, and group sizes are ragged — the tail groups waste the GPU.
+
+Worth measuring before dismissing: **how many distinct topologies does a
+50,000-step batch actually contain?** If it is tens, B is simpler and safer than
+A. That measurement is cheap (log `cur_xml_str` hashes for one epoch of the live
+run) and should be taken before committing to A.
+
+### C. Keep the design stages on CPU
+
+They cost no physics. Run all six design steps in the existing single-threaded
+path, then hand fixed topologies to batched GPU physics for the execution stage.
+
+This is not really an alternative — it is a component of both A and B, and it is
+free. The design stages are 6 steps against up to 1000 execution steps.
+
+## 8. What we already have
+
+The attribute-transform half of this problem is **solved in our own tree**.
+`rower_soccer/competevo_port/design.py`'s `DesignWriter` writes per-world model
+fields (geom sizes, masses, gears) into a batched backend for a fixed topology,
+with `mj_setConst` for the derived quantities, and it has a parity gate. That is
+exactly the attribute stage. The genuinely new work is topology.
+
+## 9. Port order (proposed for 3d)
+
+1. **`index_add` instead of cumsum-and-difference, in fp32.** Measured above,
+   independent of everything else, and it can be validated against their fp64
+   run directly.
+2. **Dense masked GraphConv.** Verified in 3c to match PyG to **0.0 max error in
+   fp32** and 9e-16 in fp64, so this is a free representation change.
+3. **Measure the distinct-topology count** (section 7B) before choosing A or B.
+4. **Execution stage on batched physics**, fixed topology, one body plan — the
+   narrowest possible thing that can be gated against their trajectories.
+5. **Topology strategy** per step 3, with the trajectory-equivalence gate.
+6. **Paper-number validation (3e)** — their Table 1 final returns.
+
+## 10. Things measured that turned out NOT to be problems
+
+Recorded because they were on the suspect list and the port should not spend
+time on them:
+
+* **`IndexLinear`'s Python loop is not obviously the bottleneck.** Batching it
+  into a gather + `baddbmm` is correct (max err 7.8e-5) but the speedup depends
+  entirely on the regime, and one of them is a *slowdown*:
+
+  | nodes | body types | loop | batched | speedup |
+  |---|---|---|---|---|
+  | 5,000 | 8 | 5.0 ms | 3.4 ms | 1.5x |
+  | 5,000 | 40 | 16.9 ms | 2.0 ms | 8.4x |
+  | 5,000 | 256 | 109.8 ms | 4.4 ms | **24.9x** |
+  | 50,000 | 8 | 3.3 ms | 19.5 ms | **0.17x** |
+  | 50,000 | 40 | 25.9 ms | 19.3 ms | 1.3x |
+  | 50,000 | 256 | 139.3 ms | 22.7 ms | 6.1x |
+
+  The loop costs one kernel per *distinct* index; the batched form pays a
+  gathered `[n, out, in]` weight tensor (3.3 GB at 50k nodes and 128x128). At
+  many nodes and few body types the loop wins outright. **Do not port this
+  blind** — measure the actual distinct-`body_index` count in a real batch
+  first, and if it is large, chunk the batched form rather than materialising
+  the full gather.
+* **Variable-size graph batching is not hard.** Their `batch_data`
+  (`policy:113-126`) concatenates node features and offsets edge indices — the
+  standard trick, and it already runs on GPU unchanged. Under superset-model
+  batching (7A) it stops being needed at all.

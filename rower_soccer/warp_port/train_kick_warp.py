@@ -446,6 +446,7 @@ def run(args, task, make_env_fn, make_eval_fn):
               f"{args.score_seed} re-applied every rollout (paired draws)",
               flush=True)
     t0 = time.perf_counter()
+    last_steps, last_t = start_steps, t0
     last_ckpt = t0
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
     # Default (--score-secs 0) puts scoring on the video cadence, so the two
@@ -471,7 +472,15 @@ def run(args, task, make_env_fn, make_eval_fn):
         stats = trainer.train_iter()
         it += 1
         now = time.perf_counter()
+        # Lifetime average since the run started. It lags hard after any slow
+        # period -- a run that spent four hours CPU-starved and then recovered
+        # reports the four hours forever -- so `fps_now` is the number to read
+        # when asking "how fast is it going", and `fps` when asking "how long
+        # until it finishes".
         fps = (trainer.total_steps - start_steps) / (now - t0)
+        fps_now = ((trainer.total_steps - last_steps) / (now - last_t)
+                   if now > last_t else fps)
+        last_steps, last_t = trainer.total_steps, now
         eta_min = max(0.0, (deadline - now) / 60)
         if it % 5 == 0:
             fit = float(env.fitness().mean())
@@ -490,7 +499,7 @@ def run(args, task, make_env_fn, make_eval_fn):
             # diverged: world-steps whose physics went non-finite (ppo.collect).
             # Expected 0 or a trickle; if it climbs the contact model is wrong.
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
-                  f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
+                  f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} fps_now={fps_now:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
                   f"fitness={fit:.3f} strikes/ep={strikes:.2f}{extra} "
                   f"std={stats['std']:.3f} diverged={trainer.n_diverged:,}",
@@ -498,7 +507,7 @@ def run(args, task, make_env_fn, make_eval_fn):
             if use_wandb:
                 import wandb
                 log = {"env_step": trainer.total_steps,
-                       "monitor/fps": fps, "monitor/eta_min": eta_min,
+                       "monitor/fps": fps, "monitor/fps_now": fps_now, "monitor/eta_min": eta_min,
                        "train/ep_rew": stats["ep_rew_env_mean"],
                        # Unshaped gate metric; the shaping terms cannot inflate it.
                        "train/fitness": fit,

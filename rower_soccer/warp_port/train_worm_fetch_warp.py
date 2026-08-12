@@ -116,6 +116,8 @@ def main():
           f"steps/iter={trainer.T * trainer.N:,}", flush=True)
 
     t0 = time.perf_counter()
+
+    last_steps, last_t = start_steps, t0
     deadline = t0 + args.max_hours * 3600.0
     last_ckpt = t0
     last_video = t0 - max(0.0, args.video_secs - args.first_video_secs)
@@ -124,17 +126,25 @@ def main():
         stats = trainer.train_iter()
         it += 1
         now = time.perf_counter()
+        # Lifetime average since the run started. It lags hard after any slow
+        # period -- a run that spent four hours CPU-starved and then recovered
+        # reports the four hours forever -- so `fps_now` is the number to read
+        # when asking "how fast is it going", and `fps` when asking "how long
+        # until it finishes".
         fps = (trainer.total_steps - start_steps) / (now - t0)
+        fps_now = ((trainer.total_steps - last_steps) / (now - last_t)
+                   if now > last_t else fps)
+        last_steps, last_t = trainer.total_steps, now
         if it % 5 == 0:
             fit = float(env.fitness().mean())
-            print(f"[monitor] step={trainer.total_steps:,} fps={fps:,.0f} "
+            print(f"[monitor] step={trainer.total_steps:,} fps={fps:,.0f} fps_now={fps_now:,.0f} "
                   f"eta={(deadline-now)/60:.1f}min "
                   f"ep_rew={stats['ep_rew_env_mean']:.1f} (max {env.episode_steps}) "
                   f"reward_now={fit:.3f} std={stats['std']:.3f} "
                   f"diverged={trainer.n_diverged:,}", flush=True)
             if use_wandb:
                 import wandb
-                wandb.log({"env_step": trainer.total_steps, "monitor/fps": fps,
+                wandb.log({"env_step": trainer.total_steps, "monitor/fps": fps, "monitor/fps_now": fps_now,
                            "train/ep_rew": stats["ep_rew_env_mean"],
                            "train/reward_now": fit,
                            "train/entropy": stats["ent"], "train/std": stats["std"],

@@ -394,6 +394,7 @@ def main():
               f"{args.score_seed} re-applied every rollout (paired draws)",
               flush=True)
     t0 = time.perf_counter()
+    last_steps, last_t = start_steps, t0
     last_ckpt = t0
     speed_curr = curriculum.from_args(args)
     # Back-date the video timer so the first one lands at --first-video-secs.
@@ -423,7 +424,15 @@ def main():
         stats = trainer.train_iter()
         it += 1
         now = time.perf_counter()
+        # Lifetime average since the run started. It lags hard after any slow
+        # period -- a run that spent four hours CPU-starved and then recovered
+        # reports the four hours forever -- so `fps_now` is the number to read
+        # when asking "how fast is it going", and `fps` when asking "how long
+        # until it finishes".
         fps = (trainer.total_steps - start_steps) / (now - t0)
+        fps_now = ((trainer.total_steps - last_steps) / (now - last_t)
+                   if now > last_t else fps)
+        last_steps, last_t = trainer.total_steps, now
         # ETA is now the wall-clock deadline, not the step target.
         eta_min = max(0.0, (deadline - now) / 60)
         if it % 5 == 0:
@@ -445,7 +454,7 @@ def main():
             if score_env is not None:
                 score_env.speed_range = env.speed_range
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
-                  f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} "
+                  f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} fps_now={fps_now:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
                   f"fitness={fit:.3f} std={stats['std']:.3f} "
                   f"ball_disp={b_disp:.2f}m moved={100*b_frac:.0f}% "
@@ -455,7 +464,7 @@ def main():
             if use_wandb:
                 import wandb
                 wandb.log({"env_step": trainer.total_steps,
-                           "monitor/fps": fps, "monitor/eta_min": eta_min,
+                           "monitor/fps": fps, "monitor/fps_now": fps_now, "monitor/eta_min": eta_min,
                            "train/ep_rew": stats["ep_rew_env_mean"],
                            # Unshaped Table-S3 fitness: the gate metric, and the
                            # one number the velocity shaping terms cannot inflate.

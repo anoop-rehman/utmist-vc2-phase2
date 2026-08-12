@@ -1017,3 +1017,44 @@ This closes the kick investigation. Every arm is accounted for:
 | v9 | strike point | **unfrozen** | **aim fixed**, still declined to 0.084 |
 
 The one arm that ever worked is the one that paid for striking.
+
+## 21. Re-scoring the pinned drill checkpoints (2026-08-12)
+
+`dribble_ant_v3` and `shoot_ant_v4` both finished before `score.py` existed, so
+their `best.pt` was chosen by the old selector: a ONE-WORLD stochastic eval whose
+noise is comparable to the differences it was ranking.
+`rower_soccer/warp_port/rescore.py` re-runs the comparison with the batched
+deterministic scorer, 256 worlds, one fixed seed so every candidate faces the
+same task draws.
+
+| run | checkpoint | fitness | +/- sem | steps |
+|---|---|---|---|---|
+| dribble_ant_v3 | `checkpoint.pt` | **0.8592** | 0.0116 | 1,362,493,440 |
+| | `checkpoint_mid.pt` | 0.8478 | 0.0134 | 255,852,544 |
+| | `latest.pt` | 0.8472 | 0.0121 | |
+| | `best.pt` (pinned) | 0.8465 | 0.0142 | |
+| shoot_ant_v4 | `latest.pt` | **0.5857** | 0.0062 | |
+| | `checkpoint.pt` | 0.5801 | 0.0060 | 575,537,152 |
+| | `best.pt` (pinned) | 0.5689 | 0.0052 | |
+
+**Nothing needs re-pinning.** Every dribble candidate is within 2 combined SEM of
+the highest, and so is every shoot candidate. The old selector did not pick a bad
+checkpoint — it picked an arbitrary one from a set that is genuinely
+indistinguishable, which is what a noise-dominated selector does when the
+candidates are all equally good.
+
+Two things worth carrying forward.
+
+**The deterministic score is much higher than the training monitor.** Dribble
+scores **0.847** here against the **0.605** this document quotes from monitor
+lines. Both are real and they measure different things: the monitor is a
+stochastic policy in the training env with its curriculum and exploration noise
+live; this is the deterministic policy on a fixed eval draw. Quote the right one
+for the question, and never compare one against the other -- that mistake has
+already been made twice in this project (see section 15 and the `best.pt` ratio
+correction).
+
+**Dribble plateaued by ~256M steps.** `checkpoint_mid.pt` at 255,852,544 steps
+scores 0.8478 +/- 0.0134 against 0.8592 +/- 0.0116 at 1,362,493,440 -- the last
+1.1 BILLION steps are inside the error bar. If dribble ever needs re-running,
+budget a quarter of what it took.

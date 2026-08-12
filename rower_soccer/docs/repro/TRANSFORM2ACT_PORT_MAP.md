@@ -247,3 +247,53 @@ time on them:
   (`policy:113-126`) concatenates node features and offsets edge indices — the
   standard trick, and it already runs on GPU unchanged. Under superset-model
   batching (7A) it stops being needed at all.
+
+## 11. Measured: the topology census settles both open decisions
+
+Sections 7 and 10 both end in "measure this before choosing". `topology_census.py`
+does, on the live run's own checkpoints. Only the design stages are run (they
+involve no physics), 200 designs per configuration.
+
+| policy | distinct topologies / 200 designs | distinct `body_index` values |
+|---|---|---|
+| untrained (worst case) | **21** | **12** |
+| epoch 100 | 2 (199 of one) | 7 |
+| epoch 200 | 2 (196 of one) | 8 |
+| epoch 100/200, mean-action | 1 | 7 |
+
+### Decision 1: group by topology (7B), not superset masking (7A)
+
+A 50,000-step epoch contains roughly 50 designs at 1,000-step episodes, and even
+a 1,000-world GPU batch samples from a distribution that is producing **21
+distinct topologies at its most diverse and 2 once trained.** Compiling one model
+per distinct topology per generation is therefore a handful of compiles, not
+thousands.
+
+That removes the whole reason to consider the superset-with-masking approach,
+whose failure mode — a deactivated body that still carries mass or contact
+geometry — is exactly the class of bug this project has shipped twice. **Take
+the exact approach; it is also the cheap one.** Section 7A stands as a fallback
+if a future task turns out to have a genuinely wide topology distribution, but
+hopper does not, and nothing should be built for it speculatively.
+
+### Decision 2: keep `IndexLinear`'s loop
+
+Section 10 found the loop beats a batched gather when there are few distinct
+indices and loses badly when there are many, and left the regime unmeasured.
+It is **7-12 distinct indices**, against a `max_index` of 256. At 50,000 nodes
+and 8 body types the sweep measured the loop at 3.3 ms against the batched form
+at 19.5 ms — the batched version would be a **6x slowdown**. Do not port it.
+
+### An observation about the method, not the port
+
+By epoch 100, **199 of 200 sampled designs share one skeleton**, and every
+mean-action design does. The skeleton stage has effectively stopped exploring
+while `exec_R_eps` continues to climb from 1,376 (epoch 100) to 3,757 (epoch
+404). Whatever is producing that improvement over the back three quarters of the
+run, it is the attribute stage and the controller, not the body plan.
+
+This matters for D3's stated motivation — wanting a machine that finds genuinely
+different bodies for different roles. On this task, at these settings, the
+skeleton search converges early and then stays put. Worth knowing before
+designing 3f around the assumption that it keeps searching. It is one task and
+one seed, so it is an observation, not a claim about the method.

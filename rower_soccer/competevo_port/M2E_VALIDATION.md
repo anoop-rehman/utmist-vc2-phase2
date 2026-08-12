@@ -798,3 +798,53 @@ rollout never occupied. It gave 1.22 m of travel alongside a 33.6% goal rate,
 which is self-contradictory, and that contradiction is the only reason it was
 caught. Both scripts now latch the start position on the first execution step.
 The ending percentages never depended on it.
+
+## 9. The reference SOLVES the task by epoch 125, and epoch 107 caught it mid-climb
+
+Everything in sections 5-8 compares the two runs at **epoch 107**, because that
+is where our 2e run stopped. Measuring their later checkpoints shows that was an
+unlucky place to stop.
+
+Their `epoch_0200` checkpoint, same protocol as section 7 (6 seeds x 48
+mean-action games, their env):
+
+| ending | theirs @ epoch 107 | theirs @ **epoch 200** |
+|---|---|---|
+| reached the goal | 41.3% | **96.9%** |
+| fell over | 34.0% | 1.0% |
+| ran out of time | 24.7% | 0.0% |
+| mean episode length | 308.5 | 170.0 |
+| win rate, summed | 0.413 | **0.969** |
+| win rate split | [0.000, 0.413] | [0.399, 0.569] |
+
+Their own logged per-epoch win rate tells the same story: 0.00 through epoch 88,
+first nonzero at 89, 0.33 by epoch 100, 0.67 at 107, and **1.00 from epoch 125
+onward**, holding there through epoch 346 where the run was stopped.
+
+Three consequences, and the first two are corrections to this document.
+
+**The agent asymmetry is a transient, not a reproduced property.** Sections 7 and
+8 record "agent 0 never wins" as behaviour that appears in both runs. At epoch
+107 that is true of theirs; by epoch 200 their split is [0.399, 0.569] and by
+epoch 225 it is [0.57, 0.43]. Whichever agent is ahead swaps repeatedly. It is a
+feature of the middle of training, and treating it as a reproduced property was
+reading a snapshot as a fact.
+
+**The reference's logged win rate is a small-sample estimate.** Every value it
+ever prints is a fraction with a denominator between 3 and 8 (0.12, 0.14, 0.17,
+0.20, 0.25, 0.29, 0.33, 0.38, 0.40, 0.43, 0.50, 0.57, 0.60, 0.62, 0.67, 0.71,
+0.75, 0.80, 0.83, 0.86, 0.88, 1.00 — sixths, sevenths and eighths). So the
+"~10 sigma" attached to the section-5 win-rate gap assumed a precision the
+reference number does not have; the gap is real and large, but that particular
+sigma should not be quoted. The numbers to use are the direct measurements here,
+288 games each.
+
+**The gap is bigger than epoch 107 suggested, not smaller.** At 107 the
+comparison was 41.3% against our 5.5%. The reference's actual converged
+behaviour is 96.9%. Our port is not 6.5x off a partially-trained reference — it
+is far from a task the reference **solves**.
+
+That raises the value of the corrected re-run rather than lowering it: it runs to
+200 epochs, which is exactly where the reference is at 96.9%, so the comparison
+is against converged behaviour instead of a mid-climb snapshot. `--iters 200`
+was chosen before any of this was known and turns out to be the right axis.

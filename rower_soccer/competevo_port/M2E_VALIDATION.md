@@ -705,3 +705,21 @@ peak forward velocity, on both sides, at the same checkpoint. If ours travels
 less far per unit of control effort, the candidates narrow to friction,
 actuator gear, or the dense forward-reward scale — and the first two are
 gateable against their model fields without training anything.
+
+### A landmine in running their env in parallel
+
+The run above launched 8 seeds and 7 finished. Seed 1 died during env
+construction, not during evaluation:
+
+```
+ValueError: mjParseXML: empty file
+'competevo/evo_envs/assets/world_body.dev_ant_body.dev_ant_body.xml'
+```
+
+Their env loader merges the world and agent XMLs into a **fixed path inside the
+source tree** and reads it back, so concurrent processes truncate each other's
+file. Nothing is wrong with the surviving seeds — a process either gets past
+construction or dies there — but the failure is at startup and silent in
+aggregate, so a script that globs the outputs will quietly report 7/8 as though
+8 had been asked for. Count the files. If more parallelism is wanted, give each
+process its own copy of `competevo/evo_envs/assets/`.

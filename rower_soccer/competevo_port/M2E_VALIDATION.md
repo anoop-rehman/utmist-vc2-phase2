@@ -597,3 +597,54 @@ Listed in the order I would test them, with what each predicts.
   recovery, matching episode lengths, matching agent asymmetry); the win rate
   is 12x too low. Nothing here should be read as "the port reproduces their
   result".
+
+## 6. Correction, 2026-08-12: the non-scoring endings are mostly TIMEOUTS, not falls
+
+`NIGHT_2026-08-11.md:342` reasons "episodes end at 303 of 500 with a 1.3% goal
+rate, so ~98.7% terminate early WITHOUT scoring -- **falls**". The premise is
+right and the last word is not: "did not score" was silently equated with
+"fell", when the env has three exits, and the third one was never counted.
+
+`render_dev_rollout.py` counts them directly, driving the saved 2e pair
+(`runs/competevo_port/m2e_validation/policies.pt`, end of the 107-epoch run)
+with mean actions over 64 worlds until 381 games finish:
+
+| ending | share | how it is detected |
+|---|---|---|
+| goal | 6.6% (25) | `info["winner"].any(-1)` |
+| fell | 31.8% (121) | `info["fell"].any(-1)`, no winner |
+| timeout | **61.7% (235)** | `info["truncated"]`, 500 steps elapsed |
+
+Mean episode length 381.5 of 500. No episode both scored and fell, so the
+precedence choice does not move any number.
+
+**The dominant failure is not falling over, it is not travelling.** Nearly
+two-thirds of games are two ants still upright at the buzzer, neither having
+crossed a goal line 4 m away. The rendered clip (`dev_pair.mp4`, five episodes
+of world 0) shows the same thing without a metric: the pair stays clustered
+around the halfway line for most of every episode.
+
+This does not refute the physics hypothesis -- it re-points it. A
+contact/friction discrepancy that makes our ants *slower* explains a timeout
+majority; one that makes them *less stable* would have predicted the fall
+majority we assumed and do not observe. The epoch-0 observation (their ant
+slides 1.08 m backwards over 500 idle steps, ours does not) is a difference in
+how the feet grip, which is on the "slower" side of that split.
+
+Two numbers here also update section 5's framing, and both cut the same way:
+
+* Win rate at this checkpoint is **0.066 summed** (agent 0: 0.0026, agent 1:
+  0.0630) against the 0.0143 quoted for epochs 78-106 -- it improved by the end
+  of the run, so the gap to their 0.1667 is ~2.5x here, not 12x. **These are
+  not the same measurement** (different epoch windows; ours is 381 mean-action
+  games at one checkpoint, theirs is their per-epoch logged rate), so this
+  narrows the headline claim without replacing it. The 12x stands for the
+  window it was measured in.
+* The agent asymmetry survives at the end of training: agent 1 wins 24x more
+  often than agent 0. Their run has the same asymmetry, so this is reproduced
+  behaviour, not our bug.
+
+Still missing, and still the gate for task #25: the same three-way breakdown on
+THEIR side. Their runner logs win rate only, so it needs a short instrumented
+reference run. Until that exists, "ours time out more than theirs" is an
+inference from our side alone.

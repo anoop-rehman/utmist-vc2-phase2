@@ -91,11 +91,22 @@ def classify(runner, episodes, seed):
 
     endings = collections.Counter()
     lens, wins = [], [0, 0]
+    # Travel is the quantity section 7 says the gap lives in, so measure it here
+    # rather than in a second pass: signed progress toward each agent's own goal
+    # (their `after_step` already applies the sign via `move_left`).
+    travel, peak_v = [], []
     both_reached = 0
     goal_and_fall = 0
 
     for _ in range(episodes):
         states, _ = env.reset()
+        # Their `transit_execution` calls `reset_state(True)`, which re-poses the
+        # robot AFTER the design stage. Reading the start here would measure
+        # displacement from a pose the rollout never occupied, so `start_x` is
+        # filled in below on the first execution step instead.
+        start_x = None
+        sign = [-1.0 if base.agents[i].move_left else 1.0 for i in base.agents]
+        run_peak = [-1e9, -1e9]
         for i, learner in runner.learners.items():
             if learner.running_state is not None:
                 states[i] = learner.running_state(states[i])
@@ -110,6 +121,13 @@ def classify(runner, episodes, seed):
                         learner.policy_net.select_action(state_var[i], True)
                     actions.append(a.squeeze().numpy().astype(np.float64))
             states, _, terminateds, truncated, infos = env.step(actions)
+            if start_x is None and base.stage == "execution":
+                start_x = [float(base.agents[i].get_body_com("0")[0])
+                           for i in base.agents]
+            for i in base.agents:
+                fwd = infos[i].get("reward_forward")
+                if fwd is not None:
+                    run_peak[i] = max(run_peak[i], float(fwd))
             for i, learner in runner.learners.items():
                 if learner.running_state is not None:
                     states[i] = learner.running_state(states[i])
@@ -143,9 +161,14 @@ def classify(runner, episodes, seed):
                 # `_get_done` also fires on a non-finite state vector.
                 endings["nonfinite"] += 1
             lens.append(base._elapsed_steps)
+            if start_x is not None:
+                moved = [sign[i] * (float(base.agents[i].get_body_com("0")[0])
+                                    - start_x[i]) for i in base.agents]
+                travel.append(max(moved))
+                peak_v.append(max(run_peak))
             break
 
-    return endings, lens, wins, both_reached, goal_and_fall
+    return endings, lens, wins, both_reached, goal_and_fall, travel, peak_v
 
 
 def main():
@@ -158,7 +181,8 @@ def main():
     args = p.parse_args()
 
     runner, cfg = build_runner(args.run_dir, args.ckpt)
-    endings, lens, wins, both, gf = classify(runner, args.episodes, args.seed)
+    endings, lens, wins, both, gf, travel, peak_v = classify(
+        runner, args.episodes, args.seed)
 
     total = sum(endings.values()) or 1
     print(f"reference: {args.run_dir}  ckpt epoch_{args.ckpt:04d}  seed {args.seed}")
@@ -169,6 +193,11 @@ def main():
     print(f"  (both agents crossed: {both}; goal and fall same step: {gf})")
     print(f"win rate per agent: [{wins[0] / total:.4f}, {wins[1] / total:.4f}]"
           f"  summed {sum(wins) / total:.4f}")
+    tr, pv = np.array(travel), np.array(peak_v)
+    print(f"travel toward goal (best agent)  mean {tr.mean():6.2f} m"
+          f"   median {np.median(tr):6.2f} m   p90 {np.percentile(tr, 90):6.2f} m")
+    print(f"peak forward speed               mean {pv.mean():6.2f} m/s"
+          f"   p90 {np.percentile(pv, 90):6.2f} m/s")
 
     if args.out:
         with open(args.out, "w") as f:
@@ -176,7 +205,8 @@ def main():
                        "seed": args.seed, "episodes": total,
                        "endings": dict(endings), "mean_len": float(np.mean(lens)),
                        "wins": wins, "both_reached": both,
-                       "goal_and_fall": gf}, f, indent=2)
+                       "goal_and_fall": gf, "travel": travel,
+                       "peak_v": peak_v}, f, indent=2)
         print(f"wrote {args.out}")
 
 

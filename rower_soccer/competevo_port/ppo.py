@@ -49,9 +49,15 @@ class RunningNorm(nn.Module):
     statistics advance only when the module is in TRAINING mode, i.e. during the
     PPO update pass and not during sampling. Cadence matters -- normalizing with
     stats that moved mid-rollout changes what the ratio in the PPO objective is
-    a ratio of -- so the odd-looking placement is deliberate and copied."""
+    a ratio of -- so the odd-looking placement is deliberate and copied.
 
-    def __init__(self, dim, demean=True, destd=True, clip=10.0):
+    `clip` was 10.0 here until 2026-08-12 and is 5.0 in theirs, which no call
+    site of theirs ever overrides. It went unnoticed because every parity gate
+    drives the ENV, and this lives in the policy. Measured under their epoch-107
+    weights, 0.46% of control-observation components land beyond 5 sigma, so the
+    two settings genuinely disagree on ~1 input in 200."""
+
+    def __init__(self, dim, demean=True, destd=True, clip=5.0):
         super().__init__()
         self.register_buffer("n", torch.zeros(1))
         self.register_buffer("mean", torch.zeros(dim))

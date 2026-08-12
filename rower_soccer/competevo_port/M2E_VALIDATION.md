@@ -723,3 +723,78 @@ construction or dies there — but the failure is at startup and silent in
 aggregate, so a script that globs the outputs will quietly report 7/8 as though
 8 had been asked for. Count the files. If more parallelism is wanted, give each
 process its own copy of `competevo/evo_envs/assets/`.
+
+## 8. Cross-evaluation: the environment is largely exonerated, the training is not
+
+Section 7 compared two different training runs and so could not separate "our
+env is slower" from "our training produced a worse gait". `cross_eval.py`
+separates them by holding the policy fixed and changing only the simulator: their
+`epoch_0107` weights are remapped into our `DevActorCritic` and run in our
+batched env.
+
+The remap is one-to-one and every tensor matches in shape — itself a check on
+the port, since a network that had drifted structurally could not be loaded at
+all. `remap()` raises on any unmapped tensor so a silent drop cannot pass as a
+successful load.
+
+| | their policy, their env | their policy, **our env** | our policy, our env |
+|---|---|---|---|
+| reached the goal | **41.3%** | **34.8%** | **5.5%** |
+| fell over | 34.0% | 34.0% | 39.3% |
+| ran out of time | 24.7% | 31.2% | 55.2% |
+| mean episode length | 308.5 | 332.6 | 364.9 |
+| travel toward goal, mean | 3.15 m | 3.89 m | 2.69 m |
+| travel, median | 3.39 m | 4.03 m | 2.45 m |
+| win rate, summed | 0.413 | 0.348 | 0.055 |
+| games | 288 (6 seeds) | 385 | 384 |
+
+**Their policy keeps 84% of its goal rate in our simulator.** Moving it from
+their env to ours costs 6.5 points. Moving from their policy to ours, in the
+same env, costs 29.3 points — 4.5x more. Their policy scores 6.3x what ours does
+in *our own* environment, and travels 45% further per episode.
+
+So the physics hypothesis that survived section 7 is now bounded rather than
+confirmed: there IS a residual environment difference worth 6.5 points, but it
+is a minority of the gap. The dominant term is that **our training produced a
+much worse gait.** Falls sit at 34.0% in all three columns, which retires
+stability as an explanation for anything.
+
+This is a better position than it sounds. The env was the expensive thing to be
+wrong about; the learning setup is cheap to iterate on, and section 1 already
+lists the places where the port knowingly deviates.
+
+### The prime suspects, now that physics is demoted
+
+All four are in the optimizer or the normalizer, not the simulator. Three were
+documented in section 1 as known deviations; the fourth was found by this
+cross-evaluation.
+
+1. **`RunningNorm` clipped at 10, theirs clips at 5.** New. Their
+   `lib/rl/core/running_norm.py:14` defaults to `clip=5.0` and not one of their
+   call sites overrides it; ours defaulted to `10.0`. Every parity gate drives
+   the ENV, and this lives inside the policy, so nothing could have caught it.
+   Measured under their weights, **0.46% of control-observation components land
+   beyond 5 sigma** — about one input in 200 is treated differently. Fixed in
+   `ppo.py` as of this commit.
+2. **`l2_reg` at half strength.** Their `sum(p^2) * 1e-3` added to the value
+   loss versus our Adam `weight_decay=1e-3`.
+3. **Grad clip covers the value parameters too.** Theirs clips
+   `policy_net.parameters()` only.
+4. **Eval protocol differs** (`eval_batch_size` 10,000 steps over 10 workers
+   versus our 64 full episodes).
+
+Suspects 2 and 3 both act on how fast the critic sharpens, which is exactly what
+an agent needs in order to value the +/-1000 goal term while `alpha` is still
+0.9 — i.e. exactly the mechanism that would produce a policy that walks but does
+not commit to crossing the line.
+
+### A measurement bug worth recording
+
+The first version of the travel numbers was wrong in both directions and I
+nearly reported it. Both envs re-pose the robot AFTER the design stage — ours in
+`_apply_designs` (`qpos = qpos0`), theirs in `transit_execution` (which calls
+`reset_state(True)`) — so a start position read at `reset()` is a pose the
+rollout never occupied. It gave 1.22 m of travel alongside a 33.6% goal rate,
+which is self-contradictory, and that contradiction is the only reason it was
+caught. Both scripts now latch the start position on the first execution step.
+The ending percentages never depended on it.

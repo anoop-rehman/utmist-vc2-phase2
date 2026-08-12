@@ -67,6 +67,10 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--eval-worlds", type=int, default=64)
     p.add_argument("--eval-every", type=int, default=10)
+    p.add_argument("--save-policies-every", type=int, default=0,
+                   help="also write policies_ep####.pt every N iterations, so a "
+                        "run can be scored at a chosen epoch rather than only "
+                        "at whatever epoch it happened to stop on")
     p.add_argument("--out", default="runs/competevo_port/selfplay_smoke")
     args = p.parse_args()
 
@@ -163,6 +167,16 @@ def main():
         log["iters"].append(row)
         with open(os.path.join(args.out, "log.json"), "w") as f:
             json.dump(log, f, indent=1)
+        # Weights on disk at a known epoch. Without this the only artefact is
+        # the final `policies.pt`, so a run cannot be evaluated at the epoch a
+        # reference run happens to be comparable at -- which is exactly what
+        # blocked the m2e_fixed vs m2e_validation goal-rate comparison at
+        # epoch 107 (M2E_VALIDATION section 8).
+        if args.save_policies_every and (it + 1) % args.save_policies_every == 0:
+            path = os.path.join(args.out, f"policies_ep{it + 1:04d}.pt")
+            torch.save({"ac_0": acs[0].state_dict(),
+                        "ac_1": acs[1].state_dict(),
+                        "args": vars(args), "epoch": it + 1}, path)
         if time.time() >= deadline:
             print(f"time budget reached after {it + 1} iters")
             break

@@ -297,3 +297,30 @@ different bodies for different roles. On this task, at these settings, the
 skeleton search converges early and then stays put. Worth knowing before
 designing 3f around the assumption that it keeps searching. It is one task and
 one seed, so it is an observation, not a claim about the method.
+
+## 12. Built and gated: the dense policy (3d step 1)
+
+`rower_soccer/t2a_port/dense_policy.py` is their policy on dense `[G, N, F]`
+tensors with one shared adjacency per group -- the representation section 11's
+topology-grouping decision implies. Their epoch-400 checkpoint loads with
+`strict=True` (65 tensors, 0 missing, 0 unexpected), and
+`gate_dense_policy.py` compares it against theirs on real observations pulled
+from their env: **0.00e+00 max abs difference at all three stages**, 66 states.
+
+The gate corrected two things written above.
+
+* **Section 2 warned that edge direction is easy to get wrong. It is not a
+  hazard at all.** `robot.get_gnn_edges()` emits both directions of every tree
+  edge, so the adjacency is symmetric and a port that transposed it would be
+  numerically identical. This was found by writing a negative control ("the
+  answer must change under transposition") that could never have failed, and
+  noticing that it did not. The check now asserts the symmetry instead.
+* **A negative control on a discrete head has to read the head, not the
+  action.** The skeleton stage ends in an argmax, which absorbs any perturbation
+  that leaves the winning logit winning: the edge-dropping control read 42/60
+  while measuring how decisive the logits were, not whether the perturbation
+  reached them. Reading the pre-argmax head output gives 60/60.
+
+Deliberately not ported: the `cumsum`-and-difference reduction of section 5. In
+the dense form each graph's nodes have their own axis, so a per-graph sum is
+`.sum(1)` and the cancellation that forces float64 never arises.

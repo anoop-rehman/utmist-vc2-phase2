@@ -379,9 +379,38 @@ def default_formation(k, n_players, scale=1.0):
     return x, y
 
 
+# Home blue / away orange-red: both read against green grass, and they differ in
+# luminance as well as hue so a greyscale still or a colour-blind viewer can also
+# tell the teams apart. The second player of each team is darkened slightly, which
+# makes slot identity readable in a debug render without weakening the team split.
+TEAM_RGBA = ((0.20, 0.45, 0.85, 1.0), (0.90, 0.35, 0.15, 1.0))
+
+
+def colour_teams(model, prefixes, n_per_team, team_rgba=TEAM_RGBA):
+    """Tint each player's own material by team. VISUAL ONLY.
+
+    Every attached creature already gets its own material (`p0-self`, ...), so
+    this touches `mat_rgba` and nothing else -- no geom edits, no textures, and
+    no field that any solver reads. `tests/test_soccer2v2` pins that by stepping
+    a coloured and an uncoloured scene from one state and requiring bitwise
+    identical qpos, because "surely a colour cannot matter" is exactly the kind
+    of assumption this project has been wrong about before.
+    """
+    for k, pref in enumerate(prefixes):
+        mat = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MATERIAL,
+                                f"{pref}self")
+        if mat < 0:
+            continue
+        base = team_rgba[0 if k < n_per_team else 1]
+        # second player of the team, a little darker
+        shade = 1.0 if (k % n_per_team) == 0 else 0.68
+        model.mat_rgba[mat] = [min(1.0, c * shade) for c in base[:3]] + [base[3]]
+
+
 def build_soccer_scene(creature_xml_path, n_players=4, ball: BallSpec = None,
                        pitch_scale=0.3125, prefix_fmt="p{}-",
-                       topdown_cam=False, cam_height=25.0, view_half=12.0):
+                       topdown_cam=False, cam_height=25.0, view_half=12.0,
+                       team_rgba=TEAM_RGBA):
     """The 2v2 scene: `n_players` creatures + one ball on the scaled pitch.
 
     Returns (model, [SceneMeta per player], player_prefixes). Players are
@@ -407,6 +436,8 @@ def build_soccer_scene(creature_xml_path, n_players=4, ball: BallSpec = None,
         spec.worldbody.add_camera(name="topdown", pos=[0.0, 0.0, cam_height],
                                   xyaxes=[1, 0, 0, 0, 1, 0], fovy=fovy)
     model = spec.compile()
+    if team_rgba is not None:
+        colour_teams(model, prefixes, n_players // 2, team_rgba)
     _stiffen_warp_contacts(model, ball)
     ball_body = model.body("ball").id
     metas = [creature_meta(model, creature_xml_path, prefix=p, ball=ball,

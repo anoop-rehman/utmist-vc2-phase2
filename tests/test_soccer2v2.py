@@ -551,6 +551,38 @@ def t_env_runs(worlds, steps, use_gpu):
             f"throw-ins/world {st['throw_ins']:.1f}, upright {st['upright']:.2f}")
 
 
+def t_team_colour_is_inert():
+    """Tinting the per-player materials must not move a single number.
+
+    rgba is visual by construction, but this project has twice shipped an env
+    that was numerically fine and visually wrong, and this is the mirror case --
+    a visual change that must be numerically nothing. Step a coloured and an
+    uncoloured scene from one identical state and require BITWISE equal qpos and
+    qvel; anything less is an assumption, not a check.
+    """
+    import numpy as np
+    import mujoco
+    from rower_soccer.warp_port.scene import build_soccer_scene
+
+    out = []
+    for team_rgba in (None, __import__(
+            "rower_soccer.warp_port.scene", fromlist=["TEAM_RGBA"]).TEAM_RGBA):
+        model, _, _ = build_soccer_scene("creature_configs/ant.xml", n_players=4,
+                                         ball=drill_ball(), team_rgba=team_rgba)
+        data = mujoco.MjData(model)
+        rng = np.random.default_rng(0)
+        data.qpos[:] = model.qpos0 + 0.01 * rng.standard_normal(model.nq)
+        data.qvel[:] = 0.01 * rng.standard_normal(model.nv)
+        data.ctrl[:] = 0.3
+        for _ in range(50):
+            mujoco.mj_step(model, data)
+        out.append((data.qpos.copy(), data.qvel.copy()))
+    dq = float(np.abs(out[0][0] - out[1][0]).max())
+    dv = float(np.abs(out[0][1] - out[1][1]).max())
+    assert dq == 0.0 and dv == 0.0, f"dqpos {dq:.3e}, dqvel {dv:.3e}"
+    return f"50 steps from one state: dqpos {dq:.1e}, dqvel {dv:.1e} (bitwise)"
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--gpu", action="store_true",
@@ -582,6 +614,9 @@ def main():
     if args.gpu:
         check("the env steps N worlds for M steps, finite, 0 diverged (warp)",
               lambda: t_env_runs(args.worlds, args.steps, True))
+
+    check("team colours are visual only (a coloured scene steps identically)",
+          t_team_colour_is_inert)
 
     n_fail = sum(1 for _, ok in _results if not ok)
     print(f"\n{len(_results) - n_fail}/{len(_results)} passed", flush=True)

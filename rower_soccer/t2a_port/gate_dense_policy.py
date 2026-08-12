@@ -172,6 +172,35 @@ def main():
               tried > 0 and broke == tried,
               f"{broke}/{tried} sampled states changed")
 
+    # Everything above ran one graph at a time, which is not what this policy
+    # exists for: the port groups worlds by topology and evaluates the group as
+    # one [G, N, F] batch. A broadcasting mistake would be invisible at G=1 and
+    # wrong for every real batch, so stack same-topology states and require the
+    # per-graph answers to be unchanged.
+    by_shape = {}
+    for stage, state in states:
+        x, adj, ind = to_dense(state)
+        key = (stage, x.shape[1], tuple(ind[0].tolist()),
+               tuple(adj[0].reshape(-1).tolist()))
+        by_shape.setdefault(key, []).append((x, adj, ind))
+    groups = [v for v in by_shape.values() if len(v) > 1]
+    worst_batch, checked, biggest = 0.0, 0, 0
+    for grp in groups:
+        xs = torch.cat([g[0] for g in grp])
+        adj = torch.cat([g[1] for g in grp])
+        ind = torch.cat([g[2] for g in grp])
+        stage = next(st for (st, *_), v in by_shape.items() if v is grp)
+        with torch.no_grad():
+            batched = ours.mean_action(stage, xs, adj, ind)
+            singles = torch.cat([ours.mean_action(stage, *g) for g in grp])
+        worst_batch = max(worst_batch, (batched - singles).abs().max().item())
+        checked += len(grp)
+        biggest = max(biggest, len(grp))
+    check("a G-graph batch gives the same answers as G single graphs",
+          checked > 0 and worst_batch < 1e-12,
+          f"{len(groups)} same-topology groups, {checked} graphs, largest G="
+          f"{biggest}, max abs diff {worst_batch:.2e}")
+
     n_fail = sum(1 for _, ok in _results if not ok)
     print(f"\n{len(_results) - n_fail}/{len(_results)} passed")
     return 1 if n_fail else 0

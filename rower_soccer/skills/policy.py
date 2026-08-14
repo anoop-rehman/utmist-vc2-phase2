@@ -106,12 +106,41 @@ def resolve_checkpoint(path: str) -> str:
         "\nSet $VC2_CHECKPOINT_ROOT, or pass an absolute path / gs:// URI.")
 
 
+def _remote_is_newer(uri: str, local: str) -> bool:
+    """True when the cached copy no longer matches the object in the bucket.
+
+    The cache is keyed on the URI alone, so without this an overwritten
+    `best.pt` is served from disk forever -- and `best.pt` is exactly the object
+    a run overwrites as it improves. Compares size, which is one cheap listing
+    and catches every real case (a re-uploaded checkpoint of byte-identical
+    length is the same checkpoint).
+
+    Fails OPEN, returning False: if the bucket cannot be reached the cached copy
+    is what we have, and being offline must not turn a working call into an
+    error. Set VC2_CHECKPOINT_REFRESH=1 to force a re-fetch regardless.
+    """
+    if os.environ.get("VC2_CHECKPOINT_REFRESH") == "1":
+        return True
+    gcloud = shutil.which("gcloud")
+    if gcloud is None:
+        return False
+    try:
+        r = subprocess.run([gcloud, "storage", "ls", "-l", uri],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return False
+        remote_size = int(r.stdout.split()[0])
+    except Exception:                                          # noqa: BLE001
+        return False
+    return remote_size != os.path.getsize(local)
+
+
 def _fetch_gcs(uri: str) -> str:
     cache = os.environ.get(
         "VC2_CHECKPOINT_CACHE",
         os.path.join(os.path.expanduser("~"), ".cache", "vc2-checkpoints"))
     local = os.path.join(cache, uri[len("gs://"):])
-    if os.path.exists(local):
+    if os.path.exists(local) and not _remote_is_newer(uri, local):
         return local
     os.makedirs(os.path.dirname(local), exist_ok=True)
     gcloud = shutil.which("gcloud")

@@ -21,7 +21,7 @@ import numpy as np
 import torch
 
 from rower_soccer.warp_port import curriculum
-from rower_soccer.warp_port import score
+from rower_soccer.warp_port import gcs, score
 
 
 def make_eval_env(args, num_worlds, seed):
@@ -212,9 +212,12 @@ def main():
                         "0 disables")
     p.add_argument("--resume", action="store_true",
                    help="resume from <run_dir>/checkpoint.pt if present")
-    p.add_argument("--gcs-bucket", default=None,
-                   help="upload each checkpoint to gs://<bucket>/<run_name>/ "
-                        "(e.g. vc2-2026-checkpoints); best-effort, non-blocking")
+    p.add_argument("--overwrite-remote", action="store_true",
+                   help="allow reusing a --run-name whose remote prefix\n"
+                        "already has objects; they will be overwritten")
+    p.add_argument("--gcs-bucket", default=gcs.DEFAULT_BUCKET,
+                   help="upload each checkpoint to gs://<bucket>/<run_name>/; "
+                        "best-effort, non-blocking. '' disables backup.")
     # The AR(1) latent prior, ||z_t - alpha*z_{t-1}||^2. train_track_warp has
     # carried this since PIPELINE_V2 and defaults it ON at 0.01 -- so the decoder
     # is trained having only ever seen SMOOTH latents. This trainer never passed
@@ -245,6 +248,12 @@ def main():
     p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--no-wandb", action="store_true")
     args = p.parse_args()
+    # Refuse to clobber another run's remote checkpoints. Local collisions
+    # are already refused; this is the remote half of the same rule.
+    gcs.assert_remote_free(args.gcs_bucket, args.run_name,
+                           resume=getattr(args, 'resume', False),
+                           overwrite=getattr(args, 'overwrite_remote', False))
+
     torch.manual_seed(args.seed)
 
     run_dir = os.path.join("runs_v2", args.run_name)

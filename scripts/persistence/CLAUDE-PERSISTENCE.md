@@ -31,7 +31,7 @@ gcloud auth login          # (and gh auth login, wandb login for the project)
 # 2. fetch the kit from the bucket, restore the chat state
 gcloud storage cp gs://vc2-2026-claude-code-state/claude-code-state/pull.sh .
 gcloud storage cp gs://vc2-2026-claude-code-state/claude-code-state/claude-gcs.env .
-bash pull.sh               # restores into ~/.claude
+bash pull.sh               # destination depends -- see below
 
 # 3. recreate the WORLD the transcripts talk about, at the SAME paths
 #    (transcripts reference absolute paths; matching them keeps context valid)
@@ -44,8 +44,35 @@ git clone https://github.com/Khrylx/Transform2Act /workspace/Transform2Act
 cd /workspace && claude --resume
 ```
 
+### Where pull.sh actually restores to
+
+It picks the FIRST of these, which is not always `~/.claude`:
+
+| condition | destination | you must then |
+|---|---|---|
+| `CLAUDE_PULL_DEST` is set | that path | nothing (inspect it) |
+| `/workspace/.claude-persistent` exists | that dir | `export CLAUDE_CONFIG_DIR=/workspace/.claude-persistent` |
+| otherwise | `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` | nothing |
+
+The middle row is the one that surprises people: on a pod that already has the
+persistent dir, `pull.sh` does NOT write to `~/.claude`, and Claude will not see
+the restored state until `CLAUDE_CONFIG_DIR` is exported. `pull.sh` prints the
+export line it wants; do what it says.
+
 `CLAUDE_PULL_DEST=/some/dir bash pull.sh` restores to a scratch dir if you want
 to inspect before overwriting.
+
+**pull.sh overwrites.** It has no merge and no newer-file check, so restoring
+onto a machine whose local state is newer loses that state. Use
+`CLAUDE_PULL_DEST` first if you are unsure which side is fresher.
+
+### The scripts live in the repo
+
+`/workspace/claude-persistence/*.sh` are SYMLINKS into
+`scripts/persistence/` in this repo, and the post-commit hook runs the former.
+Before 2026-08-14 they were independent copies, which is how a fix to the repo
+copy could -- and did -- fail to take effect. Keep them symlinked; if you ever
+replace one with a real file, edits to the repo stop mattering silently.
 
 ## Notes
 

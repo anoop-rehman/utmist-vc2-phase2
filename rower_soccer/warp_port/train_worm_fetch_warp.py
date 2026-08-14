@@ -5,6 +5,7 @@
         --init-from runs_v2/_init_follow_base.pt
 """
 import argparse
+from rower_soccer.warp_port import gcs
 import json
 import os
 import subprocess
@@ -48,11 +49,21 @@ def main():
     p.add_argument("--video-secs", type=float, default=1200.0)
     p.add_argument("--first-video-secs", type=float, default=120.0)
     p.add_argument("--ckpt-secs", type=float, default=1800.0)
-    p.add_argument("--gcs-bucket", default="vc2-2026-checkpoints")
+    p.add_argument("--overwrite-remote", action="store_true",
+                   help="allow reusing a --run-name whose remote prefix\n"
+                        "already has objects; they will be overwritten")
+    p.add_argument("--gcs-bucket", default=gcs.DEFAULT_BUCKET,
+                   help="'' disables backup; anything else is a bucket name")
     p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--no-wandb", action="store_true")
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
+
+    # Refuse to clobber another run's remote checkpoints. Local collisions
+    # are already refused; this is the remote half of the same rule.
+    gcs.assert_remote_free(args.gcs_bucket, args.run_name,
+                           resume=getattr(args, 'resume', False),
+                           overwrite=getattr(args, 'overwrite_remote', False))
 
     from rower_soccer.warp_port.worm_fetch_env import (WarpWormFetchEnv,
                                                        fetch_ball, _arena_xml)

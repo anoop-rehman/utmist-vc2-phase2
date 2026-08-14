@@ -23,6 +23,14 @@ import time
 
 _GCLOUD = shutil.which("gcloud") or "/workspace/google-cloud-sdk/bin/gcloud"
 
+# The default every trainer's --gcs-bucket uses. It lives here so another
+# project changes one line (or sets VC2_GCS_BUCKET) instead of editing seven
+# argparse blocks. Until 2026-08-14 five of the seven trainers defaulted to
+# None, so a hand-launched run silently had no backup -- which is how
+# npmp_rower_v2 was lost, and it very nearly took the section-22 kick arms too.
+# Pass --gcs-bucket "" to opt out deliberately.
+DEFAULT_BUCKET = os.environ.get("VC2_GCS_BUCKET", "vc2-2026-checkpoints")
+
 _threads = []
 _inflight = set()
 _lock = threading.Lock()
@@ -44,6 +52,40 @@ def _upload(local_path, dest):
     finally:
         with _lock:
             _inflight.discard(dest)
+
+
+def assert_remote_free(bucket, run_name, resume=False, overwrite=False):
+    """Refuse to start if gs://<bucket>/<run_name>/ already holds objects.
+
+    `_dest` is keyed on run_name alone, so a second run reusing a name
+    overwrites the first one's checkpoints with no warning and no way back --
+    the bucket has no versioning. The trainers already refuse a non-empty LOCAL
+    run dir without --resume; this is the same rule for the remote half, and the
+    asymmetry is the only reason it was ever possible to lose a run this way.
+
+    Best-effort like everything else here: if the listing cannot be performed
+    (no gcloud, no network, no auth) it warns and lets training start, because
+    an unreachable bucket must never be the thing that stops a run.
+    """
+    if not bucket or resume or overwrite:
+        return
+    prefix = f"gs://{bucket.removeprefix('gs://')}/{run_name}/"
+    try:
+        r = subprocess.run([_GCLOUD, "storage", "ls", prefix],
+                           capture_output=True, text=True, timeout=60)
+    except Exception as e:                                    # noqa: BLE001
+        print(f"[gcs] WARNING: could not check {prefix} ({e}); continuing",
+              flush=True)
+        return
+    if r.returncode == 0 and r.stdout.strip():
+        n = len(r.stdout.strip().splitlines())
+        raise SystemExit(
+            f"{prefix} already contains {n} object(s). Another run has used "
+            f"--run-name {run_name!r} and starting now would overwrite its "
+            f"checkpoints irrecoverably (the bucket has no versioning).\n"
+            f"  --resume            to continue that run\n"
+            f"  --overwrite-remote  to replace it on purpose\n"
+            f"  --gcs-bucket ''     to train with no backup")
 
 
 def sync_async(local_path, bucket, run_name):

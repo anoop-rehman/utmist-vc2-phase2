@@ -24,6 +24,7 @@ that case rather than let it happen twice.
 """
 
 import argparse
+from rower_soccer.warp_port import gcs
 import json
 import os
 import shutil
@@ -76,7 +77,11 @@ def parse_args():
     p.add_argument("--first-video-secs", type=float, default=120.0)
     p.add_argument("--ckpt-secs", type=float, default=1800.0)
     p.add_argument("--mid-ckpt-frac", type=float, default=0.5)
-    p.add_argument("--gcs-bucket", default=None)
+    p.add_argument("--overwrite-remote", action="store_true",
+                   help="allow reusing a --run-name whose remote prefix\n"
+                        "already has objects; they will be overwritten")
+    p.add_argument("--gcs-bucket", default=gcs.DEFAULT_BUCKET,
+                   help="'' disables backup; anything else is a bucket name")
     p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--no-wandb", action="store_true")
     p.add_argument("--skip-gate", action="store_true",
@@ -109,6 +114,11 @@ def gate(args):
 
 def main():
     args = parse_args()
+    # Refuse to clobber another run's remote checkpoints. Local collisions are
+    # already refused; this is the remote half of the same rule.
+    gcs.assert_remote_free(args.gcs_bucket, args.run_name,
+                           resume=getattr(args, 'resume', False),
+                           overwrite=getattr(args, 'overwrite_remote', False))
     run_dir = os.path.join(REPO, "runs_v2", args.run_name)
     os.makedirs(os.path.join(run_dir, "videos"), exist_ok=True)
 

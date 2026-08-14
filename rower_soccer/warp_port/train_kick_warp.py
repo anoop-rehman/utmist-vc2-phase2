@@ -169,6 +169,18 @@ def main():
                         "--shaping-anneal-steps exists to park it.")
     p.add_argument("--approach-scale", type=float, default=0.5,
                    help="`progress` mode: weight on the player->ball potential")
+    p.add_argument("--reset-pose-each-segment", action="store_true",
+                   help="stand the creature back up at every segment restart "
+                        "(same xy and heading, upright quat, zero velocity). "
+                        "Isolates POSTURE inheritance, which DRILL_V4_NOTES "
+                        "section 22 measured as the predictor of segment "
+                        "outcome (r = +0.674).")
+    p.add_argument("--shaping-anneal-from", type=int, default=0,
+                   help="anchor --shaping-anneal-steps at this step count "
+                        "instead of 0. Needed when resuming: the anneal is a "
+                        "function of ABSOLUTE total_steps, so a run resumed at "
+                        "2.9B with a 200M anneal would start at scale 0 rather "
+                        "than ramping down from 1.")
     p.add_argument("--shaping-anneal-steps", type=int, default=0,
                    help="anneal ALL shaping to 0 over N env-steps, so late "
                         "training optimizes the strike alone")
@@ -367,6 +379,10 @@ def run(args, task, make_env_fn, make_eval_fn):
                                             save_checkpoint)
 
     env = make_env_fn(args, num_worlds=args.worlds, seed=args.seed)
+    # Applies to the TRAINING env and, below, to the scoring env -- both, or the
+    # score would grade a different task from the one being trained.
+    if getattr(args, "reset_pose_each_segment", False):
+        env.reset_pose_each_segment = True
     if args.plain:
         ac = SimpleActorCritic(env.obs_dim, env.act_dim)
     else:
@@ -442,6 +458,8 @@ def run(args, task, make_env_fn, make_eval_fn):
     if args.score_worlds > 0:
         score_env = make_env_fn(args, num_worlds=args.score_worlds,
                                 seed=args.score_seed, use_graph=True)
+        if getattr(args, "reset_pose_each_segment", False):
+            score_env.reset_pose_each_segment = True
         print(f"[setup] scoring env: {args.score_worlds} worlds, seed "
               f"{args.score_seed} re-applied every rollout (paired draws)",
               flush=True)
@@ -458,8 +476,9 @@ def run(args, task, make_env_fn, make_eval_fn):
     cone = getattr(args, "target_cone", 0.0)
     while trainer.total_steps < args.steps and time.perf_counter() < deadline:
         if args.shaping_anneal_steps > 0:
+            done = trainer.total_steps - args.shaping_anneal_from
             env.shaping_scale = max(
-                0.0, 1.0 - trainer.total_steps / args.shaping_anneal_steps)
+                0.0, min(1.0, 1.0 - done / args.shaping_anneal_steps))
         if getattr(args, "cone_anneal_steps", 0) > 0:
             frac = min(1.0, trainer.total_steps / args.cone_anneal_steps)
             cone = args.cone_start + frac * (args.cone_max - args.cone_start)

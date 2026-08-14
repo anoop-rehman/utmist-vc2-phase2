@@ -126,6 +126,14 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
         # Public mutable knobs the trainer / eval set at runtime, same names as
         # dribble's so the trainers stay interchangeable.
         self.shaping_scale = 1.0
+        # E3 of the section-22 diagnosis. A segment normally inherits the
+        # creature's POSTURE from the last one, and posture at segment start is
+        # what predicts the outcome (r = +0.674, bimodal). Setting this stands
+        # the creature back up at every restart -- same xy, same heading, so
+        # position and orientation are still inherited and only posture is not.
+        # Deliberately narrower than teleporting it: it isolates the variable
+        # the measurement implicated instead of resetting everything at once.
+        self.reset_pose_each_segment = False
         self.fixed_start = fixed_start
         self.target_cone = target_cone
         self._reward_coef = reward_coef
@@ -356,6 +364,20 @@ class WarpKickEnv(SegmentedBallTask, WormEnv):
             root_xy = self._root_frames()[0][idx, :2]
         if yaw is None:
             yaw = self._root_yaw(idx)
+
+        if self.reset_pose_each_segment and root_xy is not None:
+            # Stand it up where it is: keep xy and heading, restore the spawn
+            # height and a yaw-only (upright) quaternion, and stop it dead.
+            # qvel is zeroed wholesale -- the ball's own velocity is written to
+            # zero by _write_ball a few lines below, so nothing survives that
+            # should not.
+            qr = self.meta.qpos_root
+            self.qpos[idx, qr + 2] = self._spawn_z
+            self.qpos[idx, qr + 3] = torch.cos(yaw / 2)
+            self.qpos[idx, qr + 4] = 0.0
+            self.qpos[idx, qr + 5] = 0.0
+            self.qpos[idx, qr + 6] = torch.sin(yaw / 2)
+            self.qvel[idx] = 0.0
 
         # fixed_start (curriculum stage 1): ball straight ahead of the creature
         # and the command colinear with it, so simply walking forward strikes the

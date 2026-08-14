@@ -1058,3 +1058,90 @@ correction).
 scores 0.8478 +/- 0.0134 against 0.8592 +/- 0.0116 at 1,362,493,440 -- the last
 1.1 BILLION steps are inside the error bar. If dribble ever needs re-running,
 budget a quarter of what it took.
+
+## 22. Why kick plateaued: 97% of the reward is shaping, and the ant is flat half the time
+
+`probe_kick_reward.py` on `kick_ant_v12_v3_unfrozen/latest.pt` (2.88B steps),
+64 worlds x 10 episodes, deterministic actions, 2,481 segments.
+
+### Where the reward actually comes from
+
+| term | share of total return | nonzero on |
+|---|---|---|
+| `shaping_scale * shaping` | **97.0%** | 3,795 / 6,000 steps |
+| `w_arrive * last_arrival` | **2.1%** | 38 / 6,000 steps |
+| `w_strike * credit` | 0.9% | 13 / 6,000 steps |
+
+`shaping_anneal_steps` is 0, so `shaping_scale` stayed at 1.0 for the entire run
+— this is not a probe artefact, it is what trained. In `paper` mode the term is
+
+    w_p2b * max(0, root_vel . unit(ball - root))    +    w_b2c * max(0, ball_vel . cmd_dir)
+
+Two raw VELOCITIES, paid every step. Neither telescopes, so the integral over a
+segment is proportional to distance covered, and the first pays for running at
+the ball whether or not the eventual contact is any good.
+
+**Arriving at the target — the thing the drill is named after — is 2.1% of the
+return.** Improving aim moves 2% of the objective. There is essentially no
+gradient pressure on accuracy, which is why 2.8 billion further steps bought
+nothing: `best.pt` scored 0.40 on the first evaluation and 0.41 on the 185th.
+
+### Why some kicks are perfect and others wild
+
+Not geometry. Correlations of per-segment arrival with the geometry the segment
+starts with are all near zero: distance to the ball -0.07, turn needed to face
+the ball +0.02, turn from ball to target +0.06, time budget +0.05.
+
+The predictor is **posture**, at +0.674 — and the distribution is bimodal:
+
+| uprightness at segment start | segments | arrival | struck the ball | arrival > 0.8 |
+|---|---|---|---|---|
+| < 0.30 (flat) | 1,227 (49.5%) | **0.117** | **4%** | 0% |
+| 0.30–0.90 | 31 (1.2%) | 0.362 | 71% | 10% |
+| > 0.90 (standing) | 1,208 (48.7%) | **0.450** | **87%** | 10% |
+
+0.117 is the do-nothing floor (`exp(-0.5 * spawn distance)` = 0.115). **A segment
+that begins with the ant on its face scores exactly what never moving scores**,
+and the ant is on its face in half of all segments.
+
+So the inconsistency the eye picks up in the videos is real and it is not about
+the task's symmetry: it is whether the previous segment left the creature
+standing. Segments are 2–6 s slices of a 15 s episode, and a segment respawns the
+BALL and the TARGET but never the creature — pose, heading and velocity all carry
+over.
+
+### The mechanism, stated as a causal chain
+
+1. Shaping pays approach SPEED and is 97% of the return.
+2. A low, splayed scramble is faster at closing on the ball than a careful gait.
+3. `upright` multiplies the reward, but 0.42 x fast evidently beats 0.95 x slow.
+4. So the policy converged on a fast unstable gait that ends up prone ~half the time.
+5. A prone segment scores the floor, and the arrival term that would punish this
+   is 2% of the return — far too small to pull the gait back.
+
+This also explains v12 against v3. Unfreezing the decoder added CAPABILITY and
+bought a one-off +0.03, then nothing for 2.8B steps: capability was never the
+binding constraint. Same lesson as section 12, now with the mechanism measured
+rather than inferred.
+
+### The obvious experiments, cheapest first
+
+1. **Anneal the shaping to zero** (`--shaping-anneal-steps`), which already
+   exists and was simply not used. If accuracy is currently unpriced, this is the
+   one-flag test of that claim.
+2. **Raise `w_upright`** above 1.0, or make the shaping conditional on being
+   upright, so the splayed gait stops being profitable.
+3. **Reset the creature at segment start**, not just the ball and target. That
+   removes the carried-over posture entirely and makes segments i.i.d. — it
+   changes the task, but it directly tests how much of the 0.40 ceiling is
+   inheritance.
+
+### Honest gaps
+
+* The probe's mean arrival is 0.283; the trainer's reported fitness is ~0.40.
+  These are different estimators (fitness includes the in-flight segment and has
+  a previous-episode fallback), and I have not reconciled them term by term.
+  Everything above is about the RATIO between buckets, which is unaffected.
+* The prediction going in was that inherited GEOMETRY explains the variance. It
+  does not — the correlations are ~0. Inherited POSTURE does. Recorded because
+  the wrong hypothesis was specific enough to have been believed.

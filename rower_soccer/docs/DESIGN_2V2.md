@@ -208,7 +208,36 @@ A second, independent run at 300 games agrees within sampling noise (`any`
 `ignore` control at 190.8 / 1.000), so none of the separations below is a
 one-run artifact.
 
-<!--DOWNED_UNTRAINED-->
+**Untrained**, which is the regime training actually starts in. One trap first:
+an untrained `DevActorCritic` at MEAN actions emits ~0 torque (their
+`control_action_mean.weight.data.mul_(0.1)` init) and simply **stands still for
+500 steps** — measured, `P(any down) = 0.000`, 100% timeout, 0.00 m/s travel.
+That row measures the initialisation, not the task. The row that matters is with
+**sampled** actions at `log_std = 0`, which is what the first rollouts of a run
+look like:
+
+```
+$ PYTHONPATH=. .venv/bin/python -u -c "... rollout_stats(env, drv, 200, mean=False) ..."
+```
+
+| rule | games | mean len | P(any down) | #down at end | 1st down | goal | wipeout | fall | timeout |
+|---|---|---|---|---|---|---|---|---|---|
+| `any` | 201 | **193.1** | **1.000** | 1.00 | — | 0.000 | — | **1.000** | 0.000 |
+| `frozen` | 256 | **500.0** | 0.832 | 1.37 | 295.0 | 0.000 | — | 0.000 | **1.000** |
+| `team_down` | 258 | **466.4** | 0.837 | 1.34 | 286.0 | 0.000 | **0.240** | 0.000 | 0.760 |
+
+(256 worlds; `n_diverged = 0` in all three.)
+
+**This is the sharpest result in the document.** Early in training:
+
+* under **`any`**, 100% of episodes end in a fall at ~193 steps and **0% produce
+  any sparse signal at all**;
+* under **`frozen`**, episodes run the full 500 steps with 1.37 of 4 agents
+  already out, and **still 0% produce a sparse signal** — 2.6x the physics per
+  episode for the same nothing;
+* under **`team_down`**, **24.0% of episodes end in a whole team going down**,
+  which pays ±1000. A rule that terminates on a team wipe-out is the only one of
+  the three that gives a *fresh* policy a sparse learning signal in this task.
 
 ### What the table says
 
@@ -244,7 +273,71 @@ one-run artifact.
 
 ### Recommendation, item 2
 
-<!--DOWNED_REC-->
+**`down_rule = "team_down"`**: a fallen agent is out for the rest of the
+episode — torque zeroed, no dense reward, cannot score, body left in the arena
+as a collidable obstacle — and a team whose *both* members are down loses
+immediately, paying the goal reward to the survivors.
+
+The measurement that justifies it, in one line: **`team_down` is the only rule
+of the three that gives an untrained policy any sparse signal (24.0% of
+episodes) and the only one that makes toppling both opponents a win, and it
+costs 2.0% of episodes at a competent policy where the alternative, `frozen`, is
+identical on every other number.**
+
+The rest of the case, briefly:
+
+* **against `any` (theirs)**: it discards 46.5% of competent-policy episodes and
+  turns "topple an opponent" into "stop the game", which makes the behaviour the
+  brief is about literally unrepresentable. It is also the fastest rule early
+  on (193 vs 500 steps per episode, 2.6x more episodes per unit of physics) —
+  that is its only advantage and it buys nothing, because 0% of those episodes
+  carry a sparse signal either.
+* **against `frozen`**: identical on every trained-policy number, but 0% sparse
+  signal from a fresh policy against `team_down`'s 24%, and unbounded episodes
+  when all four are down.
+* **against `recover`**: 30 recoveries per 200 games moved nothing; it needs an
+  unphysical teleport (an ant cannot right itself, so "recover" without a
+  re-pose is just "frozen" with a delay), and it removes the point of toppling.
+* **against teleporting the corpse out**: not implemented, and it deletes the
+  obstacle. "Flip them over and walk *past* them" needs something to walk past.
+  The gate asserts a fallen body still generates contacts with both an opponent
+  and a teammate.
+
+Two details that are part of the recommendation, not decoration:
+
+* **A downed agent must earn exactly zero**, including the survive bonus. This is
+  a `--break payslacker` control in the gate because getting it wrong turns
+  lying down into a +500/episode strategy.
+* **Keep the `bad`/non-finite exit** exactly as the 1v1 env has it. It is
+  orthogonal to all of this and `n_diverged` was 0 in every run here.
+
+
+### 2b. The renders, which were looked at
+
+```
+$ ... probe_2v2 render --worlds 8 --episodes 3 --down-rule team_down \
+      --out runs/competevo_port/2v2_probe/trained_teamdown.mp4      # 932 frames, 23.3 s
+$ ... probe_2v2 render --worlds 8 --episodes 2 --down-rule any --untrained \
+      --out runs/competevo_port/2v2_probe/team2v2_untrained_any.mp4 # 1000 frames, 25.0 s
+```
+
+Frame grids (`*_grid.png`) were extracted and inspected. What they confirm, and
+none of it was visible in a number:
+
+* **The layout on screen is the layout in the table.** Four ants, left to right:
+  beige A2 straddling the left red goal line, beige A1, dark B1, dark B2
+  straddling the right line. Teams are colour-coded (`team_scene._team_rgb`)
+  because a 2v2 clip in which all four ants are the same beige is unreadable.
+* **The goal-line ants sit on their line without visible interference** — the
+  rod passes between their feet, matching the zero-contact measurement.
+* **The trained transplant's ants converge on the middle and tangle.** Several
+  frames show three or four bodies in contact around x = 0, with ants climbing
+  over and flipping each other. That is the physical substrate the "topple them
+  and walk past" strategy would have to use, and it exists.
+* **The untrained clip shows the ants collapsing in place** and the episode
+  restarting repeatedly with no net travel — the visual form of the
+  `travel ≈ 0.00 m/s`, `100% fall` row.
+* No clipping, no ghosting, no exploded states.
 
 ---
 
@@ -278,17 +371,26 @@ own. `alpha * dense + (1 - alpha) * parse` is unchanged term for term, so
 `DEV_CURRICULUM_STEPS` does not need retuning and the 1v1 α schedule stays
 comparable epoch for epoch.
 
-Three things *do* move, and only one of them is about the sparse term:
+Four things *do* move, and only two of them are about the sparse term:
 
 1. **Episode length moves the dense side.** The sparse term is paid once; the
    dense term accumulates per step. Any rule that lengthens episodes therefore
    lowers the sparse term's share at fixed α. This is the real coupling between
    items 2 and 3, and it is measured in §2's table — read the `len` column as a
-   reward-scale column.
-2. **`goal_credit="split"` is a curriculum change in disguise.** Halving the
+   reward-scale column. Measured for the recommended rule (§4): per-agent dense
+   return **460 ± 124** over 566 episodes, against a one-off ±1000, so at
+   α = 0.90 the curriculum weighs **0.90 x 460 = 414 of dense against 0.10 x
+   1000 = 100 of sparse** — the sparse term is ~24% of the dense one at the
+   epoch where the 1v1 reference's win rate first leaves zero.
+2. **`down_rule="team_down"` adds a second ±1000 event** (the wipe-out). It is
+   the same magnitude and mutually exclusive with the goal payout in the same
+   step (`terms` fires it only when `game_done` is false), so it does not change
+   the scale — it changes the *frequency* of a sparse event, from 0% to 24% of
+   episodes at a fresh policy. That is the point of it.
+3. **`goal_credit="split"` is a curriculum change in disguise.** Halving the
    goal reward is exactly equivalent to halving `(1−α)` at every epoch. If you
    want that, change α, not the payout.
-3. **`goal_credit="scorer"` breaks the strategy the brief is about.** A blocker
+4. **`goal_credit="scorer"` breaks the strategy the brief is about.** A blocker
    that topples both opponents so its teammate can walk through is paid zero for
    it. Do not use it.
 
@@ -653,19 +755,22 @@ Two more findings worth carrying, both cheap:
 
 Ordered so the cheapest thing that could falsify the whole approach runs first.
 
-**1 — (hours) Does the task survive at four bodies and 8 m?** *Already
-half-done here.* Transplant the m2e_fixed 1v1 pair, run `probe_2v2 downed`
-under `team_down` + `team_first`, look at the ending histogram and the per-agent
-reach rates in §2. **Falsifier:** if the goal rate collapses to ~0 and the back
-agents essentially never reach the line, the 2v2 geometry is a different task
-from the one the port validated, and the fix (shorter `back_x`, longer episodes,
-y-gated goals) is a geometry decision that must be made *before* any training.
+**1 — DONE HERE, and it half passed.** "Does the task survive at four bodies and
+8 m?" Under `team_down` + `team_first` a transplanted 1v1 pair scores in
+**98.0%** of episodes in **178.7** steps — the task is intact. But the back
+agents' reach rate is **0.000-0.005** against the front pair's 0.38-0.60. So the
+falsifier fired *partially*: the game works, and the second player is decorative
+under a first-crossing rule. **The decision this forces, before training:** if
+2f wants the back agent to be a player rather than a spectator, the goal
+condition or the geometry has to give it something to do — a y-gated goal
+(§1), a shorter `back_x`, or accepting that its only value is interference and
+letting the sparse team reward find that. This document recommends the third,
+with the first held in reserve, but it is a decision and not a default.
 
-**2 — (hours) Watch it.** `probe_2v2 render` under two rules and two policies.
-This project has twice shipped envs that were numerically fine and visually
-wrong. Specifically look for: ants clipping through each other, the back ant
-colliding with its own teammate at spawn, and frozen corpses behaving like
-obstacles rather than ghosts.
+**2 — DONE HERE.** Rendered and inspected: `probe_2v2 render` under
+`team_down` (trained transplant, 932 frames) and `any` (untrained, 1000
+frames). Both are in §2b below. Nothing visually wrong; the layout on screen is
+the layout in the table.
 
 **3 — (half a day) Observation and network plumbing, with a regression.** Widen
 `DevActorCritic` to the 56-dim obs (+2 for the role one-hot = 58). **The
@@ -704,6 +809,29 @@ for ants); shared-vs-summed reward; spawn randomisation on/off.
 **9 — (2g, out of scope here)** heterogeneous teams: two policies and two
 genomes per team, ring keyed by pair.
 
+### What 2v2 costs, measured
+
+```
+$ ... python -c "... 60 timed steps, interleaved, after 10 warmup ..."
+W=128: 46.3 ms/step,  2,766 world-steps/s
+W=512: 60.7 ms/step,  8,440 world-steps/s
+```
+
+Against the 1v1 port's ~10,200 world-steps/s at 1024 worlds (M2E §"the GPU port
+IS a ~19x speedup"), a 2v2 world costs about **1.2x** a 1v1 world at comparable
+batch — the 4-agent model is 2x the bodies but the step is launch-bound, not
+arithmetic-bound. Per *agent-transition* 2v2 is therefore **cheaper**. Budget a
+2f 200-epoch run at roughly the same wall clock as the 1v1 one (~48 h at their
+PPO settings), and note that 512 worlds is well past the point where the batch
+stops being launch-bound: do not run 2f at 128.
+
+**Operational note for whoever runs these.** Several long probe processes were
+killed silently mid-run in this session when launched detached; the runs that
+completed were foreground or tool-tracked. Nothing in the port caused it
+(`n_diverged = 0` everywhere, no tracebacks), but a 2f run should write
+per-iteration to `log.json` as the existing trainer does rather than trusting a
+process to survive to its final print.
+
 ---
 
 ## 9. Summary of recommendations
@@ -711,7 +839,7 @@ genomes per team, ring keyed by pair.
 | # | question | recommendation |
 |---|---|---|
 | 1 | spawn geometry | user's layout as specified (5 m / 8 m); randomise side, y ±1 m, back_x ∈ [3, 4]; y-gated goal held in reserve |
-| 2 | downed player | <!--REC2--> |
+| 2 | downed player | `team_down`: out for the episode, torque zeroed, unpaid, body left as an obstacle; both members down = the team loses |
 | 3 | win condition | `team_first` + `goal_credit="team"`; per-agent rewards; curriculum constants unchanged |
 | 4 | credit assignment | individual dense + shared sparse; no team sum, no COMA; add death masking; team spirit τ as the fallback |
 | 5 | population / genome | one policy per team, two emergent genomes; +role one-hot; +teammate in the obs |
@@ -752,3 +880,18 @@ Stated plainly, because an honest gap is worth more than a plausible guess.
 * **Episode-length effects on the curriculum were measured but not tuned.** §3
   says episode length is what moves the sparse/dense balance; nobody has decided
   what to do about it if 2v2 episodes turn out to be twice as long.
+* **`win_rule="exactly_one"` was only exercised on hand-set states**, not in a
+  rollout. §0b's "it fines your own teammate" is exact and gated; what fraction
+  of *rollout* episodes it would corrupt is not measured (it is all of the ones
+  that score, but the number is not in this document).
+* **The 1v1 dense-return distribution was not re-measured** for the §4 scale
+  comparison, so "sparse is ~24% of dense at α = 0.90" is stated for 2v2 only.
+  Comparing it to 1v1 needs the same probe run against `RunToGoalDevEnv`, which
+  is ~10 minutes of work nobody did.
+* **`goal_credit="split"` and `"scorer"` were gated but never rolled out.** The
+  argument against them in §3 is structural, not empirical.
+All four negative controls in this document were run and all four failed on
+demand: `--break bitmask`, `--break nomask`, `--break payslacker` in the gate,
+and `probe_2v2 credit --break-restore`, which moves `cross/own` from
+**8.5e−4 to 1.03** — i.e. with the restore broken, resampling one agent's action
+appears to move its distant teammate's own reward by as much as its own.

@@ -11,7 +11,10 @@ export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidi
 # "No API key configured".
 set -a; . ./.env; set +a
 INIT=runs_v2/kick_ant_v12_v3_unfrozen/latest.pt
-COMMON="--creature-xml creature_configs/ant.xml --arena pitch --pitch-scale 0.3125
+# --gcs-bucket is NOT optional here: train_kick_warp defaults it to None, so
+# omitting it silently disables all backup. That is how npmp_rower_v2 was lost.
+COMMON="--gcs-bucket vc2-2026-checkpoints
+        --creature-xml creature_configs/ant.xml --arena pitch --pitch-scale 0.3125
         --init-from $INIT --worlds 2048 --max-hours 8 --steps 400000000
         --ball-radius 0.15 --ball-mass 0.045
         --reward-kind point --w-arrive 3.0 --w-strike 0.1

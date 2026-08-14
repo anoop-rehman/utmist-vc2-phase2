@@ -178,6 +178,7 @@ def rollout_stats(env, driver, n_games, max_iters=20000, mean=True):
     per_agent_reached = np.zeros(env.n_agents)
     down_ever = np.zeros(env.n_agents)
     ep_down_step = torch.full((env.n, env.n_agents), -1.0, device=env.device)
+    step_no = torch.zeros(env.n, device=env.device, dtype=torch.long)
     start_x = env._agent_com_x().clone()
     travel = []
     games = 0
@@ -186,12 +187,14 @@ def rollout_stats(env, driver, n_games, max_iters=20000, mean=True):
         it += 1
         a = driver.act(obs, mean=mean)
         obs, rew, done, info = env.step(a.to(env.dtype))
-        if not bool(info["was_design"].all()):
-            newly = info["newly_down"]
-            ep_down_step = torch.where(newly & (ep_down_step < 0),
-                                       env.ep_step.unsqueeze(-1).float(),
-                                       ep_down_step)
-        st = env.ep_step.unsqueeze(-1)
+        # Count steps HERE, not from `env.ep_step`: with auto_reset on, a
+        # world that finished this step has already had `ep_step` zeroed, so
+        # reading it after `step()` records 0 for every fall that ended an
+        # episode -- which under down_rule="any" is every fall there is.
+        step_no += (~info["was_design"]).long()
+        newly = info["newly_down"]
+        ep_down_step = torch.where(newly & (ep_down_step < 0),
+                                   step_no.unsqueeze(-1).float(), ep_down_step)
         if bool(info["was_design"].any()):
             w = info["was_design"].nonzero(as_tuple=True)[0]
             start_x[w] = env._agent_com_x()[w]
@@ -212,6 +215,7 @@ def rollout_stats(env, driver, n_games, max_iters=20000, mean=True):
             fd = ep_down_step[idx].cpu().numpy()
             first_down_step.extend(fd[fd >= 0].tolist())
             ep_down_step[idx] = -1.0
+            step_no[idx] = 0
             games += len(idx)
     tot = max(games, 1)
     trav = np.concatenate(travel, 0) if travel else np.zeros((1, env.n_agents))
@@ -238,11 +242,13 @@ def rollout_stats(env, driver, n_games, max_iters=20000, mean=True):
 
 def probe_downed(args, device):
     from rower_soccer.competevo_port.team_env import DOWN_RULES
-    pols = {"trained(1v1 transplant)": load_acs(args.policies, device),
-            "untrained": fresh_acs(device, seed=args.seed)}
+    pols = ({"untrained": fresh_acs(device, seed=args.seed)} if args.untrained
+            else {"trained(1v1 transplant)": load_acs(args.policies, device),
+                  "untrained": fresh_acs(device, seed=args.seed)})
     rules = args.rules.split(",") if args.rules else list(DOWN_RULES)
     print(f"{args.worlds} worlds, >= {args.games} finished games per cell, "
-          f"mean actions, back_x={args.back_x}\n")
+          f"{'SAMPLED' if args.stochastic else 'mean'} actions, "
+          f"back_x={args.back_x}\n")
     for pname, acs in pols.items():
         print(f"=== policy: {pname} ===")
         hdr = (f"{'rule':10s} {'games':>6s} {'len':>7s} {'med':>6s} "
@@ -257,7 +263,8 @@ def probe_downed(args, device):
                            recover_steps=args.recover_steps,
                            scene_kwargs={"back_x": args.back_x})
             d = Transplant(acs, env)
-            s = rollout_stats(env, d, args.games)
+            s = rollout_stats(env, d, args.games,
+                              mean=not args.stochastic)
             e = s["ends"]
             print(f"{rule:10s} {s['games']:6d} {s['mean_len']:7.1f} "
                   f"{s['median_len']:6.0f} {s['p_any_down']:11.3f} "
@@ -572,6 +579,12 @@ def main():
     p.add_argument("--rules", default=None)
     p.add_argument("--recover-steps", type=int, default=50)
     p.add_argument("--untrained", action="store_true")
+    p.add_argument("--stochastic", action="store_true",
+                   help="sample actions instead of taking the mean; "
+                        "an untrained net at mean actions emits ~0 "
+                        "torque (the control head is init x0.1) and "
+                        "simply stands still, which is not the state "
+                        "early training is actually in")
     # credit
     p.add_argument("--k", type=int, default=24)
     p.add_argument("--warmup", type=int, default=60)

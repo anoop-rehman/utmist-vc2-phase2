@@ -94,7 +94,7 @@ class RunToGoalDevEnv:
         if not use_gpu:
             use_graph = False
 
-        self.model, self.meta = build_dev_scene(**(scene_kwargs or {}))
+        self.model, self.meta = self._build_scene(**(scene_kwargs or {}))
         self.backend = backend_cls(self.model, num_worlds, FRAME_SKIP,
                                    use_graph=use_graph, nconmax=nconmax,
                                    njmax=njmax, device=device,
@@ -166,6 +166,17 @@ class RunToGoalDevEnv:
         self.games = 0
         self.wins = np.zeros(m.n_agents)
         self.n_diverged = 0
+
+    # Subclass hooks. Both are identity/default here, so the 1v1 path is
+    # bit-for-bit what it was; `team_env.TeamRunToGoalDevEnv` is the only user.
+    @staticmethod
+    def _build_scene(**kw):
+        return build_dev_scene(**kw)
+
+    def _mask_motors(self, motor_eff):
+        """Last chance to zero an agent's torque before it is written to
+        `ctrl`. 2v2 uses it to disable a downed agent."""
+        return motor_eff
 
     # -- state helpers ------------------------------------------------------
     def _agent_com_x(self):
@@ -318,6 +329,7 @@ class RunToGoalDevEnv:
         motor_eff = torch.where(zero_design, torch.zeros_like(motor), motor)
         cost_action = torch.where(zero_design, torch.zeros_like(motor_raw),
                                   motor_raw)
+        motor_eff = self._mask_motors(motor_eff)
         self.ctrl.copy_(motor_eff.reshape(self.n, -1).to(self.ctrl.dtype))
         self._com_before = self._agent_com_x().clone()
         self.backend.step()

@@ -848,3 +848,52 @@ That raises the value of the corrected re-run rather than lowering it: it runs t
 200 epochs, which is exactly where the reference is at 96.9%, so the comparison
 is against converged behaviour instead of a mid-climb snapshot. `--iters 200`
 was chosen before any of this was known and turns out to be the right axis.
+
+## 10. Result: the three optimizer fixes took the win rate from 0.06 to 0.84
+
+`runs/competevo_port/m2e_fixed` ran to completion, 200 epochs. The comparison
+that isolates the fix from the extra epochs is **matched epoch 101**, where both
+runs have data:
+
+| epoch | ORIGINAL, summed win | FIXED, summed win |
+|---|---|---|
+| 1–81 | 0.00 | 0.00 |
+| **101** | **0.000** | **0.395** |
+| 121 | — | 0.685 |
+| 141 | — | 0.872 |
+| 199 | — | 0.730 |
+
+And measured directly at 384 mean-action games, against the reference's own
+converged behaviour:
+
+| | goal | fell | timeout | win, summed | ep length |
+|---|---|---|---|---|---|
+| theirs @200, their env | **96.9%** | 1.0% | 0.0% | 0.969 | 170.0 |
+| **ours @200, FIXED** | **83.9%** | 15.6% | 0.0% | **0.839** | 175.7 |
+| ours @107, original | 5.5% | 39.3% | 55.2% | 0.055 | 364.9 |
+
+**The paper-number gate is close to met.** Our port reaches 87% of the
+reference's converged goal rate, on the same task, from the same config, with
+episode lengths that agree to 3%. Section 5's headline — "the win rate is 12x too
+low" — was a consequence of three optimizer infidelities, not of the physics.
+
+### What is left, and it is a different question from before
+
+Timeouts are **gone** (55.2% -> 0.0%): our ants now travel. Mean travel is 4.71 m
+against their 4.02 m, and episodes end in 176 steps against their 170. The whole
+"our ants are slower" finding of sections 7 and 8 was downstream of the optimizer.
+
+What remains is **falls: 15.6% against their 1.0%**, and that gap of 14.6 points
+almost exactly accounts for the 13-point goal-rate gap. So the stability question
+that sections 7-8 retired is back — but as a well-posed 13-point residual rather
+than as the explanation for everything, and now with a policy good enough that
+the comparison means something.
+
+### Measurement honesty
+
+Two runs of "their policy in our env" gave 34.8% and 30.7% goal rate on 384-385
+games. Binomial SEM is ~2.4 points, so run-to-run variation is real and the
+estimate is ~32 +/- 3, not 34.8 exactly. Single-run figures in sections 7-9
+should be read with that width. It does not move any conclusion here — 83.9% vs
+5.5% is not a 3-point question — but the earlier text quoted four significant
+figures it had not earned.

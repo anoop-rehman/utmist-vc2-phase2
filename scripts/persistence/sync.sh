@@ -39,7 +39,18 @@ DEST="gs://${GCS_BUCKET}/${GCS_PREFIX}"
 
 # What counts as "the chat". projects/ carries transcripts AND memory/.
 SYNC_DIRS=(projects)
-SYNC_FILES=(history.jsonl settings.json .claude.json)
+SYNC_FILES=(history.jsonl settings.json)
+# NOT in SYNC_FILES: Claude Code writes .claude.json BESIDE the config dir
+# (/root/.claude.json), not inside it. It was listed here until 2026-08-14 and
+# the `[ -f "$SRC/$f" ] || continue` below skipped it silently on all 75 syncs
+# since -- the bucket's copy was dated 2026-07-26 while the live file changed
+# daily, and pull.sh would have restored the July one over it. Resolved from an
+# explicit candidate list instead, and NOISY when it finds nothing, because a
+# silent skip is exactly what hid this.
+CLAUDE_JSON=""
+for c in "$SRC/.claude.json" "$HOME/.claude.json"; do
+    [ -f "$c" ] && { CLAUDE_JSON="$c"; break; }
+done
 [ "${INCLUDE_CREDENTIALS:-0}" = "1" ] && SYNC_FILES+=(.credentials.json)
 
 echo "source : $SRC"
@@ -58,6 +69,15 @@ for f in "${SYNC_FILES[@]}"; do
     echo "  file $f"
     gcloud storage cp "$SRC/$f" "$DEST/config/$f" --project="$GCS_PROJECT" >/dev/null 2>&1
 done
+
+if [ -n "$CLAUDE_JSON" ]; then
+    echo "  file .claude.json  (from $CLAUDE_JSON)"
+    gcloud storage cp "$CLAUDE_JSON" "$DEST/config/.claude.json" \
+        --project="$GCS_PROJECT" >/dev/null 2>&1
+else
+    echo "  WARNING: no .claude.json found at $SRC/ or $HOME/ -- per-project" >&2
+    echo "           trust and tool approvals will NOT be restored." >&2
+fi
 
 # Ship the scripts too, so a brand-new machine can bootstrap from the bucket.
 for f in pull.sh sync.sh claude-gcs.env claude-bootstrap.sh claude-snapshot.sh CLAUDE-PERSISTENCE.md; do

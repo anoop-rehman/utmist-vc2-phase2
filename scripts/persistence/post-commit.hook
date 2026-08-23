@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
 # Lazily push Claude Code chat state to GCS after every commit.
 #
-# Backgrounded: the commit returns immediately; the ~50 s rsync runs detached.
+# Backgrounded: the commit returns immediately; the rsync runs detached.
 # flock single-flights it so a burst of commits produces one sync, not a pile.
-# Failures are silent by design (a backup hook must never block a commit) —
-# check /workspace/claude-persistence/sync.log if you suspect it is not running.
-SYNC=/workspace/claude-persistence/sync.sh
-[ -x "$SYNC" ] || exit 0
+# A backup hook must never block or fail a commit, so it always exits 0.
+#
+# The sync script is resolved FROM THE REPO. It used to be a hardcoded
+# /workspace/claude-persistence/sync.sh guarded by `[ -x ... ] || exit 0`, which
+# meant that on any machine without that directory the hook installed cleanly
+# and then did nothing, silently, forever. That is exactly what happened on the
+# 2026-08-23 pod rebuild. Resolving from the repo removes the external
+# dependency, and a missing script now leaves a line in the log instead of
+# vanishing.
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+SYNC="$REPO/scripts/persistence/sync.sh"
+LOG="$REPO/.git/claude-sync.log"        # inside .git: always present, never committed
+
+if [ ! -f "$SYNC" ]; then
+  echo "[$(date -u +%FT%TZ)] post-commit: no sync.sh at $SYNC" >> "$LOG"
+  exit 0
+fi
+
 setsid bash -c '
   exec 9>/tmp/claude-chat-sync.lock
   flock -n 9 || exit 0
-  bash '"$SYNC"' >> /workspace/claude-persistence/sync.log 2>&1
+  echo "[$(date -u +%FT%TZ)] sync start" >> '"$LOG"'
+  bash '"$SYNC"' >> '"$LOG"' 2>&1
+  echo "[$(date -u +%FT%TZ)] sync end rc=$?" >> '"$LOG"'
 ' < /dev/null > /dev/null 2>&1 &
 exit 0

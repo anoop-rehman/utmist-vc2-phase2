@@ -99,11 +99,23 @@ def main():
                 fell = info["fell"][idx].any(-1)
                 trunc = info["truncated"][idx]
                 both += int((won & fell).sum())
-                # Precedence is the env's own: a crossed goal line ends the
-                # game whatever the torso height is doing.
-                for w, f, t in zip(won.tolist(), fell.tolist(), trunc.tolist()):
-                    endings["goal" if w else "fell" if f
-                            else "timeout" if t else "other"] += 1
+                if "end" in info:
+                    # The 2v2 env classifies its own endings and knows the
+                    # distinction this file cannot re-derive: under
+                    # down_rule="team_down" an episode can end because a whole
+                    # TEAM is down (a wipeout), which is not the same event as
+                    # one agent leaving the band. Re-deriving it from `fell`
+                    # would silently merge the two.
+                    for e in env.last_end[idx].tolist():
+                        endings[{0: "other", 1: "goal", 2: "wipeout",
+                                 3: "fell", 4: "timeout"}[e]] += 1
+                else:
+                    # Precedence is the env's own: a crossed goal line ends the
+                    # game whatever the torso height is doing.
+                    for w, f, t in zip(won.tolist(), fell.tolist(),
+                                       trunc.tolist()):
+                        endings["goal" if w else "fell" if f
+                                else "timeout" if t else "other"] += 1
                 lens.extend(env.last_len[idx].float().cpu().tolist())
 
     total = sum(endings.values()) or 1
@@ -111,7 +123,9 @@ def main():
     print(f"\n{args.kind}  {args.policies}")
     print(f"  {total} games over {env.n} worlds x {env.n_agents} agents, "
           f"mean actions")
-    for k in ("goal", "fell", "timeout", "other"):
+    for k in ("goal", "wipeout", "fell", "timeout", "other"):
+        if k == "wipeout" and not endings[k] and args.kind == "1v1":
+            continue        # 1v1 has no such ending
         print(f"    {k:8s} {endings[k]:6d}   {100.0 * endings[k] / total:5.1f}%")
     print(f"    mean episode length {np.mean(lens) if lens else 0:.1f} "
           f"of {env.max_episode_steps}")

@@ -1,0 +1,21 @@
+diff --git a/design_opt/envs/hopper.py b/design_opt/envs/hopper.py
+index 08a03a0..683f171 100644
+--- a/design_opt/envs/hopper.py
++++ b/design_opt/envs/hopper.py
+@@ -156,7 +156,15 @@ class HopperEnv(MujocoEnv, utils.EzPickle):
+ 
+             posafter, height, ang = self.sim.data.qpos[0:3]
+             alive_bonus = self.cfg.reward_specs.get('alive_bonus', 1.0)
+-            reward = (posafter - posbefore) / self.dt
++            # The paper's equation 17 is |p^x_{t+1} - p^x_t| / dt + 1, with an
++            # ABSOLUTE VALUE that this line has never had. Opt-in, default
++            # off, so the unmodified behaviour is bit-identical and only a cfg
++            # that asks for it gets the paper's form. See
++            # utmist-vc2-phase2 docs/repro/TRANSFORM2ACT_M1_REPRO_NOTES.md.
++            _dx = posafter - posbefore
++            if self.cfg.reward_specs.get('abs_displacement', False):
++                _dx = abs(_dx)
++            reward = _dx / self.dt
+             reward += alive_bonus
+             scale = self.cfg.reward_specs.get('exec_reward_scale', 1.0)
+             reward *= scale

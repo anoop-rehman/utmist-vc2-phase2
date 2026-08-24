@@ -996,3 +996,36 @@ Two epochs of one run. The direction is a hint, not a trend.
 The run is unfinished. Everything above is epoch 60-80 of 200. Topple
 attribution stays uninformative at these counts (2-3 credited events), and no
 render of a trained team has been looked at yet.
+
+### 11b. What it looks like: a four-ant scrum
+
+`render_team.py` on `policies_ep0080.pt`, 1,000 frames, looked at rather than
+counted. The clip is unambiguous and the numbers alone did not say it:
+
+* **step 40** — four ants near their spawns, spread across the pitch;
+* **step 200** — all four converged into one tight interleaved cluster around
+  x ≈ −3, orange/dark/orange/dark;
+* **step 400** — still clustered, tangled, one agent visibly toppled;
+* **step 700** — still clustered, now sitting on the left goal line.
+
+So the behaviour behind "84.8% timeout, 1.5% goal" is not four ants milling
+about failing to find the goal. It is **all four converging and shoving**, and
+the episode ending on the clock because neither side can get through.
+
+**That is interference, and it is the behaviour this design was hoping for** —
+the user's "coordinating to flip over the opponents and render them useless".
+Team A wipes team B out in 13.6% of episodes, which is the shoving occasionally
+working. What is missing is the second half of the sentence: *and then passing
+them by*. Nobody passes.
+
+It also explains the epoch 60→80 numbers. Wipeouts 66% → 8% is not "less
+contact", it is the scrum stabilising: the ants got good enough at staying
+upright that shoving no longer knocks anyone over, so the same pile-up now ends
+on the clock instead of in a wipeout.
+
+Two cautions. This is epoch 80 of 200 and the 1v1 control did not begin scoring
+until ~90-120, so the stalemate may simply be the phase before someone learns to
+break out. And a scrum is also what a *degenerate* equilibrium looks like — if
+it persists to 200, the honest reading is that `team_first` + `goal_credit=team`
+pays interference well enough that scoring is not worth the risk, which is
+decision 3 of section 9 coming back.

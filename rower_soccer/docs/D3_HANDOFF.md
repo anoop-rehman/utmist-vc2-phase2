@@ -129,3 +129,105 @@ Nothing in `dense_policy.py` has been trained — it is gated for forward-pass
 equivalence only. There is no batched Transform2Act env, no training loop, and no
 measurement of what the port's throughput would actually be; the 3.8x above is an
 Amdahl ceiling computed from hopper's phase timings, not an achieved number.
+
+---
+
+## Update 2026-08-24 — M1, and step 3's two blockers cleared
+
+### M1 is NOT met, and the bar we were checking against was our own
+
+`~4000+` was never in the paper. The paper has **no results table and no numeric
+return anywhere** — two tables, both hyperparameters, everything else a curve.
+Read off Figure 3, 2D Locomotion converges to **~9,000**. Our completed
+1,000-epoch run reached 6,836, about 76% of it.
+
+A candidate excuse was examined and destroyed. The paper's equation 17 pays
+`|p^x_{t+1} − p^x_t| / δt + 1` and the released code has no `abs`, so the code
+might have been implementing a harder task than the figure. Adding the `abs`
+(opt-in flag, default off) and training a seed:
+
+| at epoch 50 | signed (released) | `\|Δx\|` (eq. 17) |
+|---|---|---|
+| reward | 1,321 | 3,324 |
+| **net displacement** | **2.57 m** | **0.60 m** |
+| net / path | **0.999** | **0.032** |
+
+The `|Δx|` agent vibrates in place — 18.6 m of motion for 0.6 m of progress —
+while scoring 2.5x the reward. The paper reports and renders plausible
+locomoting agents, so the `|·|` is a write-up error and Figure 3 came from the
+shipped code. **~9,000 is real and the 24% gap is ours.**
+
+Note how nearly this went wrong: the reward curves showed `|Δx|` learning
+2.5-6.5x faster, which reads as evidence until you notice it is a tautology.
+`displacement_probe.py` exists because reward is not comparable across reward
+forms and displacement is.
+
+**Seed variance is small here**, unlike D2: two signed seeds tracked each other
+within a few percent for 200 epochs (211/206 at epoch 10, 494/520 at 40,
+1,314/1,357 at 50). So 6,836 is not a bad draw.
+
+### Step 3 was blocked twice, and both are now cleared
+
+Before writing a batched execution env, the assumption underneath it was
+checked: they simulate with **mujoco-py 2.1 / mujoco210**, the port with the
+**modern bindings under mujoco_warp**.
+
+1. **Their XML does not compile in modern MuJoCo at all** — `xml_robot.py`
+   emits `<compiler coordinate="global">` and global coordinates were removed
+   in 2.3.3. `t2a_port/xml_global_to_local.py` converts; the conversion is a
+   pure translation only because their generator never emits `quat`/`euler`,
+   and `assert_no_rotation` enforces that rather than assuming it.
+
+2. **MuJoCo 2.1 computed capsule mass and inertia differently, and that is what
+   they trained against.** Recovered exactly by sweeping their compiler over a
+   49-point (r, h) grid:
+
+   ```
+   mass  = rho*pi * (2 r^2 h + r^3)                      # cylinder + 3/4 sphere
+   I_ax  = rho*pi * (r^4 h + r^5 / 2)
+   I_tr  = rho*pi * (r^4 h + 2/3 r^2 h^3 + r^5 / 3 + r^3 h^2)
+   ```
+
+   Verified against their compiler at 4.2e-16 (mass) and 1.8e-14 (inertia).
+   Their bodies are 1.3-3.2% lighter than the same XML compiled today.
+
+`convert(legacy_inertial=True)` emits explicit `<inertial>` from these, and the
+**whole model then round-trips to machine precision** — mass 4.3e-11, inertia
+4.4e-13, all geometry at 1e-16. So the batched env can compute their physics
+in closed form on the GPU, with no per-world compiler call; at ~50,000 worlds
+per epoch that call was the thing that would have made step 3 impossible.
+
+**Trap worth knowing:** their compiler line says `inertiafromgeom="true"`, which
+makes MuJoCo ignore an explicit `<inertial>` **silently**. The elements were
+emitted, correct, and discarded, and every field still read as mismatched. Set
+`inertiafromgeom="auto"`.
+
+### What step 3 still has to decide
+
+The model matches exactly; the **engine** does not. Trajectories separate at
+1e-3 by step 11 and 1e-2 by step 72 over 300 recorded-action steps — RK4 plus
+contacts across two MuJoCo versions, not a model error, and not closable by
+fixing the model.
+
+So a batched port cannot bit-match their episodes, and the question is what it
+is for:
+
+* **A faithful reproduction** whose numbers are comparable to their curves —
+  needs the legacy inertial (now available) and has to accept that individual
+  trajectories diverge while the *distribution* should not. Worth checking by
+  training a short run in the port and comparing the learning curve, not the
+  trajectory.
+* **A correct-physics environment**, using modern MuJoCo's fixed capsules. Valid
+  and arguably better, but its numbers are not comparable to theirs and M1 would
+  have to be restated against a fresh baseline.
+
+Recommend the first, because M1 is the point of D3 and it is a comparison.
+
+### Files added
+
+| file | what |
+|---|---|
+| `t2a_port/xml_global_to_local.py` | global→local, plus the legacy capsule formulas |
+| `t2a_port/physics_bridge_gate.py` | two-venv model + trajectory comparison |
+| `t2a_port/legacy_capsule_fit.py` | the sweep that recovered the formula |
+| `t2a_port/displacement_probe.py` | net vs path displacement; settled the `\|Δx\|` question |

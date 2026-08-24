@@ -958,3 +958,72 @@ Whether the reference shows the same profile. That needs their checkpoints,
 which the pod destroyed; their run-to-goal reference is training again as of
 2026-08-24 and reaches the comparable epoch in roughly 15 hours. Until then
 every number here describes our port without a control.
+
+## 12. The re-run meets the paper-number gate (2026-08-24)
+
+`runs/competevo_port/m2e_fixed` was re-run from scratch on a new pod, same
+config, same seed 42, 200 epochs, 93 minutes. Scored with `score_policies.py`,
+384 worlds, mean actions, **three independent eval seeds**:
+
+| eval seed | games | goal | fell | timeout | win, summed |
+|---|---|---|---|---|---|
+| 1234 | 861 | 97.1% | 2.3% | 0.0% | 0.971 |
+| 7 | 875 | 96.8% | 2.3% | 0.0% | 0.968 |
+| 99 | 849 | 96.9% | 2.6% | 0.0% | 0.969 |
+
+Against the reference, measured in §9 at its epoch_0200 checkpoint:
+
+| | goal | fell | timeout | length | win, summed |
+|---|---|---|---|---|---|
+| **theirs @200** | **96.9%** | 1.0% | 0.0% | 170.0 | **0.969** |
+| **ours @200, re-run** | **96.9%** | 2.4% | 0.0% | 179.5 | **0.969** |
+| ours @200, old pod | 83.9% | 15.6% | 0.0% | 175.7 | 0.839 |
+
+**The paper-number gate is met.** Section 10 said it was "close to met" at 87%
+of the reference's goal rate; this run is at 100% of it, with episode lengths
+agreeing to 6%.
+
+### The fall residual is closed, and section 11's leads died with it
+
+The 14.6-point fall gap that §10 and §11 were chasing is **1.4 points** here
+(2.4% against 1.0%). `fall_analysis.py` on the converged policy finds 11
+fallers in 1,024 agent-episodes, and at that sample both hypotheses §11 raised
+evaporate:
+
+* the genome signal is now **0.95x the null maximum** — below the noise floor,
+  where §11's 1.55x was already only "suggestive". It was noise.
+* early speed differs by **0.3 SE** (was 1.9). The speed/stability trade is
+  dead in both directions.
+* still not collisions: 0 of 11 fallers had an opponent within 1 m.
+
+What survives is only the shape: falls are mid-run (median step 178), and
+63.6% are collapses against 36.4% launches.
+
+### What this does NOT establish, and it matters
+
+**The same code, the same seed and the same config produced 83.9% on the
+previous pod and 96.9% here.** The only difference is the GPU, and through it
+warp's kernel scheduling, so the trajectories were never going to be identical
+— but a 13-point spread between two runs of one configuration is a large
+spread, and it is the honest headline number of this section:
+
+* **Established:** the port is *capable* of the reference's converged
+  behaviour. 83.9% was not a ceiling imposed by the port, and nothing further
+  needs fixing to reach 96.9%.
+* **NOT established:** that the port *reliably* reaches 96.9%. That is one run.
+  Quoting 96.9% as the port's number, without the 83.9% beside it, would be
+  picking the better of two samples.
+* Consequently the §10 and §11 fall investigations were chasing a property of
+  one run, not of the port. That is worth remembering before the next residual
+  gets a workstream.
+
+Three or more seeds at 200 epochs (~90 min each here) would settle it and are
+the obvious next measurement.
+
+### The reference number is also single-source
+
+96.9% / 1.0% comes from one measurement of their `epoch_0200` checkpoint (§9,
+288 games), and those checkpoints no longer exist. Their run-to-goal reference
+is training again as of 2026-08-24 and reaches epoch 200 in roughly 15 hours,
+which will give a like-for-like their-side number measured by the same tool
+rather than a remembered one.

@@ -112,8 +112,15 @@ Result (12 min total, 8 sampler procs + 1 learner, well under 12 cores):
 ```
 
 3 checkpoints + `best.p` written, tensorboard events written, `training done!` logged.
-Rewards at ~0 training are naturally near the survival-bonus floor (paper's 2D locomotion
-converges to ~4000+ over 1000 epochs); the point here is the full loop, not the number.
+Rewards at ~0 training are naturally near the survival-bonus floor; the point here is
+the full loop, not the number.
+
+> **Correction, 2026-08-24.** This line originally read "paper's 2D locomotion converges
+> to ~4000+ over 1000 epochs". That figure was never in the paper — it was ours, written
+> down here and then cited back as if it were theirs. The real number, read off Figure 3
+> of the paper directly (`assets/plot_baselines.png` of the ar5iv build), is **~9,000**.
+> See "What the paper actually reports" below. Every claim that used ~4000 as the bar
+> was measuring against a number half the size of the real one.
 
 ## Long sanity run (in progress)
 
@@ -139,3 +146,71 @@ will yield ~10-15 epochs/day, enough to check the reward trend against the paper
 early learning curve. A faithful full run needs a GPU slot (the authors trained on GPU;
 torch 1.8 + cu111 wheels install the same way) or porting the update loop to float32 +
 larger OMP parallelism, both out of scope for milestone 1.
+
+---
+
+## What the paper actually reports (2026-08-24)
+
+`D3_HANDOFF.md` listed this as the cheapest open item in D3: *"Read the paper's 2D
+Locomotion number and settle whether M1 is met. Costs minutes; currently gates a claim we
+would otherwise be making on our own arithmetic."* Settled here, and it does not settle
+the way the handoff expected.
+
+### There is no number in the text
+
+The paper contains **two tables, both hyperparameters** (Appendix G, Table 1 for
+Transform2Act and Table 2 for the NGE / RGS / ESS baselines). There is no results table,
+no appendix table of returns, and **no sentence anywhere in the paper that quotes a
+numeric return for any experiment**. All four environments' performance is communicated
+only as learning curves in Figure 3.
+
+So the earlier attempt to verify "~4000+" did not fail because the PDF was too large. It
+would have failed anyway: the quantity does not exist in prose.
+
+### Read off Figure 3
+
+Figure 3 is `assets/plot_baselines.png` in the ar5iv build of arXiv 2110.03659 — a
+figure, so these are read by eye off gridded axes, ±5% or so, not transcribed:
+
+| environment | Transform2Act at 50 M simulation steps | y-axis top |
+|---|---|---|
+| **2D Locomotion** | **~9,000** (band ~8,000–10,500) | 10,000+ |
+| 3D Locomotion | ~4,100, still climbing at 50 M | 4,000+ |
+| Swimmer | ~750, flat from ~10 M | 800 |
+| Gap Crosser | ~3,500 | 4,000 |
+
+All four curves run to 50 M simulation steps, which matches Appendix G: batch size 50,000
+for 1,000 epochs.
+
+### What that does to M1
+
+Our completed `hopper_gpu` run — 1,000/1,000 epochs, 50 M steps, the same config — reached
+a final-20 mean `exec_R_eps` of **6,836**, max 7,452.
+
+**6,836 against ~9,000 is about 76% of the reference, and below the lower edge of their
+shaded band.** The handoff's reading — "a clean, monotone, fully-completed run that lands
+well above a number we wrote down" — was true only of the number we wrote down. Against
+the paper's actual curve the run lands *short*.
+
+**M1 is therefore NOT met on the strength of that run.** Nobody should claim it is.
+
+### Three caveats, none of which close the gap
+
+* **One seed against their several.** Their band is over seeds; ours is a single run and
+  has no band at all. The honest comparison is one sample against a distribution.
+* **`exec_R_eps` versus their "Reward" may not be the same quantity.** Ours is the
+  execution-stage episode return. Theirs is labelled "Reward" against simulation steps. The
+  design stages earn nothing, so these should coincide — but "should" is doing work here
+  and it has not been checked against their logging code.
+* **Read by eye.** ~9,000 is a figure reading. It is not 9,000.
+
+The gap is large enough (24%) that none of these plausibly account for it, but the first
+is the cheapest to attack.
+
+Note what the re-run now in flight is and is not. `hopper_gpu.yml` carries `seed: 1`, the
+same as the run it replaces, so it is **a replicate on different hardware, not an
+independent second seed** — the GPU changed, so it will not be bit-identical, but nothing
+about it was deliberately varied. It regenerates the checkpoints the pod destroyed and it
+gives a second point on the curve; it does not give an error bar. A real answer to "is
+M1 met" needs 3-5 seeds run to 1,000 epochs, which at ~16 h each is a two-day commitment
+and a decision for whoever owns the milestone, not a thing to slip in.

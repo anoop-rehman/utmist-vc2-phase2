@@ -64,7 +64,17 @@ def team_eval(env, acs, team_lanes, max_steps=None):
                             else "timeout" if t else "other"] += 1
                 lens.extend(env.last_len[idx].float().cpu().tolist())
     total = max(sum(endings.values()), 1)
-    return {"win_rate": [float(x) for x in np.atleast_1d(env.win_rate())],
+    per_agent = np.atleast_1d(env.win_rate())
+    # `win_rate` is per AGENT, which at 2v2 is the wrong unit: under
+    # goal_credit="team" a team wins when either member crosses, so the number
+    # to compare against the 1v1 control is the per-TEAM sum. Both are
+    # reported -- the split across a team's two agents is exactly the division
+    # of labour 2f is looking for, and averaging it away would hide it.
+    teams = env.team.tolist()
+    per_team = [float(sum(per_agent[i] for i in range(env.n_agents)
+                          if teams[i] == e)) for e in range(2)]
+    return {"win_rate": [float(x) for x in per_agent],
+            "win_rate_team": per_team,
             "len": float(np.mean(lens)) if lens else 0.0,
             "episodes": total,
             **{f"end_{k}": v / total for k, v in endings.items()}}
@@ -167,7 +177,7 @@ def main():
         print(f"  it {it:3d}  fwd {row['fwd_per_step'][0]:+.3f}/"
               f"{row['fwd_per_step'][1]:+.3f}  lag {row['opp_lag']:5.1f}  "
               f"ring {row['ring']}  nan {row['diverged']}"
-              + (f"  | win {[round(x, 3) for x in ev['win_rate']]} "
+              + (f"  | team win {[round(x, 3) for x in ev['win_rate_team']]} "
                  f"goal {ev['end_goal']:.2f} fell {ev['end_fell']:.2f} "
                  f"len {ev['len']:.0f}" if ev else ""), flush=True)
 

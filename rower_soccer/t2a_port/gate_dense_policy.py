@@ -14,7 +14,10 @@ uses. Random inputs of the right shape would pass all three while being wrong.
     .venv-gpu/bin/python /workspace/utmist-vc2-phase2/rower_soccer/t2a_port/gate_dense_policy.py
 """
 
+import argparse
+import glob
 import os
+import re
 import sys
 
 sys.path.append("/workspace/Transform2Act")
@@ -82,13 +85,37 @@ def to_dense(state):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cfg", default="hopper_gpu")
+    ap.add_argument("--checkpoint", default="latest",
+                    help="an epoch number, 'best', or 'latest' (the default): "
+                         "the highest epoch_*.p present")
+    args = ap.parse_args()
+
     torch.set_default_dtype(torch.float64)
-    cfg = Config("hopper_gpu", tmp=False)
+    cfg = Config(args.cfg, tmp=False)
+    # Was hardcoded to 400. That checkpoint died with the pod, and hardcoding
+    # an epoch means the gate is unrunnable for the first 400 epochs of every
+    # re-run -- exactly when you most want to know the port still matches.
+    ckpt = args.checkpoint
+    if ckpt == "latest":
+        eps = sorted(int(m.group(1)) for m in
+                     (re.search(r"epoch_(\d+)\.p$", f) for f in
+                      glob.glob(os.path.join(cfg.model_dir, "epoch_*.p")))
+                     if m)
+        if not eps:
+            raise SystemExit(
+                f"no epoch_*.p under {cfg.model_dir} -- train first, or pass "
+                f"--checkpoint best if best.p exists")
+        ckpt = eps[-1]
+        print(f"checkpoint: latest = epoch {ckpt} (of {len(eps)} present)")
+    elif ckpt != "best":
+        ckpt = int(ckpt)
     np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
     agent = Transform2ActAgent(cfg=cfg, dtype=torch.float64,
                                device=torch.device("cpu"), seed=cfg.seed,
-                               num_threads=1, training=False, checkpoint=400)
+                               num_threads=1, training=False, checkpoint=ckpt)
     theirs = agent.policy_net
     theirs.eval()
 

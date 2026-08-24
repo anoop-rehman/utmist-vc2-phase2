@@ -1029,3 +1029,24 @@ break out. And a scrum is also what a *degenerate* equilibrium looks like — if
 it persists to 200, the honest reading is that `team_first` + `goal_credit=team`
 pays interference well enough that scoring is not worth the risk, which is
 decision 3 of section 9 coming back.
+
+### 11c. Section 8 step 1 re-measured on the regenerated policies
+
+The step-1 falsifier was measured with `m2e_fixed/policies.pt` as it existed on
+the old pod. That file was destroyed; the re-run regenerated it, and it is a
+STRONGER pair (M2E §12: 96.9% against the old 83.9%). So the measurement was
+repeated rather than assumed to carry over.
+
+`probe_2v2 downed`, 256 games per rule, transplanted trained pair:
+
+| | as documented | re-measured |
+|---|---|---|
+| goal rate | 98.0% | **100.0%** (every rule) |
+| episode length | 178.7 | 185.0 |
+| front pair reach rate | 0.38-0.60 | 0.543 / 0.445 |
+| **back pair reach rate** | **0.000-0.005** | **0.0 / 0.027** |
+
+The conclusion is unchanged and now rests on a policy that exists: the task
+survives at four bodies and 8 m, and the back agent is decorative under a
+first-crossing rule. The untrained arm still reads 100% timeout and zero travel,
+so the probe still has a floor.

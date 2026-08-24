@@ -1083,3 +1083,83 @@ and 120 the crossing split reads 50/50, against 0/100 at 60 and 80. That is
 computed over **two crossings in 128 games**. One front and one back agent
 crossing produces exactly 50/50. The split is uninformative at this goal rate
 and should not be quoted until scoring is common enough to divide.
+
+---
+
+## 12. 2f step 6 COMPLETE — 2v2 is solved, and roles emerged
+
+`runs/competevo_port/t2v2_cold`, 200 epochs, cold start, ~2 h. Scored with
+`score_policies.py`, 321 games, mean actions.
+
+| | goal | wipeout | fell | timeout | length | win, per team |
+|---|---|---|---|---|---|---|
+| **2v2 @200** | **96.6%** | 0.3% | 0.0% | 3.1% | 278.6 | [0.430, 0.539] |
+| 1v1 control @200 | 96.9% | — | 2.4% | 0.0% | 179.5 | 0.969 summed |
+
+**The 2v2 task is solved to the same degree as 1v1** — 96.6% against 96.9% —
+on a task with twice the bodies, an 8 m pitch, and an opponent pair actively in
+the way. Episodes take 55% longer (278.6 against 179.5), which is what the
+obstruction costs.
+
+### Section 11d was wrong: the stalemate WAS transitional
+
+§11d recorded 1.6% goals flat across epochs 100 and 120 and concluded "stable,
+not transitional", explicitly rejecting the hope that a breakout was coming. It
+came, between epoch 120 and 174. **That conclusion was drawn from three
+measurements over 60 epochs of a 200-epoch run and it was wrong.** The lesson is
+the ordinary one and worth writing down anyway: a flat stretch in a self-play
+curve is not evidence of convergence, and the 1v1 control's own curve was flat
+from epoch 1 to 74.
+
+### Division of labour emerged — this is the result 2f was for
+
+Crossings, `role_metrics.py`, 256 worlds:
+
+| | transplanted 1v1 pair | epoch 60-80 | **epoch 200** |
+|---|---|---|---|
+| front pair | ~100% | 100% | **64.2%** |
+| **back pair** | **0.0-0.5%** | **0.0%** | **35.8%** |
+
+The back agent was decorative for the first 80 epochs and is now responsible for
+**more than a third of all goals**. Section 8's step-1 falsifier fired against a
+transplanted pair and asked whether training would move it. It does. **Decision
+1 of section 9 is settled in favour of the recommended option:** the sparse team
+reward found a use for the second player without needing a y-gated goal or a
+shorter `back_x`, both of which can now stay in reserve.
+
+### The teammate channel is now the most-attended other-agent input
+
+CPD, std-scaled jitter, at epoch 200 against epoch 120:
+
+| channel group | epoch 120 | **epoch 200** |
+|---|---|---|
+| own state | 0.0407 | 0.0476 |
+| **teammate** | 0.0038 | **0.0075** |
+| role one-hot | 0.0042 | 0.0057 |
+| near opponent | 0.0023 | 0.0045 |
+| far opponent | 0.0036 | 0.0037 |
+
+Teammate influence **doubled** and is now the largest of the three other-agent
+groups, having been the joint-smallest at epoch 120. §11b's "the policy was
+handed teammate position and is declining it" described epoch 80 and does not
+survive to 200 — as §11d already half-conceded when it withdrew the "falling"
+claim. Coordination did develop; it developed late, alongside the breakout.
+
+### What it looks like, and the honest caveat
+
+The clip is NOT four ants running past each other. They still converge into a
+pack by step ~120 — but the pack now **migrates**, travelling to one goal line
+with someone crossing at the end. It is a shoving match with a winner rather
+than a stalemate, and in the recorded episodes the pack drags toward whichever
+side is pushing harder (team B here, 0.589 against 0.377).
+
+So "one defending and one attacking" is not what emerged. What emerged is a
+maul that both teams contest and one wins, with the back agent contributing a
+third of the finishes. Falls are essentially gone (0.23 down events per game
+against 2.5 at epoch 60).
+
+### Still not established
+
+One run, one seed, one config. The `goal_credit="scorer"` ablation is running
+to test whether paying the non-scoring teammate is what produces the pack, and
+that is the single most informative follow-up.

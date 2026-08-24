@@ -323,3 +323,49 @@ mis-specified, and the bar for the released code is ~6,800, not ~9,000.
 Until (2) is done, the alternative reading stays alive: `|Δx|` may simply be an
 easier curriculum that reaches the same gait sooner, in which case the paper's
 ~9,000 is reachable and the gap is ours.
+
+### RESOLVED: equation 17's `|·|` is a write-up error, and the M1 gap is real
+
+`displacement_probe.py`, 12 mean-action episodes each, both at **epoch 50**:
+
+| | signed (released code) | `\|Δx\|` (paper's eq. 17) |
+|---|---|---|
+| `exec_R_eps` (Figure 3's axis) | 1,321 | **3,324** |
+| **net displacement** | **2.57 m** | **0.60 m** |
+| path length | 2.57 m | 18.59 m |
+| **net / path** | **0.999** | **0.032** |
+| net speed | 0.32 m/s | 0.07 m/s |
+
+The signed agent is a **pure runner**: net/path = 0.999, i.e. it essentially
+never steps backward, and its path length equals its displacement to two
+decimals. The `|Δx|` agent **oscillates**: 18.59 m of movement to achieve 0.60 m
+of progress, and it scores 2.5x more reward while travelling **4x less far**.
+
+That is the degenerate solution predicted when the discrepancy was found, and it
+settles which of the two readings is right — **in the opposite direction to the
+hint the reward curves gave.**
+
+**The `|·|` in equation 17 is a write-up error.** The paper's own claims rule out
+the alternative: it reports agents that "look plausible", shows their rendered
+designs, and titles the environment 2D *Locomotion*. A body that vibrates 18 m
+in place to travel 0.6 m is not that, and would not have been showcased. Figure
+3 was produced by the signed code that was released.
+
+**Consequences, and they are not comfortable:**
+
+1. **~9,000 is a real locomotion number and our 6,836 is genuinely short.** M1 is
+   not met, the bar is not mis-specified, and the gap is ours to close.
+2. The previous section's provisional reading — "M1 was never failed, it was
+   mis-specified" — is **withdrawn**. It was based on reward curves, and reward
+   is exactly the quantity that is not comparable across the two forms. This is
+   why the displacement cross-check was written before the reading was believed.
+3. `hopper_gpu_abs` has answered its question at epoch 50 and was stopped rather
+   than run to 300. The flag stays (default off) and the patch stays in
+   `docs/t2a/`, because the measurement is worth being able to repeat.
+
+**A note on the method, since it nearly went the other way.** The reward curves
+said `|Δx|` learns 2.5-6.5x faster and that looked like support for the
+mis-specification reading. It was support for nothing: a reward that pays for
+oscillation is higher on an oscillating agent, which is a tautology, not
+evidence. The number that discriminated was net displacement — chosen because it
+is comparable across both reward forms, which reward is not.

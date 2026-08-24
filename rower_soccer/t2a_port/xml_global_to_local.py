@@ -136,7 +136,80 @@ def _apply_legacy_capsule_mass(root, default_density=1000.0):
     return n
 
 
-def convert(xml_str, legacy_capsule_mass=False):
+
+# ---------------------------------------------------------------------------
+# MuJoCo 2.1's capsule inertial properties, in closed form
+# ---------------------------------------------------------------------------
+# Recovered empirically in `legacy_capsule_fit.py` by sweeping a 49-point
+# (radius x half-length) grid through THEIR compiler and fitting an independent
+# monomial basis. Every coefficient came out a clean rational at ~3e-15 relative
+# error, so this is the formula rather than an approximation to it:
+#
+#     mass  = rho*pi * (2 r^2 h  +  r^3)
+#     I_ax  = rho*pi * (r^4 h  +  r^5 / 2)
+#     I_tr  = rho*pi * (r^4 h  +  2/3 r^2 h^3  +  r^5 / 3  +  r^3 h^2)
+#
+# with r the radius and h the CYLINDER half-length. The mass agrees with
+# "cylinder + 3/4 sphere"; the inertia does not reduce to any single scaling of
+# the correct one, which is why the density trick above leaves it 6.9% out.
+#
+# A capsule is transversely isotropic, so the body-frame tensor is
+#     I = I_ax * u u^T + I_tr * (Id - u u^T)
+# for a unit axis u -- no quaternion needed, and `fullinertia` takes it directly.
+PI = 3.141592653589793
+
+
+def legacy_capsule_inertial(radius, half_len, axis, density=1000.0):
+    """(mass, 3x3 body-frame inertia) as MuJoCo 2.1 would have computed them."""
+    r, h = radius, half_len
+    mass = density * PI * (2 * r * r * h + r ** 3)
+    i_ax = density * PI * (r ** 4 * h + r ** 5 / 2.0)
+    i_tr = density * PI * (r ** 4 * h + 2.0 / 3.0 * r * r * h ** 3
+                           + r ** 5 / 3.0 + r ** 3 * h * h)
+    n = sum(c * c for c in axis) ** 0.5
+    u = [c / n for c in axis]
+    I = [[0.0] * 3 for _ in range(3)]
+    for a in range(3):
+        for b in range(3):
+            I[a][b] = (i_ax - i_tr) * u[a] * u[b] + (i_tr if a == b else 0.0)
+    return mass, I
+
+
+def _apply_legacy_inertial(root, default_density=1000.0):
+    """Give every single-capsule body an explicit <inertial> matching 2.1.
+
+    Explicit beats corrective: with `<inertial>` present the compiler uses it
+    verbatim, so nothing depends on which MuJoCo version does the deriving.
+    """
+    n = 0
+    for body in root.iter("body"):
+        caps = [g for g in body if g.tag == "geom" and g.get("type") == "capsule"]
+        others = [g for g in body if g.tag == "geom" and g.get("type") != "capsule"]
+        if len(caps) != 1 or others:
+            continue            # only the shape their generator actually emits
+        g = caps[0]
+        ft = _vec(g.get("fromto"))
+        r = float(g.get("size").split()[0])
+        axis = [ft[i + 3] - ft[i] for i in range(3)]
+        half = 0.5 * sum(c * c for c in axis) ** 0.5
+        if half <= 0:
+            continue
+        com = [(ft[i] + ft[i + 3]) / 2.0 for i in range(3)]
+        d = g.get("density")
+        rho = float(d) if d is not None else default_density
+        mass, I = legacy_capsule_inertial(r, half, axis, rho)
+        el = ET.Element("inertial")
+        el.set("pos", _fmt(com))
+        el.set("mass", f"{mass:.12g}")
+        el.set("fullinertia", " ".join(
+            f"{v:.12g}" for v in (I[0][0], I[1][1], I[2][2],
+                                  I[0][1], I[0][2], I[1][2])))
+        body.insert(0, el)
+        n += 1
+    return n
+
+
+def convert(xml_str, legacy_capsule_mass=False, legacy_inertial=False):
     """Global-coordinate morphology XML -> local-coordinate equivalent.
 
     `legacy_capsule_mass=True` additionally reproduces MuJoCo 2.1's capsule
@@ -145,7 +218,10 @@ def convert(xml_str, legacy_capsule_mass=False):
     root = ET.fromstring(xml_str)
     comp = root.find("compiler")
     out = copy.deepcopy(root)
-    if legacy_capsule_mass:
+    if legacy_inertial:
+        # Must run on LOCAL geometry, so it is applied after the shift below.
+        pass
+    elif legacy_capsule_mass:
         _apply_legacy_capsule_mass(out)
     if comp is None or comp.get("coordinate") != "global":
         return ET.tostring(out, encoding="unicode")
@@ -159,6 +235,16 @@ def convert(xml_str, legacy_capsule_mass=False):
         for body in list(world):
             if body.tag == "body":
                 _recurse(body, [0.0, 0.0, 0.0])
+    if legacy_inertial:
+        n = _apply_legacy_inertial(out)
+        # WITHOUT THIS THE <inertial> ELEMENTS ARE SILENTLY IGNORED.
+        # Their compiler line says inertiafromgeom="true", which tells MuJoCo
+        # to derive inertia from geoms ALWAYS, overriding an explicit
+        # <inertial>. "auto" uses the explicit one when present and falls back
+        # to geoms otherwise, which is exactly the wanted behaviour.
+        comp_out = out.find("compiler")
+        if comp_out is not None and n:
+            comp_out.set("inertiafromgeom", "auto")
     return ET.tostring(out, encoding="unicode")
 
 

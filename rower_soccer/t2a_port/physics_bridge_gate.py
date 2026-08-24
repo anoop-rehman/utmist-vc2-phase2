@@ -134,10 +134,12 @@ def check(args):
         blob = json.load(f)
     # Their generator emits coordinate="global", which MuJoCo removed in
     # 2.3.3. Convert rather than give up: see xml_global_to_local.
-    local_xml = convert(blob["xml"], legacy_capsule_mass=args.legacy_mass)
+    local_xml = convert(blob["xml"], legacy_capsule_mass=args.legacy_mass,
+                        legacy_inertial=args.legacy_inertial)
     model = mujoco.MjModel.from_xml_string(local_xml)
     data = mujoco.MjData(model)
-    print(f"legacy capsule mass: {'ON' if args.legacy_mass else 'off'}")
+    print(f"legacy: mass={'ON' if args.legacy_mass else 'off'} "
+          f"inertial={'ON' if args.legacy_inertial else 'off'}")
 
     print(f"their model: nq={blob['nq']} nv={blob['nv']} nu={blob['nu']} "
           f"timestep={blob['timestep']}")
@@ -202,6 +204,9 @@ def main():
     p.add_argument("--cfg", default="hopper_gpu")
     p.add_argument("--checkpoint", default="latest")
     p.add_argument("--steps", type=int, default=300)
+    p.add_argument("--legacy-inertial", action="store_true",
+                   help="emit explicit <inertial> from the recovered MuJoCo "
+                        "2.1 closed form -- exact, not corrective")
     p.add_argument("--legacy-mass", action="store_true",
                    help="reproduce MuJoCo 2.1's capsule mass, which is what "
                         "Transform2Act actually trained against")

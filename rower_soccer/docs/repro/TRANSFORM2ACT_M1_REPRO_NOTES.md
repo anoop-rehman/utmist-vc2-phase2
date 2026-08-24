@@ -272,3 +272,54 @@ in both. It is not a demonstration that it caused the gap. Two readings survive:
 be done before anyone spends days chasing the gap. It is not being done here: changing the
 reward mid-flight would invalidate the two seeds now running, whose purpose is to measure
 the spread of THIS code.
+
+### First result: `|Δx|` learns 2.5-6.5x faster, and it is not seed noise
+
+`hopper_gpu_abs` (seed 11, `reward_specs.abs_displacement: true`) against the
+two unmodified seeds, `exec_R_eps` at matched epochs:
+
+| epoch | seed 1 signed | seed 2 signed | **seed 11 \|Δx\|** | ratio |
+|---|---|---|---|---|
+| 10 | 211 | 206 | 272 | 1.3x |
+| 20 | 335 | 311 | 397 | 1.2x |
+| 30 | 371 | 421 | **2,565** | **6.5x** |
+| 40 | 494 | 520 | **2,750** | 5.4x |
+| 50 | 1,314 | 1,357 | **3,344** | 2.5x |
+
+**The two signed seeds agree with each other throughout** — 211/206, 335/311,
+371/421, 494/520, 1,314/1,357, 1,356/1,403 — so Transform2Act's seed variance on
+this task is small and the gap is not sampling. It is the reward form.
+
+**Why the size of the gap matters more than its sign.** `|Δx| ≥ Δx` pointwise,
+so *some* increase is guaranteed by construction. But for an agent that runs
+forward the two are **equal**, because `posafter > posbefore` every step. A
+6.5x gap at epoch 30 therefore is not the same behaviour scored more generously
+— it says the `|Δx|` agent is doing something the signed reward would not pay
+for at all, which is exactly the oscillating-body failure mode predicted above.
+
+Our completed signed run reached 6,836 over 1,000 epochs. The `|Δx|` run is at
+3,344 by **epoch 50**.
+
+### What this does to M1, provisionally
+
+If the `|Δx|` curve continues, the reading that survives is the second of the
+two in the previous section: **Figure 3 was produced with a reward the released
+code does not implement, and our 6,836 was being compared against a number no
+run of this code can reach.** Under that reading M1 was never failed; it was
+mis-specified, and the bar for the released code is ~6,800, not ~9,000.
+
+**This is not yet established.** Three things would settle it, none expensive:
+
+1. **Let `hopper_gpu_abs` reach 300 epochs** (running) and see where it lands
+   relative to the signed seeds at the same epoch. Currently at 56.
+2. **Look at the `|Δx|` agent.** If it evolves a vibrating body with little net
+   displacement, that confirms the mechanism and also says the paper's own
+   number describes an agent that does not locomote. `render` on its checkpoint
+   costs minutes.
+3. **Measure net displacement, not reward.** The honest cross-check is metres
+   travelled per episode, which is comparable across both reward forms and is
+   what "2D Locomotion" is supposed to mean.
+
+Until (2) is done, the alternative reading stays alive: `|Δx|` may simply be an
+easier curriculum that reaches the same gait sooner, in which case the paper's
+~9,000 is reachable and the gap is ours.

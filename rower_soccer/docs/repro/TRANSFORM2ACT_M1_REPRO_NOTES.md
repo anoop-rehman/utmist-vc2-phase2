@@ -198,10 +198,12 @@ the paper's actual curve the run lands *short*.
 
 * **One seed against their several.** Their band is over seeds; ours is a single run and
   has no band at all. The honest comparison is one sample against a distribution.
-* **`exec_R_eps` versus their "Reward" may not be the same quantity.** Ours is the
-  execution-stage episode return. Theirs is labelled "Reward" against simulation steps. The
-  design stages earn nothing, so these should coincide — but "should" is doing work here
-  and it has not been checked against their logging code.
+* ~~**`exec_R_eps` versus their "Reward" may not be the same quantity.**~~
+  **CHECKED, and they do coincide.** `design_opt/utils/logger.py:19-22` accumulates
+  `exec_episode_reward` only on steps where `info['stage'] == 'execution'`, and the two
+  design stages return `reward = 0.0` literally (`design_opt/envs/hopper.py:120` for
+  skeleton_transform, `:140` for attribute_transform). So the execution-stage return IS
+  the whole episode return, and this axis is apples-to-apples. One caveat closed.
 * **Read by eye.** ~9,000 is a figure reading. It is not 9,000.
 
 The gap is large enough (24%) that none of these plausibly account for it, but the first
@@ -214,3 +216,59 @@ about it was deliberately varied. It regenerates the checkpoints the pod destroy
 gives a second point on the curve; it does not give an error bar. A real answer to "is
 M1 met" needs 3-5 seeds run to 1,000 epochs, which at ~16 h each is a two-day commitment
 and a decision for whoever owns the milestone, not a thing to slip in.
+
+
+---
+
+## The released code does not implement the paper's reward (2026-08-24)
+
+Found while closing the `exec_R_eps` caveat above, and it bears directly on the 24% gap.
+
+**The paper, equation 17**, for 2D Locomotion:
+
+> The reward function is defined as `r_t = |p^x_{t+1} − p^x_t| / δt + 1`, where `p^x_t`
+> denotes the x-position of the agent and `δt = 0.008` is the time step. An alive bonus of
+> 1 is also used inside the reward.
+
+Note the **absolute value**.
+
+**The released code**, `design_opt/envs/hopper.py:159-160`:
+
+```python
+reward = (posafter - posbefore) / self.dt
+reward += alive_bonus
+```
+
+There is no `abs`. The same signed form appears in `ant.py:160` and `swimmer.py:158`; no
+env in the repository takes an absolute value of displacement.
+
+`δt` does match: the model timestep is 0.002 (`assets/mujoco_envs/hopper.xml:8`) and
+`self.dt = frame_skip * timestep` with `frame_skip = 4`, so 0.008.
+
+### Why it could matter, and why it might not
+
+Under the paper's `|·|`, motion in EITHER direction is paid, so an agent that oscillates
+rapidly in place accrues reward without net displacement. Under the code's signed form,
+backward motion is penalised and only net forward progress pays. For a converged forward
+runner the two coincide exactly — `posafter > posbefore` every step — so this is **not
+automatically** an explanation for 6,836 against ~9,000.
+
+Where it could bite is the shape of the optimum. A morphology-searching method rewarded on
+`|Δx|` can find a fast-vibrating body that a signed reward would never select, and such a
+body would score far above a runner. That is a plausible route to a materially higher
+curve, and it is exactly the kind of thing Transform2Act's design stage is good at finding.
+
+### What this is and is not
+
+It is a **documented discrepancy between the paper's text and the released code**, verified
+in both. It is not a demonstration that it caused the gap. Two readings survive:
+
+1. The `|·|` is a write-up error and Figure 3 was produced by this code, in which case the
+   gap is real and ours to close.
+2. Figure 3 was produced with `|·|` and the released code differs, in which case our run
+   is being compared against a number no run of this code can reach.
+
+**Distinguishing them is cheap** — add the `abs` and train one hopper seed — and it should
+be done before anyone spends days chasing the gap. It is not being done here: changing the
+reward mid-flight would invalidate the two seeds now running, whose purpose is to measure
+the spread of THIS code.

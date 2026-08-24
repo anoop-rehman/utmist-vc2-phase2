@@ -45,7 +45,8 @@ def team_eval(env, acs, team_lanes, max_steps=None):
     steps = max_steps or env.max_episode_steps
     env.reset_win_stats()
     obs = env.reset()
-    lens, endings = [], {"goal": 0, "fell": 0, "timeout": 0, "other": 0}
+    lens, endings = [], {"goal": 0, "wipeout": 0, "fell": 0,
+                         "timeout": 0, "other": 0}
     with torch.no_grad():
         for _ in range(steps + 2):
             o = obs.float()
@@ -56,12 +57,15 @@ def team_eval(env, acs, team_lanes, max_steps=None):
             obs, _, done, info = env.step(act.to(env.dtype))
             if bool(done.any()):
                 idx = done.nonzero(as_tuple=True)[0]
-                won = info["winner"][idx].any(-1)
-                fell = info["fell"][idx].any(-1)
-                trunc = info["truncated"][idx]
-                for w, f, t in zip(won.tolist(), fell.tolist(), trunc.tolist()):
-                    endings["goal" if w else "fell" if f
-                            else "timeout" if t else "other"] += 1
+                # The env's OWN classification. Re-deriving it from
+                # winner/fell/truncated merges two different endings: under
+                # down_rule="team_down" one agent leaving the standing band
+                # does not end anything, so an episode that timed out with
+                # somebody on the floor is a TIMEOUT, not a fall, and only a
+                # whole team going down is a wipeout.
+                for e in env.last_end[idx].tolist():
+                    endings[{0: "other", 1: "goal", 2: "wipeout",
+                             3: "fell", 4: "timeout"}[e]] += 1
                 lens.extend(env.last_len[idx].float().cpu().tolist())
     total = max(sum(endings.values()), 1)
     per_agent = np.atleast_1d(env.win_rate())
@@ -179,7 +183,7 @@ def main():
               f"{row['fwd_per_step'][1]:+.3f}  lag {row['opp_lag']:5.1f}  "
               f"ring {row['ring']}  nan {row['diverged']}"
               + (f"  | team win {[round(x, 3) for x in ev['win_rate_team']]} "
-                 f"goal {ev['end_goal']:.2f} fell {ev['end_fell']:.2f} "
+                 f"goal {ev['end_goal']:.2f} wipe {ev['end_wipeout']:.2f} "
                  f"len {ev['len']:.0f}" if ev else ""), flush=True)
 
         if args.save_policies_every and (it + 1) % args.save_policies_every == 0:

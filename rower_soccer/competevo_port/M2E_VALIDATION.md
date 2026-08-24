@@ -897,3 +897,64 @@ estimate is ~32 +/- 3, not 34.8 exactly. Single-run figures in sections 7-9
 should be read with that width. It does not move any conclusion here — 83.9% vs
 5.5% is not a 3-point question — but the earlier text quoted four significant
 figures it had not earned.
+
+## 11. What kind of fall? (2026-08-24)
+
+Section 10 closed with the residual: **15.6% of our episodes end in a fall
+against the reference's 1.0%**, and that 14.6-point gap almost exactly accounts
+for the 13-point goal-rate gap. That is a count. Four different causes produce
+it and they want different fixes, so `fall_analysis.py` separates them.
+
+Measured on `policies_ep0140.pt` of the re-run, 512 worlds x 2 agents = 1,024
+agent-episodes, mean actions, 97-99 fallers depending on seed:
+
+```
+PYTHONPATH=. MUJOCO_GL=osmesa .venv/bin/python \
+  -m rower_soccer.competevo_port.fall_analysis \
+  --policies runs/competevo_port/m2e_fixed/policies_ep0140.pt --worlds 512
+```
+
+| question | answer |
+|---|---|
+| **when** | 0% before step 30, 12% by 100, **78% between 100 and 300**, median step 171 |
+| **which bound** | **75.8% collapse** (z < 0.28), 24.2% launched (z > 1.2) |
+| **which body** | largest \|SMD\| 0.401 over 20 genome dims vs a null max of 0.259 — **1.55x, suggestive only** |
+| **contact** | opponent 3.24 m away at the fall vs a 3.54 m all-steps baseline; 11-12% within 1 m — **not collisions** |
+| **speed** | agents that fall later were **slower** over steps 0-100 (+0.884 vs +0.980, 1.9 SE) |
+
+**What this rules out.** Not the spawn and not the design stage — nothing falls
+in the first 30 steps. Not collisions — falls happen at slightly *more* than the
+average opponent distance. Not a speed/stability trade, which was the obvious
+reading of "we travel 4.71 m and they travel 4.02 m": the fallers are the slower
+ants, not the faster ones.
+
+**What is left.** A gait that walks for ~170 steps and then collapses, and it
+happens to the ants that were already moving worse at the start. That is a
+control-stability question, and it is now a specific one.
+
+**One quarter of the falls are LAUNCHES**, which is worth separating out: the
+dev ant terminates on an upper bound too (`dev_ant.py:291`, z > 1.2) and the
+fixed-morph ant has no ceiling. This does not by itself explain the gap against
+their run — their reference is a dev ant with the same ceiling — but 24% of a
+15.6% rate is 3.7 points of episodes ending because an ant went *up*, which is
+a contact-impulse question rather than a balance one.
+
+### A correction, because the first version of this said the opposite
+
+The probe initially reported **100% launches, 0% collapses** — exactly
+inverted. It read torso z *before* `env.step()` and classified a fall that
+`terms()` detected *after* it, so an ant that collapsed during that frame still
+had `z >= 0.28` on the reading and was booked as a launch. `terms()` judges
+post-step z and `step()` then auto-resets the world, so with `auto_reset=True`
+there is no moment at which the deciding height is readable at all.
+
+Fixed by running with `auto_reset=False` and reading z after the step. The
+probe now also counts any fall whose z lands *inside* the band as a probe bug
+and says so in its own output rather than reporting a number.
+
+### Not measured
+
+Whether the reference shows the same profile. That needs their checkpoints,
+which the pod destroyed; their run-to-goal reference is training again as of
+2026-08-24 and reaches the comparable epoch in roughly 15 hours. Until then
+every number here describes our port without a control.

@@ -1163,3 +1163,57 @@ against 2.5 at epoch 60).
 One run, one seed, one config. The `goal_credit="scorer"` ablation is running
 to test whether paying the non-scoring teammate is what produces the pack, and
 that is the single most informative follow-up.
+
+---
+
+## 13. Ablation: `goal_credit` — paying the blocker is what buys coordination
+
+§8 step 8 named this the ablation that "directly tests whether the blocker being
+paid is what makes blocking appear". Same config as §12, 200 epochs, seed 42,
+only `goal_credit` changed from `team` (both members of the scoring team paid
+±GOAL) to `scorer` (only the crosser paid; the teammate gets 0).
+
+| | `team` | `scorer` |
+|---|---|---|
+| goal rate | 96.6% | 98.4% |
+| wipeout | 0.3% | 1.1% |
+| episode length | 278.6 | **231.6** |
+| **back-pair share of crossings** | 35.8% | **48.5%** |
+| **teammate CPD** | **0.0075** | **0.0032** |
+| near-opponent CPD | 0.0045 | 0.0045 |
+| role one-hot CPD | 0.0057 | 0.0059 |
+| team win split | [0.430, 0.539] | [0.738, 0.255] |
+
+### The answer is yes, and the mechanism is visible
+
+Under **`scorer`** each agent races for the line on its own account: scoring is
+faster (231.6 steps against 278.6) and the back agent crosses nearly as often as
+the front (48.5%), because nobody is paid for helping and the only way to earn
+is to arrive.
+
+Under **`team`** the non-scoring teammate is paid too, and the policy attends to
+its teammate **2.4x more** (0.0075 against 0.0032) while episodes run 20%
+longer. The near-opponent and role channels are unchanged between the two, so
+this is specific to the teammate channel and not a general shift in how much the
+policy looks at anything.
+
+**So paying the blocker is what buys the mutual attention.** It also buys slower,
+more contested games. Which is preferable is a choice about what 2f is for: if
+the goal is emergent coordination, `team` is producing it and `scorer` is not;
+if the goal is scoring, `scorer` wins on both rate and speed.
+
+### The caveat is large and it comes from D2
+
+**One run each.** M2E §13 has just established that a single run of this
+codebase can land 13 points from another run of the *same seed*. The 96.6 vs
+98.4 goal difference is **well inside that noise and should not be read as an
+effect at all**. The CPD difference is 2.4x and the length difference 20%, both
+larger, but neither is replicated.
+
+The one thing worth flagging as a possible instability rather than noise:
+`scorer`'s team win split is [0.738, 0.255] against `team`'s [0.430, 0.539].
+One side dominating that heavily is what a co-evolution loop looks like when it
+stops being self-correcting, and it is the reason to replicate this before
+building on it.
+
+**Cost to settle: two more seeds per arm, ~2 h each.**

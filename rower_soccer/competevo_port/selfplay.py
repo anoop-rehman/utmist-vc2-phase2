@@ -106,6 +106,7 @@ assembled action (`tests/test_selfplay.py`, first two checks).
 """
 
 import collections
+import copy
 import math
 
 import numpy as np
@@ -244,15 +245,19 @@ class _LaneEnv:
     is fenced off below.
     """
 
-    def __init__(self, env, n_worlds):
-        self.n, self.n_agents = n_worlds, 1
+    def __init__(self, env, n_worlds, n_lanes=1):
+        # `n_lanes` is the TEAM SIZE: 1 for their two-agent co-evolution, 2 for
+        # 2v2, where one learner owns both of its team's lanes in each of its
+        # worlds. Everything downstream (GAE, the mask, the globally
+        # standardized advantages) already runs per (world, lane).
+        self.n, self.n_agents = n_worlds, n_lanes
         self.obs_dim, self.act_dim = env.obs_dim, env.act_dim
         self.max_episode_steps = env.max_episode_steps
         self._device, self._dtype = env.device, env.dtype
 
     def reset(self):
-        return torch.zeros(self.n, 1, self.obs_dim, device=self._device,
-                           dtype=self._dtype)
+        return torch.zeros(self.n, self.n_agents, self.obs_dim,
+                           device=self._device, dtype=self._dtype)
 
 
 class _LaneLearner(DevSelfPlayPPO):
@@ -282,10 +287,24 @@ class CoEvoPPO:
                  batched_opponents=True,
                  rollout_len=64, seed=0, device="cuda", **ppo_kw):
         assert env.n % 2 == 0, "the ego split needs an even world count"
-        assert env.n_agents == 2, "their co-evolution loop is two-agent"
         self.env, self.device = env, device
         self.T, self.N, self.A = rollout_len, env.n, env.n_agents
         self.n_ego = env.n // 2
+        # TWO SIDES, not two agents. Their loop is two-agent and this was an
+        # assert on that; 2f needs two TEAMS of two, and the generalisation is
+        # that "ego lane e" becomes "the lanes belonging to side e". At two
+        # agents `team_lanes` is [[0], [1]] and every path below is what it
+        # was, which is what `tests/test_selfplay.py` keeps honest.
+        teams = (env.team.tolist() if hasattr(env, "team")
+                 else list(range(self.A)))
+        assert sorted(set(teams)) == [0, 1], (
+            f"co-evolution needs exactly two sides, got teams {teams}")
+        self.team_lanes = [
+            torch.tensor([i for i, t in enumerate(teams) if t == e],
+                         device=env.device, dtype=torch.long)
+            for e in range(2)]
+        self.L = len(self.team_lanes[0])
+        assert self.L == len(self.team_lanes[1]), "sides must be the same size"
         self.blocks = max(int(blocks), 1)
         self.use_opponent_sample = use_opponent_sample
         self.checkpoint_every = max(int(checkpoint_every), 1)
@@ -306,7 +325,7 @@ class CoEvoPPO:
             ac.eval()
 
         self.learners = [
-            _LaneLearner(_LaneEnv(env, self.n_ego), self.acs[e],
+            _LaneLearner(_LaneEnv(env, self.n_ego, self.L), self.acs[e],
                          rollout_len=rollout_len, device=device, **ppo_kw)
             for e in range(2)]
 
@@ -316,10 +335,12 @@ class CoEvoPPO:
         # gradient (all forward passes are under `torch.no_grad`, and their
         # RunningNorm is pinned by `eval()`).
         self.rings = [OpponentRing(ring_capacity, delta) for _ in range(2)]
-        self.opp_nets = [[DevActorCritic(design_dim=env.design_dim,
-                                         sim_obs_dim=env.sim_obs_dim,
-                                         n_motor=env.n_motor).to(device).eval()
-                          for _ in range(self.blocks)] for _ in range(2)]
+        # deepcopy rather than a fresh DevActorCritic: at 2v2 the learners are
+        # `TeamActorCritic`s and an opponent built from the env's dims would be
+        # the wrong width. Copying the thing it must mirror is correct for any
+        # architecture, and the weights are overwritten wholesale below anyway.
+        self.opp_nets = [[copy.deepcopy(self.acs[1 - e]).to(device).eval()
+                          for _ in range(self.blocks)] for e in range(2)]
         for e in range(2):
             for k in range(self.blocks):
                 self.opp_nets[e][k].load_state_dict(self.acs[1 - e].state_dict())
@@ -390,10 +411,15 @@ class CoEvoPPO:
         Running every slot on every row wastes `blocks - 1` of the compute but
         keeps the shapes static (no boolean indexing, no host sync), which on
         this batch size is the cheaper of the two."""
+        # `obs_half` is [M, obs] at one lane per side and [M, L, obs] at more;
+        # a per-world slot applies to every lane of that world, because the
+        # ring holds whole past TEAMS (design doc section 6), so the slot is
+        # broadcast across L rather than drawn per agent.
         slots = self.slot[self.ego_worlds[e]]
         outs = torch.stack([net.act(obs_half, noise=noise)[0]
-                            for net in self.opp_nets[e]])      # [K, M, act]
-        idx = slots.view(1, -1, 1).expand(1, outs.shape[1], outs.shape[2])
+                            for net in self.opp_nets[e]])      # [K, M, (L,) act]
+        idx = slots.view(-1, *([1] * (outs.dim() - 2)))
+        idx = idx.unsqueeze(0).expand(1, *outs.shape[1:])
         return outs.gather(0, idx).squeeze(0)
 
     def _opponent_actions_batched(self, obs, noise=None):
@@ -402,9 +428,21 @@ class CoEvoPPO:
         being lane 1 of the ego-0 worlds and group 1 lane 0 of the ego-1
         worlds. The ego halves are contiguous by construction, so the two
         groups are slices."""
-        M = self.n_ego
-        half = torch.stack([obs[:M, 1], obs[M:, 0]])           # [2, M, obs]
-        return self.opp_stack.act(half, self.slot.view(2, M), noise=noise)
+        M, L = self.n_ego, self.L
+        # [2, M, L, obs] -> [2, M*L, obs]: the stacked actors take one row per
+        # driven agent, and a world's L lanes all run on that world's slot.
+        half = torch.stack([obs[:M][:, self.team_lanes[1]],
+                            obs[M:][:, self.team_lanes[0]]])
+        flat = half.reshape(2, M * L, -1)
+        slot = self.slot.view(2, M, 1).expand(2, M, L).reshape(2, M * L)
+        if noise is not None:
+            # Callers supply lane-shaped noise [2, M, L, d]; the stacked actors
+            # see one row per driven agent, so it flattens exactly as obs does.
+            noise = tuple(z.reshape(2, M * L, z.shape[-1]) for z in noise)
+        # Always [2, M, L, act], including at L = 1. One shape means the
+        # caller's lane assignment is the same expression at both team sizes,
+        # and the reference path below returns the same thing.
+        return self.opp_stack.act(flat, slot, noise=noise).reshape(2, M, L, -1)
 
     def collect(self):
         env, T = self.env, self.T
@@ -421,32 +459,36 @@ class CoEvoPPO:
                               dtype=obs.dtype)
             if self.batched_opponents:
                 opp = self._opponent_actions_batched(obs)
-                act[:self.n_ego, 1] = opp[0]
-                act[self.n_ego:, 0] = opp[1]
+                act[:self.n_ego][:, self.team_lanes[1]] = opp[0]
+                act[self.n_ego:][:, self.team_lanes[0]] = opp[1]
             for e in range(2):
                 w = self.ego_worlds[e]
+                mine, theirs = self.team_lanes[e], self.team_lanes[1 - e]
                 lr = self.learners[e]
-                a, logp, v = lr.ac.act(obs[w, e])
-                act[w, e] = a
+                a, logp, v = lr.ac.act(obs[w][:, mine])
+                act[w.unsqueeze(-1), mine.unsqueeze(0)] = a
                 if not self.batched_opponents:
-                    # The opponent occupies lane 1 - e of the SAME worlds.
-                    act[w, 1 - e] = self._opponent_actions(e, obs[w, 1 - e])
-                lr.obs_buf[t, :, 0] = obs[w, e]
-                lr.act_buf[t, :, 0] = a
-                lr.logp_buf[t, :, 0] = logp
-                lr.val_buf[t, :, 0] = v
+                    # The opponents occupy the OTHER side's lanes of the SAME
+                    # worlds.
+                    act[w.unsqueeze(-1), theirs.unsqueeze(0)] = (
+                        self._opponent_actions(e, obs[w][:, theirs]))
+                lr.obs_buf[t] = obs[w][:, mine]
+                lr.act_buf[t] = a
+                lr.logp_buf[t] = logp
+                lr.val_buf[t] = v
             self._obs, rew, done, info = env.step(act.to(env.dtype))
             term = (~info["terminated"]).float()
             for e in range(2):
-                w = self.ego_worlds[e]
+                w, mine = self.ego_worlds[e], self.team_lanes[e]
                 lr = self.learners[e]
-                r = rew[w, e].float()
+                r = rew[w][:, mine].float()
                 if alphas[e] is not None:
-                    r = (alphas[e] * info["dense"][w, e].float()
-                         + (1.0 - alphas[e]) * info["parse"][w, e].float())
-                lr.rew_buf[t, :, 0] = r
-                lr.mask_buf[t, :, 0] = term[w]
-                self.ep_fwd[e] += float(info["forward"][w, e].mean()) / T
+                    r = (alphas[e] * info["dense"][w][:, mine].float()
+                         + (1.0 - alphas[e]) * info["parse"][w][:, mine].float())
+                lr.rew_buf[t] = r
+                # Termination is per WORLD, so every lane of a world shares it.
+                lr.mask_buf[t] = term[w].unsqueeze(-1).expand(-1, self.L)
+                self.ep_fwd[e] += float(info["forward"][w][:, mine].mean()) / T
             # Their per-episode opponent resample, as an index write: a world
             # that just reset picks a new slot for its next episode.
             if bool(done.any()):
@@ -455,13 +497,15 @@ class CoEvoPPO:
                                               generator=self.gen,
                                               device=env.device)
         for lr in self.learners:
-            lr.total_steps += T * self.n_ego
+            lr.total_steps += T * self.n_ego * self.L
         out = []
         with torch.no_grad():
             obs = self._obs.float()
             for e in range(2):
-                last_v = self.learners[e].ac.value(obs[self.ego_worlds[e], e])
-                out.append(self.learners[e]._gae(last_v.view(self.n_ego, 1)))
+                w, mine = self.ego_worlds[e], self.team_lanes[e]
+                last_v = self.learners[e].ac.value(obs[w][:, mine])
+                out.append(self.learners[e]._gae(
+                    last_v.view(self.n_ego, self.L)))
         return out
 
     def train_iter(self):

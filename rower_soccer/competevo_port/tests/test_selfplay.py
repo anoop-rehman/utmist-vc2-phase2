@@ -621,14 +621,18 @@ def t_batched_equals_per_slot_in_trainer(use_gpu=False):
 
     obs = tr._obs.float()
     M, A = tr.n_ego, env.act_dim
-    eps = (torch.randn(2, M, tr.acs[0].design_dim).to(obs),
-           torch.randn(2, M, tr.acs[0].n_motor).to(obs))
+    # Lane-shaped throughout. At two agents `team_lanes` is [[0], [1]], so
+    # this drives exactly the lanes the two-agent form did; the expression is
+    # what generalised, not the thing being tested.
+    L = tr.L
+    eps = (torch.randn(2, M, L, tr.acs[0].design_dim).to(obs),
+           torch.randn(2, M, L, tr.acs[0].n_motor).to(obs))
     ref = torch.stack([
-        tr._opponent_actions(e, obs[tr.ego_worlds[e], 1 - e],
+        tr._opponent_actions(e, obs[tr.ego_worlds[e]][:, tr.team_lanes[1 - e]],
                              noise=(eps[0][e], eps[1][e])) for e in range(2)])
     got = tr._opponent_actions_batched(obs, noise=eps)
     d = float((got - ref).abs().max())
-    assert got.shape == (2, M, A), f"batched path returned {tuple(got.shape)}"
+    assert got.shape == (2, M, L, A), f"batched path returned {tuple(got.shape)}"
     assert d <= 1e-5, f"CoEvoPPO's two opponent paths differ by {d:.3e}"
 
     # And the two paths drive a whole iteration to the same place when the
@@ -665,13 +669,14 @@ def t_opponent_mixture_unchanged(use_gpu=False):
     got = tr._opponent_actions_batched(obs)[..., -env.n_motor:]
     slots = tr.slot.view(2, tr.n_ego)
     want = (1.0 + 10 * torch.arange(2, device=slots.device).view(2, 1)
-            + slots).to(got.dtype).unsqueeze(-1).expand_as(got)
+            + slots).to(got.dtype).view(2, tr.n_ego, 1, 1).expand_as(got)
     assert torch.allclose(got, want, atol=1e-3), (
         "the batched gather routed a world to the wrong slot: wanted "
         f"{want[0, :4, 0].tolist()}, got {got[0, :4, 0].tolist()}")
     # the per-slot path agrees, on the same slot assignment
-    per = torch.stack([tr._opponent_actions(e, obs[tr.ego_worlds[e], 1 - e])
-                       for e in range(2)])[..., -env.n_motor:]
+    per = torch.stack([
+        tr._opponent_actions(e, obs[tr.ego_worlds[e]][:, tr.team_lanes[1 - e]])
+        for e in range(2)])[..., -env.n_motor:]
     assert torch.allclose(per, want, atol=1e-3), \
         "the per-slot path and the slot table disagree"
 

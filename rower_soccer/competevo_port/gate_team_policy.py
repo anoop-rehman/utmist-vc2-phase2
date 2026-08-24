@@ -165,6 +165,37 @@ def main():
     check("(c) flipping the role one-hot does NOT change it at init",
           d_role == 0.0, f"max |da| = {d_role:.3e}")
 
+    print("\n[4] save/load round trip")
+    # `sim_perm` and `roles` are registered non-persistent, so they are NOT in
+    # the state dict and are rebuilt by __init__ from n_agents. If that ever
+    # drifted, every post-hoc consumer (score_policies, role_metrics,
+    # render_team) would load a policy whose column mapping silently differs
+    # from the one it trained with -- and nothing else here would catch it,
+    # because in-process the buffers are simply the same objects.
+    import io
+    buf = io.BytesIO()
+    torch.save(tac.state_dict(), buf)
+    buf.seek(0)
+    reborn = TeamActorCritic(n_agents=env.n_agents).to(dev)
+    missing, unexpected = reborn.load_state_dict(torch.load(buf))
+    reborn.eval()
+    x = tac.expand_obs(flat56, 0)
+    with torch.no_grad():
+        dd = (tac.mean_action(x) - reborn.mean_action(x)).abs().max().item()
+        dvv = (tac.value(x) - reborn.value(x)).abs().max().item()
+    check("state dict is complete (no missing or unexpected keys)",
+          not missing and not unexpected,
+          f"{len(missing)} missing, {len(unexpected)} unexpected")
+    check("a reloaded policy is identical", dd == 0.0 and dvv == 0.0,
+          f"max |da| {dd:.3e}, |dv| {dvv:.3e}")
+    check("non-persistent buffers rebuild identically",
+          torch.equal(tac.sim_perm, reborn.sim_perm)
+          and torch.equal(tac.roles, reborn.roles))
+    check("RunningNorm statistics survive the round trip",
+          float(reborn.control_norm.n) == float(tac.control_norm.n)
+          and float(reborn.control_norm.n) > 0,
+          f"n = {float(reborn.control_norm.n):.0f}")
+
     n_ok = sum(ok for _, ok, _ in RESULTS)
     print(f"\n{n_ok}/{len(RESULTS)} checks passed")
     if n_ok != len(RESULTS):

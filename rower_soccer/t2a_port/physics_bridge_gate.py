@@ -125,6 +125,55 @@ def emit(args):
           f"nu={nu} frame_skip={blob['frame_skip']} -> {OUT}")
 
 
+DESIGNS = "/tmp/claude-0/-root/453bc0de-a27f-4894-ad03-7d048158ee36/scratchpad/t2a_designs.json"
+
+
+def emit_designs(args):
+    """Dump N SAMPLED morphologies, so the field gate sees real topology
+    variety rather than one design that might happen to be easy."""
+    sys.path.append("/workspace/Transform2Act")
+    os.chdir("/workspace/Transform2Act")
+    import glob
+    import re
+
+    import torch
+    from design_opt.agents.transform2act_agent import (Transform2ActAgent,
+                                                       tensorfy)
+    from design_opt.utils.config import Config
+
+    torch.set_default_dtype(torch.float64)
+    cfg = Config(args.cfg, tmp=False)
+    ckpt = args.checkpoint
+    if ckpt == "latest":
+        eps = sorted(int(m.group(1)) for m in
+                     (re.search(r"epoch_(\d+)\.p$", f)
+                      for f in glob.glob(os.path.join(cfg.model_dir, "epoch_*.p")))
+                     if m)
+        ckpt = eps[-1] if eps else "best"
+    elif ckpt != "best":
+        ckpt = int(ckpt)
+    agent = Transform2ActAgent(cfg=cfg, dtype=torch.float64,
+                               device=torch.device("cpu"), seed=cfg.seed,
+                               num_threads=1, training=False, checkpoint=ckpt)
+    env, policy = agent.env, agent.policy_net
+    policy.eval()
+    xmls = []
+    with torch.no_grad():
+        for _ in range(args.designs):
+            state = env.reset()
+            while True:
+                # SAMPLED, not mean: the mean-action design is one morphology
+                # and the census showed sampling gives 8 distinct topologies.
+                a = policy.select_action(tensorfy([state]), False).numpy().astype(np.float64)
+                state, _, _, info = env.step(a)
+                if info.get("stage") == "execution":
+                    break
+            xmls.append(env.cur_xml_str)
+    with open(DESIGNS, "w") as f:
+        json.dump(xmls, f)
+    print(f"emitted {len(xmls)} sampled morphologies -> {DESIGNS}")
+
+
 def check(args):
     import mujoco
 
@@ -204,6 +253,8 @@ def main():
     p.add_argument("--cfg", default="hopper_gpu")
     p.add_argument("--checkpoint", default="latest")
     p.add_argument("--steps", type=int, default=300)
+    p.add_argument("--emit-designs", action="store_true")
+    p.add_argument("--designs", type=int, default=25)
     p.add_argument("--legacy-inertial", action="store_true",
                    help="emit explicit <inertial> from the recovered MuJoCo "
                         "2.1 closed form -- exact, not corrective")
@@ -211,7 +262,9 @@ def main():
                    help="reproduce MuJoCo 2.1's capsule mass, which is what "
                         "Transform2Act actually trained against")
     args = p.parse_args()
-    if args.emit:
+    if args.emit_designs:
+        emit_designs(args)
+    elif args.emit:
         emit(args)
     elif args.check:
         check(args)

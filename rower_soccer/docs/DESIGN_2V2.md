@@ -1050,3 +1050,36 @@ The conclusion is unchanged and now rests on a policy that exists: the task
 survives at four bodies and 8 m, and the back agent is decorative under a
 first-crossing rule. The untrained arm still reads 100% timeout and zero travel,
 so the probe still has a floor.
+
+### 11d. Epochs 100 and 120: a stable stalemate, and two claims withdrawn
+
+| epoch | goal | wipeout | timeout |
+|---|---|---|---|
+| 60 | 0.8% | 66.4% | 32.8% |
+| 80 | 1.6% | 7.8% | 90.6% |
+| 100 | 1.6% | 1.6% | 96.9% |
+| 120 | 1.6% | 1.6% | 96.9% |
+
+**The stalemate is stable, not transitional.** Goal rate has sat at 1.6% for
+three consecutive measurements 20 epochs apart while wipeouts decayed to
+nothing. The hope in §11b — that this was the phase before someone breaks out,
+as the 1v1 control did at ~90-120 — is not supported at 120. The 1v1 control
+was at 0.114 by epoch 90 and climbing; this is flat.
+
+The agents are also getting spatially closer, not further apart: mean root x
+spans 3.9 m at epoch 80 (−2.39 to +1.47) and 2.4 m at 120 (−1.37 to +1.01).
+The scrum is tightening.
+
+**Withdrawn: "teammate influence is falling."** Across four checkpoints the
+teammate CPD reads 0.0052, 0.0035, 0.0036, 0.0038 — it dropped once and then
+flattened, and the far opponent went the other way (0.0058 → 0.0036) over the
+same span. Two points looked like a trend; four do not. There is no direction
+here, only noise, and the honest statement is the weaker one: **teammate,
+near-opponent and far-opponent influence are all of the same small size, and
+all are ~10x below the agent's own state.**
+
+**Not a finding: "the back agent now takes 50% of crossings."** At epochs 100
+and 120 the crossing split reads 50/50, against 0/100 at 60 and 80. That is
+computed over **two crossings in 128 games**. One front and one back agent
+crossing produces exactly 50/50. The split is uninformative at this goal rate
+and should not be quoted until scoring is common enough to divide.

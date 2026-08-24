@@ -895,3 +895,91 @@ demand: `--break bitmask`, `--break nomask`, `--break payslacker` in the gate,
 and `probe_2v2 credit --break-restore`, which moves `cross/own` from
 **8.5e−4 to 1.03** — i.e. with the restore broken, resampling one agent's action
 appears to move its distant teammate's own reward by as much as its own.
+
+---
+
+## 11. First training results (2026-08-24) — and a correction to how they were read
+
+`runs/competevo_port/t2v2_cold`: step 6, cold start, 512 worlds, 200 epochs, the
+config M2E validated. `runs/competevo_port/m2e_fixed` is the 1v1 control.
+
+### The logged goal rate is not the goal rate
+
+`train_team_selfplay`'s per-iteration eval reported "goal 0.595" at epoch 59.
+**That number is wipeouts.** Its classifier derived the ending from
+`info["winner"]`, and under `down_rule="team_down"` the env sets `winner` on a
+wipeout as well as on a crossing (`team_env.py:226`,
+`winner = torch.where(fire, (~lose), winner)`). So "one team knocked the other
+team over" was being counted as a goal.
+
+Fixed to use the env's own `last_end`; the run in flight predates the fix, so
+**`end_goal` and `end_fell` in that log.json are not to be quoted.**
+`score_policies.py` and `role_metrics.py` read `last_end` and are authoritative.
+
+### What actually happened
+
+Measured with `role_metrics.py`, 192-241 games, mean actions:
+
+| epoch | goal | wipeout | timeout | down events per game |
+|---|---|---|---|---|
+| 60 | 0.8% | **66.4%** | 32.8% | 2.5 |
+| 80 | 1.6% | 7.8% | 90.6% | 0.95 |
+
+The apparent "collapse from 59.5% to 7.8%" was the **wipeout rate** falling.
+What the agents learned between epochs 60 and 80 is to STAY UP: down events per
+game drop 2.5 → 0.95, wipeouts 66% → 8%, and episodes lengthen back toward the
+timeout because nothing ends them early any more.
+
+Real scoring is 0.8% → 1.6%. **The 1v1 control is at 1.5% at epoch 80** and did
+not take off until ~90-120, so 2v2 is neither ahead nor behind — it is at the
+same place on a slower clock.
+
+### The back agent is still a spectator, and this is now a training result
+
+**Back pair: 0.0% of all crossings, at both epochs.** The design doc's step-1
+falsifier measured 0.000-0.005 for a transplanted 1v1 pair and asked whether
+training would move it. Through 80 epochs of native 2v2 training, it has not.
+
+It is not that the back agent does nothing — its mean root x moves off the goal
+line (agent 3: +4.0 at spawn, +1.47 by epoch 80) so it does advance. It simply
+never arrives first.
+
+**This re-opens decision 1 of section 9.** The options were: accept interference
+as the back agent's only value (recommended, and what this run tests), a y-gated
+goal, or a shorter `back_x`. The evidence so far says the recommended option
+leaves the second player decorative on the scoring metric. It does not yet say
+interference is absent — see the CPD below — and 200 epochs is early.
+
+### The role one-hot is used; the teammate channel is not
+
+Counterfactual policy divergence, identical jitter per channel group, so only
+the ratio means anything:
+
+| channel group | epoch 60 | epoch 80 |
+|---|---|---|
+| own state | 0.0540 | 0.0603 |
+| **role one-hot** | **0.0107** | **0.0111** |
+| far opponent | 0.0063 | 0.0058 |
+| teammate | 0.0040 | 0.0025 |
+| near opponent | 0.0020 | 0.0024 |
+
+Two things, and the second is the interesting one:
+
+* **The role one-hot is the most-used input after the agent's own state** — 2
+  columns carrying more influence than the 6 columns of other-agent positions
+  combined. One policy per team really is producing two differentiated agents,
+  which is what section 5 recommended and it is working.
+* **The teammate channel is the LEAST used of the three other-agent groups, and
+  it fell between epochs 60 and 80** (0.0040 → 0.0025), while the far opponent
+  stayed roughly four times higher. The policy was handed teammate position and
+  is declining it. On this evidence there is no coordination yet — the division
+  of labour is coming from the static role bit, not from watching each other.
+
+That is a negative result about coordination and a positive one about roles, and
+they are separable because the two channels were measured apart.
+
+### Not measured yet
+
+The run is unfinished. Everything above is epoch 60-80 of 200. Topple
+attribution stays uninformative at these counts (2-3 credited events), and no
+render of a trained team has been looked at yet.

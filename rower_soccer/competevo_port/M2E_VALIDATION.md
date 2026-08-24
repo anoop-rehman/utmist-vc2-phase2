@@ -1027,3 +1027,29 @@ the obvious next measurement.
 is training again as of 2026-08-24 and reaches epoch 200 in roughly 15 hours,
 which will give a like-for-like their-side number measured by the same tool
 rather than a remembered one.
+
+### 12b. Matched-epoch comparison against a LIVE reference
+
+Their reference is training again, so for the first time both sides can be
+measured at the same epoch by tools that each use that side's own ending
+semantics (`score_policies.py` for ours, `reference_endings.py` for theirs).
+
+| epoch 60 | goal | fell | timeout | mean length |
+|---|---|---|---|---|
+| ours | 0.0% | **100.0%** | 0.0% | 45.4 |
+| theirs | 0.0% | **100.0%** | 0.0% | 59.2 |
+
+At epoch 50 theirs is 0% / 95% / 5%, length 133.
+
+**Both runs fall on essentially every episode at epoch 60.** Whatever else is
+true, "our ants fall over and theirs do not" is not a property of the two
+implementations — it is a property of where each run is on its own curve. Their
+reference passes through the same phase.
+
+Ours fall sooner (45.4 steps against 59.2, ~24% shorter), which is a real
+difference and the only one visible at this point. One run each, so it is a
+single observation, not a rate.
+
+The comparison that matters is at epoch 200, where §12 puts ours at 96.9% / 2.4%
+against the remembered 96.9% / 1.0%. Their run reaches it in roughly 5 hours and
+the same two tools will produce both numbers.

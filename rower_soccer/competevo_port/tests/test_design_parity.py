@@ -98,11 +98,7 @@ def query_their_dev(payload, timeout=1200):
     proc = subprocess.run([parity.THEIR_PYTHON, DRIVER],
                           input=json.dumps(payload), capture_output=True,
                           text=True, timeout=timeout, cwd="/workspace/competevo")
-    if proc.returncode != 0 or "@@JSON@@" not in proc.stdout:
-        raise RuntimeError("their_dev_driver failed:\n"
-                           f"stdout tail:\n{proc.stdout[-2000:]}\n"
-                           f"stderr tail:\n{proc.stderr[-2000:]}")
-    return json.loads(proc.stdout.split("@@JSON@@", 1)[1])
+    return parity._decode_driver_reply(proc, "their_dev_driver")
 
 
 def random_designs(n, seed=0, n_agents=2):

@@ -18,6 +18,7 @@ delta separately, as a diagnostic.
 import json
 import os
 import subprocess
+import sys
 
 import numpy as np
 import torch
@@ -81,16 +82,52 @@ def random_states(n, seed=0, nq=30, nv=28, n_agents=2, contact=False):
     return cases
 
 
+
+def _decode_driver_reply(proc, name):
+    """Their driver's JSON, tolerating a crash that happens AFTER it is written.
+
+    On the 2026-08-24 pod rebuild their venv started aborting at interpreter
+    teardown -- `free(): invalid pointer`, SIGABRT, returncode -6 -- with the
+    complete reply already on stdout. That is a C-level double-free somewhere
+    in the mujoco/gymnasium/torch teardown on this box, not a parity failure,
+    and treating it as one silently disables four cross-checks against their
+    code, which is the last thing this file should do.
+
+    So the contract is "a COMPLETE, PARSEABLE reply", not "exit 0":
+
+      * no marker, or JSON that does not parse -> failure, as before. That is
+        what a crash MID-computation looks like, and it is not tolerated.
+      * a complete reply plus death by signal -> accepted, and WARNED about on
+        stderr every single time, because a silently tolerated crash is how a
+        real failure hides.
+      * a complete reply plus a positive exit code -> failure. Their driver
+        exits 0 on success, so a nonzero one means it decided something went
+        wrong, and it is entitled to be believed.
+    """
+    tail = (f"stdout tail:\n{proc.stdout[-2000:]}\n"
+            f"stderr tail:\n{proc.stderr[-2000:]}")
+    if "@@JSON@@" not in proc.stdout:
+        raise RuntimeError(f"{name} failed (no reply):\n{tail}")
+    try:
+        reply = json.loads(proc.stdout.split("@@JSON@@", 1)[1])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{name} reply is truncated ({exc}):\n{tail}")
+    if proc.returncode > 0:
+        raise RuntimeError(f"{name} exited {proc.returncode}:\n{tail}")
+    if proc.returncode < 0:
+        print(f"  WARNING: {name} produced a complete reply and then died with "
+              f"signal {-proc.returncode} at teardown. Reply used; the crash "
+              f"is an environment artefact, not a parity result.",
+              file=sys.stderr)
+    return reply
+
+
 def query_their_env(payload, timeout=600):
     """Run the driver in their venv and return its JSON reply."""
     proc = subprocess.run([THEIR_PYTHON, DRIVER], input=json.dumps(payload),
                           capture_output=True, text=True, timeout=timeout,
                           cwd="/workspace/competevo")
-    if proc.returncode != 0 or "@@JSON@@" not in proc.stdout:
-        raise RuntimeError("their_env_driver failed:\n"
-                           f"stdout tail:\n{proc.stdout[-2000:]}\n"
-                           f"stderr tail:\n{proc.stderr[-2000:]}")
-    return json.loads(proc.stdout.split("@@JSON@@", 1)[1])
+    return _decode_driver_reply(proc, "their_env_driver")
 
 
 def evaluate_ours(cases, env):

@@ -290,6 +290,15 @@ class CoEvoPPO:
         self.env, self.device = env, device
         self.T, self.N, self.A = rollout_len, env.n, env.n_agents
         self.n_ego = env.n // 2
+        # Measured 2026-08-24, against the pre-generalisation file extracted
+        # from commit 90c0bba: at L = 1 this code is BIT-IDENTICAL to the
+        # two-agent version it replaced -- 0.000e+00 over every rollout buffer
+        # (obs, act, logp, val, rew, mask) and both learners' GAE outputs,
+        # given matched env state and a matched global RNG. So a 1v1 run under
+        # this file is directly comparable to one under the old one, which is
+        # what makes the seed-to-seed spread in M2E section 12 a statement
+        # about the port rather than about this refactor.
+        #
         # TWO SIDES, not two agents. Their loop is two-agent and this was an
         # assert on that; 2f needs two TEAMS of two, and the generalisation is
         # that "ego lane e" becomes "the lanes belonging to side e". At two

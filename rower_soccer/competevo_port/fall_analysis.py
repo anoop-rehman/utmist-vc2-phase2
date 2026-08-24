@@ -79,6 +79,13 @@ def main():
     fell_dist = torch.zeros(n, A, device=device)
     ended = torch.zeros(n, dtype=torch.bool, device=device)
     n_unexplained = 0
+    # Forward-progress reward accumulated over an EARLY window that closes
+    # before almost any fall happens. Comparing speed over each agent's own
+    # lifetime would be confounded: fallers have shorter lifetimes by
+    # definition. A fixed early window asks the predictive question instead --
+    # does how fast you move at the start say whether you go down later?
+    EARLY = 100
+    early_fwd = torch.zeros(n, A, device=device)
     design = env.scale.clone()                 # [n, A, 20], fixed after step 1
     all_dists = []
 
@@ -109,6 +116,8 @@ def main():
                 unexplained = newly & (z >= STAND_Z_MIN) & (z <= STAND_Z_MAX)
                 n_unexplained += int(unexplained.sum())
                 fell_dist = torch.where(newly, d.unsqueeze(-1), fell_dist)
+            if t < EARLY:
+                early_fwd += info["forward"].float() * (~ended).unsqueeze(-1)
             ended |= done
             if bool(ended.all()):
                 break
@@ -180,6 +189,26 @@ def main():
                         "clears the floor -- worth a targeted look"))
     else:
         print("    one of the two populations is too small to compare")
+
+    print(f"\n-- 5. EARLY SPEED (steps 0-{EARLY}) vs falling LATER")
+    ef = (early_fwd / EARLY).reshape(-1).cpu().numpy()
+    late = (fa.reshape(-1) >= EARLY)
+    never = ~flat_fell
+    if late.sum() > 1 and never.sum() > 1:
+        a_, b_ = ef[late], ef[never]
+        se_ = np.sqrt(a_.var() / len(a_) + b_.var() / len(b_)) + 1e-12
+        print(f"    fell after step {EARLY} (n={late.sum():4d}): "
+              f"mean early forward reward {a_.mean():+.4f}")
+        print(f"    never fell          (n={never.sum():4d}): "
+              f"mean early forward reward {b_.mean():+.4f}")
+        print(f"    difference {a_.mean() - b_.mean():+.4f}, "
+              f"{abs(a_.mean() - b_.mean()) / se_:.1f} SE")
+        print("    Motivation: M2E section 10 records our ants travelling "
+              "4.71 m against the reference's 4.02 m AND falling 15.6% "
+              "against 1.0%. If speed buys instability, that is one fact, "
+              "not two.")
+    else:
+        print("    too few in one group to compare")
 
     print("\n-- 4. OPPONENT DISTANCE at the moment of the fall")
     dd = fd.reshape(-1)[flat_fell]

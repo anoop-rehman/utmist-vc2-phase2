@@ -65,14 +65,15 @@ def team_eval(env, acs, team_lanes, max_steps=None):
                 lens.extend(env.last_len[idx].float().cpu().tolist())
     total = max(sum(endings.values()), 1)
     per_agent = np.atleast_1d(env.win_rate())
-    # `win_rate` is per AGENT, which at 2v2 is the wrong unit: under
-    # goal_credit="team" a team wins when either member crosses, so the number
-    # to compare against the 1v1 control is the per-TEAM sum. Both are
-    # reported -- the split across a team's two agents is exactly the division
-    # of labour 2f is looking for, and averaging it away would hide it.
-    teams = env.team.tolist()
-    per_team = [float(sum(per_agent[i] for i in range(env.n_agents)
-                          if teams[i] == e)) for e in range(2)]
+    # NOT the sum. Under win_rule="team_first" the env sets
+    # `winner = mine & one_team`, marking BOTH members of the scoring team, so
+    # summing a team's agents double-counts and a team that wins every game
+    # would report 2.0. `team_win_rate` divides by team size, which is the
+    # per-team probability of winning and the number the 1v1 control compares
+    # against. Per-agent is kept alongside it because the split within a team
+    # is the division of labour 2f is looking for -- but at team_first that
+    # split is about who CROSSED, which `reached` tracks, not `winner`.
+    per_team = [float(x) for x in np.atleast_1d(env.team_win_rate())]
     return {"win_rate": [float(x) for x in per_agent],
             "win_rate_team": per_team,
             "len": float(np.mean(lens)) if lens else 0.0,

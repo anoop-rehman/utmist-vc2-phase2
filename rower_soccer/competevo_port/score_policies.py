@@ -117,10 +117,12 @@ def main():
           f"of {env.max_episode_steps}")
     print(f"    win rate per agent  {[round(float(x), 3) for x in per_agent]}")
     if args.kind == "2v2":
-        teams = env.team.tolist()
-        pt = [round(float(sum(per_agent[i] for i in range(env.n_agents)
-                              if teams[i] == e)), 3) for e in range(2)]
-        print(f"    win rate per TEAM   {pt}   (sum {sum(pt):.3f})")
+        # env.team_win_rate(), not a sum over the team's agents: `team_first`
+        # marks BOTH members of the scoring team as winners, so the sum
+        # double-counts and would top out at 2.0.
+        pt = [round(float(x), 3) for x in np.atleast_1d(env.team_win_rate())]
+        print(f"    win rate per TEAM   {pt}   (total {sum(pt):.3f} "
+              f"of 1.0 -- the rest are draws and timeouts)")
     else:
         print(f"    win rate summed     {float(per_agent.sum()):.3f}")
     # A goal and a fall in the same episode means the two categories are not

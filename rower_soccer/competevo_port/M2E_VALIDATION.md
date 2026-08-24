@@ -1053,3 +1053,68 @@ single observation, not a rate.
 The comparison that matters is at epoch 200, where §12 puts ours at 96.9% / 2.4%
 against the remembered 96.9% / 1.0%. Their run reaches it in roughly 5 hours and
 the same two tools will produce both numbers.
+
+## 13. Settled: three seeds each side, and the port is at parity (2026-08-24)
+
+§12 met the gate on one run and flagged the real question: the same code and
+seed gave 83.9% on the old pod and 96.9% here, so was 96.9% reliable or lucky?
+Two more seeds were run to find out, and their reference was re-trained to give
+a live number instead of a remembered one.
+
+### Ours — three seeds, tight
+
+`score_policies.py`, 384 worlds, mean actions, 751-1,045 games each:
+
+| run | goal | fell | timeout | length | win, summed |
+|---|---|---|---|---|---|
+| seed 42 | 96.9% | 2.4% | 0.0% | 179.5 | 0.969 |
+| seed 43 | 95.1% | 4.1% | 0.0% | 209.3 | 0.951 |
+| seed 44 | 96.7% | 1.5% | 0.0% | 164.2 | 0.967 |
+| **mean** | **96.2%** | **2.7%** | 0.0% | 184.3 | **0.962** |
+| *old pod, seed 42* | *83.9%* | *15.6%* | *0.0%* | *175.7* | *0.839* |
+
+**Range 1.8 points across three seeds.** The port reaches ~96% reliably; the old
+pod's 83.9% is the outlier, not this. §12's worry is resolved in the direction
+that makes the port look better, and §12's caution against quoting 96.9% without
+83.9% beside it can be relaxed to: **96.2 ± 1.0 over three seeds**.
+
+### Theirs — the live run says 94.4%, not the remembered 96.9%
+
+`reference_endings.py`, their venv, their env, their policies, 288 games:
+
+| | goal | fell | timeout | length |
+|---|---|---|---|---|
+| theirs @200, **live run** | **94.4%** | **5.6%** | 0.0% | 160.4 |
+| theirs @200, remembered (§9) | 96.9% | 1.0% | 0.0% | 170.0 |
+
+**The reference varies too.** 96.9/1.0 was one run of their code; this is
+another, and it is 2.5 points lower with 5.6x the falls. Every comparison in
+§5-§11 treated 96.9/1.0 as a fixed property of their implementation. It is not.
+
+### The comparison, finally like-for-like
+
+| | goal | fell | length |
+|---|---|---|---|
+| **ours, 3 seeds** | **96.2%** | **2.7%** | 184.3 |
+| **theirs, 1 live run** | **94.4%** | **5.6%** | 160.4 |
+
+**Our port scores higher than their reference run and falls half as often.** On
+the evidence available the two are indistinguishable — three runs against one is
+not a basis for claiming ours is better, and the honest statement is *parity*.
+
+**The fall gap is gone, and it was never what it looked like.** §10 recorded
+15.6% against 1.0% and §11 spent a probe characterising it. The truth is that
+our 15.6% was one unlucky run and their 1.0% was one lucky one; at three seeds
+against one, ours fall *less*. The D2 residual is closed — not by fixing
+anything, but by measuring enough runs to see there was nothing there.
+
+### What is still one-sided
+
+Three seeds of ours against one of theirs. Their run costs ~7 h of CPU per seed
+and two more would make the comparison symmetric. Nothing in this section needs
+it — the claim is parity, and parity is what one run of theirs already supports
+— but a claim that ours is *better* would.
+
+Also: their win split at epoch 200 is [0.212, 0.733], strongly asymmetric.
+§9 already retired "agent 0 never wins" as a mid-training transient; this is a
+second run showing the asymmetry is real, large, and not fixed to one agent.

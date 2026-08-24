@@ -950,33 +950,46 @@ goal, or a shorter `back_x`. The evidence so far says the recommended option
 leaves the second player decorative on the scoring metric. It does not yet say
 interference is absent — see the CPD below — and 200 epochs is early.
 
-### The role one-hot is used; the teammate channel is not
+### What the policy actually attends to (corrected)
 
-Counterfactual policy divergence, identical jitter per channel group, so only
-the ratio means anything:
+Counterfactual policy divergence, each channel group perturbed by **one
+standard deviation of that channel**, taken from the policy's own
+`control_norm` statistics:
 
 | channel group | epoch 60 | epoch 80 |
 |---|---|---|
-| own state | 0.0540 | 0.0603 |
-| **role one-hot** | **0.0107** | **0.0111** |
-| far opponent | 0.0063 | 0.0058 |
-| teammate | 0.0040 | 0.0025 |
-| near opponent | 0.0020 | 0.0024 |
+| own state | 0.0373 | 0.0407 |
+| far opponent | 0.0057 | 0.0058 |
+| role one-hot | 0.0051 | 0.0053 |
+| teammate | 0.0052 | **0.0035** |
+| near opponent | 0.0017 | 0.0025 |
 
-Two things, and the second is the interesting one:
+**This table replaces a wrong one.** The first version perturbed every group by
+the same ABSOLUTE jitter. The policy whitens its input by the running std, and
+those stds are not equal — 0.5 for the role one-hot against ~0.85-1.75 for the
+position channels — so a fixed jitter handed the role bit roughly twice the
+normalised perturbation of everything it was being compared against. It scored
+0.0111 and ranked second; scaled properly it scores 0.0053 and ranks third.
+Two claims made on the bad table do not survive:
 
-* **The role one-hot is the most-used input after the agent's own state** — 2
-  columns carrying more influence than the 6 columns of other-agent positions
-  combined. One policy per team really is producing two differentiated agents,
-  which is what section 5 recommended and it is working.
-* **The teammate channel is the LEAST used of the three other-agent groups, and
-  it fell between epochs 60 and 80** (0.0040 → 0.0025), while the far opponent
-  stayed roughly four times higher. The policy was handed teammate position and
-  is declining it. On this evidence there is no coordination yet — the division
-  of labour is coming from the static role bit, not from watching each other.
+* ~~"the role one-hot is the most-used input after the agent's own state"~~ —
+  it is comparable to the far opponent, not above it.
+* ~~"the teammate channel is the least used of the three"~~ — the NEAR opponent
+  is, at both epochs.
 
-That is a negative result about coordination and a positive one about roles, and
-they are separable because the two channels were measured apart.
+What does survive, and it is the thing worth watching:
+
+* **Own state dominates by ~7x.** At 80 epochs this is still mostly a
+  locomotion policy that happens to have other agents in its observation.
+* **Teammate influence is FALLING** — 0.0052 to 0.0035 over those 20 epochs,
+  the only group that moved down, while the near opponent rose 0.0017 to
+  0.0025. The policy is being handed teammate position and is progressively
+  attending to it less. On this evidence there is no coordination developing.
+* The role one-hot is used at all, which is what section 5 needed: one policy
+  per team is producing two differentiated agents rather than the same agent
+  twice.
+
+Two epochs of one run. The direction is a hint, not a trend.
 
 ### Not measured yet
 

@@ -154,10 +154,16 @@ def cpd(acs, driver, env, lanes, device, n_states=512, jitter=1.0, seed=0):
     with torch.no_grad():
         ref = ac.mean_action(x)
         out = {}
+        # The control head's normalizer holds the per-column statistics, and
+        # its columns are the sim block -- the observation minus the leading
+        # [flag | scale]. Scale each group's jitter by its own std so every
+        # group gets the same perturbation IN THE UNITS THE NETWORK SEES.
+        std = ac.control_norm.var.sqrt().to(x)
         for name, (a, b) in groups.items():
             xp = x.clone()
-            noise = torch.randn(xp.shape[0], b - a, generator=g).to(xp) * jitter
-            xp[..., a:b] = xp[..., a:b] + noise
+            col = std[a - base_slice:b - base_slice]
+            noise = torch.randn(xp.shape[0], b - a, generator=g).to(xp)
+            xp[..., a:b] = xp[..., a:b] + noise * col * jitter
             out[name] = float((ac.mean_action(xp) - ref).abs().mean())
     return out
 

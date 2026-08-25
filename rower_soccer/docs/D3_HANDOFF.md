@@ -265,3 +265,36 @@ Cheap to test once the seeds land: one more seed at `--num_threads 32`,
 everything else identical. If it reproduces ~6,800 while 16 and 24 reach higher,
 the mechanism is confirmed and every previous Transform2Act number here needs
 its thread count recorded beside it.
+
+#### Correction: the lead is real but narrowing, and "M1 may flip" was overstated
+
+The comparison above quoted SINGLE epochs of the new seeds against the old run's
+100-epoch BLOCK MEANS. That is not like-for-like: per-epoch variance here is
+enormous (seed 2 goes 6,098 at epoch 300, 2,958 at 400, 6,562 at 437, 3,852 at
+445; over epochs 300+ its sd is 1,202 and its minimum is 860). Comparing a noisy
+point against a smoothed one is how the earlier claim got its size.
+
+Block means, like for like:
+
+| block | seed 1 | seed 2 | old run |
+|---|---|---|---|
+| 0-99 | 902 | 930 | 858 |
+| 100-199 | 2,330 | 2,413 | 1,529 |
+| 200-299 | 4,403 | 4,701 | 2,500 |
+| 300-399 | 5,177 | 5,695 | 3,366 |
+| 400-499 | 5,625 | 5,837 | 4,382 |
+
+**The lead survives the correction** — the new seeds are ahead in every block —
+**but it is shrinking**: 1.5x, 1.8x, 1.6x, 1.3x. And the shapes differ. The old
+run was still climbing steeply at 400-499 (4,382, on its way to 6,836 by epoch
+1,000); the new seeds are flattening (5,177 -> 5,625).
+
+So the honest projection is **not** "these are heading for ~9,300". It is "these
+converge sooner, to somewhere plausibly in the 6,000-7,000 region" — which would
+land near the old run's 6,836 and leave **M1 still not met**. The `num_threads`
+hypothesis, if it holds, would then explain a difference in *convergence speed*
+rather than in *final performance*, which is a much less interesting result and
+does not rescue the gap.
+
+Do not restate M1 until epoch 1,000. But the earlier note's framing — that a
+reversal was likely — was built on a bad comparison and should not be relied on.

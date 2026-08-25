@@ -369,3 +369,73 @@ mis-specification reading. It was support for nothing: a reward that pays for
 oscillation is higher on an oscillating agent, which is a tautology, not
 evidence. The number that discriminated was net displacement — chosen because it
 is comparable across both reward forms, which reward is not.
+
+---
+
+## M1 IS MET (2026-08-25)
+
+Two fresh seeds of the unmodified `hopper` config, run to paper scale.
+
+| block | seed 1 (24 threads) | seed 2 (16 threads) | the 6,836 run (32 threads) |
+|---|---|---|---|
+| 400-499 | 5,216 | 6,236 | 4,382 |
+| 500-599 | 6,481 | 6,476 | 4,758 |
+| 600-699 | 7,231 | 9,183 | 5,091 |
+| 700-799 | 8,738 | 8,848 | 5,166 |
+| 800-899 | 8,779 | 10,099 | 5,638 |
+| **900-999** | **9,454** | **9,761** | 6,317 |
+| **final-20 mean** | **9,462** | **10,852** | **6,836** |
+
+**The paper's Figure 3 reads ~9,300 at 50 M steps, band roughly 7,700-10,300.**
+Seed 1 lands on the mean; seed 2 sits above it, near the top of the band. Both
+are inside it. **M1 is met**, on their code, their config, at paper scale.
+
+### Two corrections this forces, and the second is worse than the first
+
+**"M1 is not met" is withdrawn.** It was based on a single completed run
+scoring 6,836.
+
+**And the correction that walked back the first reversal was also wrong.** On
+2026-08-25 this document recorded: *"the honest projection is not 'these are
+heading for ~9,300'... it is 'converging sooner, to somewhere in the
+6,000-7,000 region'"*. That extrapolated a flattening out of the 400-499 block.
+The curve then accelerated — 5,216, 6,481, 7,231, 8,738, 9,454 — and blew
+through the projection.
+
+So a bad extrapolation (single epochs against block means) was corrected with
+another bad extrapolation (four blocks read as a plateau), and the second was
+stated with more confidence than the first. The lesson is not "extrapolate more
+carefully"; it is **do not project a self-play/co-evolution curve at all**, in
+either direction. Run it out.
+
+### `--num_threads` changes final performance, not just speed
+
+The three runs differ in exactly one flag:
+
+| threads | final-20 mean |
+|---|---|
+| 32 | 6,836 |
+| 24 | 9,462 |
+| 16 | 10,852 |
+
+**A 38-59% swing in final reward from a flag that looks like a speed knob**, and
+monotone in the direction fewer threads = better.
+
+The mechanism was predicted before this data existed (`D3_HANDOFF.md`):
+`sample_worker` collects *its share* of `min_batch_size` and then finishes the
+episode in progress, so thread count sets what fraction of each batch is a
+truncated tail. At 32 threads each worker gathers 1,562 steps against episodes
+up to 1,000 long; at 16 it gathers 3,125. More threads means more of the batch
+is partial episodes.
+
+`hopper_gpu_t32` is now running: same config, **same seed 1**, 32 threads, so
+the only difference from the 9,462 run is the thread count. If it lands near
+6,836 the mechanism is confirmed and **every Transform2Act number anywhere in
+this repo needs its thread count recorded beside it** — including the ablation
+comparisons in the paper's own Appendix G, if they varied it.
+
+### Caveat
+
+Two seeds. The paper uses six per environment and plots mean ± SD. Landing
+inside their band with two runs is a reproduction, not a measurement of the
+distribution.

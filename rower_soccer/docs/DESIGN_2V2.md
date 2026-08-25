@@ -1217,3 +1217,66 @@ stops being self-correcting, and it is the reason to replicate this before
 building on it.
 
 **Cost to settle: two more seeds per arm, ~2 h each.**
+
+---
+
+## 14. The `goal_credit` ablation, replicated three seeds per arm
+
+§13 drew its conclusions from one run per arm and flagged that as the problem.
+Two more seeds per arm now exist. Scored with `score_policies.py`, 192 worlds.
+
+| arm | seed 42 | seed 43 | seed 44 | mean | range |
+|---|---|---|---|---|---|
+| `team` | 94.2% | **47.9%** | 98.6% | 80.2% | **50.7 pts** |
+| `scorer` | 99.7% | 86.6% | 92.5% | 92.9% | 13.1 pts |
+
+**§13's goal-rate comparison does not survive.** It read 96.6 against 98.4 and
+called the difference "well inside the noise"; the noise turns out to be a
+**50.7-point** within-arm range. `team` seed 43 finished at 47.9% with mean
+episode length 428.9 — it never left the stalemate §11d described, while its
+siblings solved the task. One configuration, three seeds, and the outcome is
+bimodal.
+
+That is the headline about this codebase, not about the ablation: **a single 2v2
+run tells you almost nothing.** M2E §13 measured a 13-point spread at 1v1; at
+2v2 it is four times worse.
+
+### What does survive: teammate attention, weakly
+
+| arm | seed 42 | seed 43 | seed 44 | mean |
+|---|---|---|---|---|
+| `team` teammate CPD | 0.00656 | 0.00436 | 0.00602 | **0.00565** |
+| `scorer` teammate CPD | 0.00298 | 0.00468 | 0.00415 | **0.00394** |
+
+The direction holds in the means and `team` is higher, but the **effect is 1.4x,
+not the 2.4x** a single run suggested, and the two sets overlap (`team`'s
+minimum 0.00436 sits below `scorer`'s maximum 0.00468). By rank sum that is
+p ≈ 0.10 one-sided at n = 3 — **suggestive, not established**. "Paying the
+blocker buys coordination" is still the best guess and is still not a result.
+
+### What is now solid: the back agent is a real player
+
+Back-pair share of all crossings, six independent runs:
+
+| | s42 | s43 | s44 |
+|---|---|---|---|
+| `team` | 34.5% | 70.8% | 63.1% |
+| `scorer` | 49.7% | 52.4% | 59.0% |
+
+**Mean 54.9%, and above 34% in every single run.** Against the transplanted
+1v1 pair's 0.000-0.005 and the 0.0% at epochs 60-80 of training, this is the
+one 2f finding that replication makes *stronger* rather than weaker. In four of
+six runs the back agent scores more than half its team's goals.
+
+Section 8's step-1 falsifier is fully answered: the second player is not
+decorative, the sparse team reward does find a use for it, and neither the
+y-gated goal nor a shorter `back_x` is needed.
+
+### Consequence for how 2f gets measured from here
+
+Nothing about a 2v2 configuration should be claimed from fewer than three
+seeds, and differences smaller than ~15 points of goal rate are not
+measurable at that sample size. The ablations still queued in §8 step 8
+(`down_rule`, `delta`, shared-vs-summed reward, spawn randomisation) each need
+three seeds per arm — roughly 2.5 h per run — or they will produce exactly the
+kind of number this section just had to withdraw.

@@ -413,3 +413,107 @@ shows it is not a bug to be fixed. So:
   seeds, comparing distributions** -- a single matched run proves nothing in
   either direction.
 * **Do not chase the residual.** Every settable option is already matched.
+
+## 14. Built and gated: the batched execution env (3d step 4)
+
+`t2a_port/batched_exec_env.py` is their execution stage on batched physics, one
+topology, N worlds. `gate_batched_exec.py` gates it against their live env in
+two venvs, the way the bridge does. **11/11 on both backends.**
+
+### The method: gate at THEIR states, not on THEIR trajectories
+
+Section 13 measured that the two MuJoCo builds cannot be made to agree
+step-for-step and that no settable option closes the gap. So every exact check
+here feeds **their recorded qpos/qvel** into our env and compares what our
+pipeline computes from it. Observation, reward and done are pure functions of
+state, so those comparisons are exact and any difference is a real defect rather
+than integrator drift.
+
+| check | fp64 CPU backend | fp32 warp backend |
+|---|---|---|
+| `attr_fixed`, `body_index` | 0.000e+00 | 0.000e+00 |
+| observation, 400 states | **0.000e+00** | 4.75e-07 |
+| reward, 400 steps | **0.000e+00** | 2.10e-04 |
+| done, 400 steps | 0 disagreements | 0 disagreements |
+| 32 identical worlds, one step | 0.000e+00 | 2.83e-06 |
+
+### The three things a port of this env gets wrong, and the controls that catch them
+
+Documented at the top of `batched_exec_env.py`. Each has a negative control in
+the gate, because a check that cannot fail proves nothing:
+
+1. **The root node's sim block is FLIPPED** -- `[ang, height, ang_vel, z_vel,
+   x_vel]`, from `np.flip(qpos[1:3])` and `np.flip(qvel[:3])`, and it is the
+   *second and third* qpos entries. Every other node is `[q, 0, v, 0, 0]`.
+   Control: un-flipping it moves the observation by **1.260e+00**.
+2. **`clip_qvel` is observation-only.** Control: the clip binds on **592** of
+   the reference entries (max |qvel| = 61.78), so a port that skipped it or
+   applied it to the physics would be caught.
+3. **Actuators resolve BY NAME.** On `hopper_gpu_s2` name-order and body-order
+   coincide, so the direct check cannot catch an index-order port -- the gate
+   says so out loud. Control: reversing the map moves qpos by **5.79e-03**.
+
+### Closed loop is where the port is actually validated
+
+Open-loop replay of their actions into our sim is the worst case and is NOT
+gated: a hopper is unstable, nothing closes the loop on our state, and our copy
+falls (final rootz 0.21, theirs 1.41) while theirs runs on. That is chaos, not a
+defect, so the gate prints it as a measurement.
+
+The real check is our env driven by our dense policy (itself 0.0 against theirs,
+section 12), compared against their episode **distribution**:
+
+| | theirs (20 eps) | ours, fp64 CPU (32) | ours, fp32 warp (64) |
+|---|---|---|---|
+| episode length | 928.4 +/- 51.5 | 922.5 +/- 62.7 | 918.1 +/- 54.2 |
+| **return** | **11,397.6 +/- 848.2** | **11,301.9 +/- 1033.4** | **11,199.5 +/- 884.5** |
+| return SMD vs theirs | -- | **-0.099** | **-0.225** |
+
+Both inside |SMD| < 0.8. For scale, section 11's M1 finding is that *seed alone*
+spreads final return ~30% on this task, so an SMD of -0.2 is well under the
+noise the task already has.
+
+### Two precision findings
+
+**`mujoco_warp` is fp32; Transform2Act is fp64 throughout.** This is a genuine
+port property, not a setting. Consequences:
+
+* **The reward amplifies fp32 error 125x.** `reward = (posafter - posbefore)/dt`
+  with `dt = 0.008` is a cancellation of two nearby fp32 positions divided by a
+  small number, and its absolute error grows with distance travelled --
+  `ulp(25 m) ~ 2e-6`, `ulp(100 m) ~ 8e-6`. Measured 2.10e-04 at ~25 m. The gate
+  therefore derives its reward tolerance as `pos_tol / dt` from the mechanism
+  rather than loosening a constant until it passes. Over a full episode the
+  signs are uncorrelated, so the return error is ~0.04 against a return of
+  11,400 and does not matter *yet*; on a task with longer travel it would, and
+  the fix is to re-origin the root x periodically rather than to switch dtype.
+* **"Identical worlds stay identical" is the wrong invariant.** 32 worlds set to
+  the same state diverge by 1.5e-08 after one step (one fp32 ulp) and by ~1e+01
+  after 400 -- doubling every few steps. Asserting on the rollout spread is
+  asserting that a chaotic system is not chaotic. The gate checks the
+  **one-step** spread, which is what a port can actually guarantee.
+
+### Throughput
+
+Measured **while the GPU was shared with two live training runs**, so these are
+contended numbers and a floor, not a benchmark.
+
+| | env only | + policy |
+|---|---|---|
+| 64 worlds | 1,361 /s | -- |
+| 256 worlds | 4,908 /s | -- |
+| 1,024 worlds | 16,497 /s | 11,543 /s |
+| 4,096 worlds | -- | **39,378 /s** |
+
+Theirs, like for like (`T_sample` includes policy inference): 57,344 steps in
+19.13 s at 16 threads = **~3,000 steps/s**. So **~13x** with the policy in the
+loop at 4,096 worlds, still scaling near-linearly and not saturated. Compare the
+CompetEvo port's ~3x end-to-end -- that one was bounded by the update, and this
+number is sampling only, so it is not yet an end-to-end claim.
+
+### What step 4 does NOT do
+
+One topology, shared across every world. Per-world *attributes* are plumbed
+(`batched_fields` reaches `CompeteWarpDevBackend`'s per-world model arrays, and
+`xml_to_fields.py` computes the values without compiling), but nothing yet
+groups worlds by topology or writes those fields -- that is step 5.

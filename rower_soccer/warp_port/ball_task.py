@@ -130,6 +130,9 @@ class SegmentedBallTask:
         self.ball_spawn_xy = torch.zeros(n, 2, device=dev)
         self.seg_t, self.seg_best, self.credit = z(), z(), z()
         self.touched, self.banked, self.seg_reset = b(), b(), b()
+        # Cumulative since reset_stats(); see _close_segments.
+        self.seg_started = 0.0
+        self.seg_started_flat = 0.0
         # Worlds the divergence sanitizer teleported. _sanitize runs BEFORE
         # _update_task, which then overwrites seg_reset, so the flag has to be
         # parked here and folded in when the segment bookkeeping runs -- else a
@@ -204,6 +207,30 @@ class SegmentedBallTask:
         self.credit_count += pay.float()
         return pay
 
+    @property
+    def flat_start_frac(self):
+        """Share of segments that began with the creature already down.
+
+        The quantity DRILL_V4_NOTES section 22 identified as the actual cause
+        of the kick plateau. Returns nan before any segment has closed, rather
+        than 0.0, so an empty window is not mistaken for a perfect one.
+        """
+        if self.seg_started <= 0:
+            return float("nan")
+        return self.seg_started_flat / self.seg_started
+
+    def take_flat_start_frac(self):
+        """`flat_start_frac` for the window since the last call, then reset.
+
+        Windowed on purpose. A cumulative average over a billion steps barely
+        moves when the gait changes, which is the opposite of what a leading
+        indicator is for.
+        """
+        v = self.flat_start_frac
+        self.seg_started = 0.0
+        self.seg_started_flat = 0.0
+        return v
+
     def _close_segments(self, end):
         """Restart the segment in every world flagged in `end`."""
         self.seg_reset = end | self._pending_reset
@@ -212,6 +239,17 @@ class SegmentedBallTask:
             return
         idx = end.nonzero(as_tuple=True)[0]
         self.n_segments[idx] += 1.0
+        # THE LEADING INDICATOR (DRILL_V4_NOTES section 22). A segment inherits
+        # the creature's pose, and one that starts with upright < 0.30 scores
+        # 0.117 -- the do-nothing floor -- against 0.450 for one that starts
+        # standing. 49.5% of segments started flat in the run that plateaued.
+        # Sampled HERE because this is the instant before `_spawn_worlds`, so
+        # it is the posture carried IN, which is the quantity that predicts the
+        # outcome (r = +0.674). Fitness takes ~100M steps to move; this moves
+        # in ~10M, which is what makes a screening run cheap.
+        u = upright(self)[idx]
+        self.seg_started += float(idx.numel())
+        self.seg_started_flat += float((u < 0.30).sum())
         self._spawn_worlds(idx)
         self._reset_segments(idx)
         # qpos was written directly; xpos/sensordata are stale until forward().

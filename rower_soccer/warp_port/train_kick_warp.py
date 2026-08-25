@@ -527,6 +527,14 @@ def run(args, task, make_env_fn, make_eval_fn):
                 extra += f" anchor={anchor:.2f}m"
             # diverged: world-steps whose physics went non-finite (ppo.collect).
             # Expected 0 or a trickle; if it climbs the contact model is wrong.
+            # The leading indicator: share of segments that began with the
+            # creature already down. DRILL_V4_NOTES section 22 measured 49.5%
+            # on the run that plateaued, and 0.117 arrival for those segments
+            # against a 0.115 do-nothing floor. It responds ~10x sooner than
+            # fitness, which is what makes a screen affordable.
+            flat = (env.take_flat_start_frac()
+                    if hasattr(env, "take_flat_start_frac") else float("nan"))
+            extra += f" flat_start={flat:.1%}"
             print(f"[monitor] step={trainer.total_steps:,}/{args.steps:,} "
                   f"({100*trainer.total_steps/args.steps:.1f}%) fps={fps:,.0f} fps_now={fps_now:,.0f} "
                   f"eta={eta_min:.1f}min ep_rew={stats['ep_rew_env_mean']:.1f} "
@@ -542,7 +550,8 @@ def run(args, task, make_env_fn, make_eval_fn):
                        "train/fitness": fit,
                        "train/strikes_per_ep": strikes,
                        "train/entropy": stats["ent"], "train/std": stats["std"],
-                       "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"]}
+                       "train/pg_loss": stats["pg"], "train/vf_loss": stats["vf"],
+                       "train/flat_start_frac": flat}
                 if hasattr(env, "goals"):
                     log["train/goals_per_ep"] = float(env.goals.mean())
                 if anchor is not None:

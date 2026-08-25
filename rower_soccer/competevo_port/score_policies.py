@@ -51,12 +51,21 @@ def load(kind, path, n_agents, device):
             ac.load_state_dict(blob[key])
             out.append(ac.to(device).eval())
         return out
-    from rower_soccer.competevo_port.team_policy import TeamActorCritic
+    from rower_soccer.competevo_port.team_policy import (ROLE_DIM,
+                                                          TeamActorCritic)
+    # Infer role_in_design from the checkpoint rather than requiring a flag.
+    # Constructing the wrong variant fails on load with a shape mismatch, and
+    # a scorer that needs to be told which variant it is being handed is a
+    # scorer that will silently be pointed at the wrong one.
+    probe = TeamActorCritic(n_agents=n_agents)
+    want = blob["ac_0"]["scale_norm.mean"].numel()
+    role = want == probe.scale_norm.mean.numel() + ROLE_DIM
     out = []
     for key in ("ac_0", "ac_1"):
-        ac = TeamActorCritic(n_agents=n_agents)
+        ac = TeamActorCritic(n_agents=n_agents, role_in_design=role)
         ac.load_state_dict(blob[key])
         out.append(ac.to(device).eval())
+    print(f"  (role_in_design={role}, inferred from the checkpoint)")
     return out
 
 

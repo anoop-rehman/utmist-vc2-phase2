@@ -1280,3 +1280,62 @@ measurable at that sample size. The ablations still queued in §8 step 8
 (`down_rule`, `delta`, shared-vs-summed reward, spawn randomisation) each need
 three seeds per arm — roughly 2.5 h per run — or they will produce exactly the
 kind of number this section just had to withdraw.
+
+---
+
+## 15. 2g: morphological specialisation appears the moment the design head can see the role
+
+§12 found the 2v2 run evolved bodies but that front and back converged on the
+*same* one (SMD 0.052). §14 showed the roles were behavioural. The obstacle was
+never the environment — `self.scale` is `[n, n_agents, 20]`, so two bodies on a
+team have always been representable — it was that the design head reads only the
+scale vector and is blind to which agent it is designing for.
+
+`--role-in-design` widens its input by the role one-hot. Three seeds per arm,
+200 epochs, everything else identical. Largest per-dimension standardised
+difference between front and back genomes, 256 worlds:
+
+| | seed 42 | seed 43 | seed 44 | mean |
+|---|---|---|---|---|
+| role hidden (2f) | 0.112 | 0.101 | 0.118 | **0.110** |
+| **role visible (2g)** | **0.873** | **0.716** | **0.909** | **0.833** |
+
+**7.6x, with no overlap** — the largest role-hidden value (0.118) is far below
+the smallest role-visible one (0.716). At n = 3 per arm with complete
+separation this is the strongest separation the sample size admits.
+
+**And it costs nothing.** Goal rate, same protocol:
+
+| | s42 | s43 | s44 | mean |
+|---|---|---|---|---|
+| role hidden | 94.2% | 47.9% | 98.6% | 80.2% |
+| role visible | 55.9% | 99.7% | 98.2% | 84.6% |
+
+Indistinguishable, and both arms carry the same one bimodal seed that §14
+documented. Specialisation is free.
+
+### What specialised, and what did not
+
+Mass barely moved: 0.961 kg front against 0.947 kg back, a 1.5% difference,
+where the SMD on individual genome dimensions reaches 0.9. So the two roles did
+**not** diverge into a big agent and a small one — they diverged in *shape*, at
+roughly equal mass. Which genome dimensions carry it, and what the two bodies
+actually look like, is the obvious next question and is not answered here.
+
+### Why this matters beyond 2f
+
+`PLAN_D3_TRANSFORM2ACT.md` motivates the whole Transform2Act track on the
+premise that *"CompeteEvo's evolved morphologies stay within their creature
+class"* and that open-ended skeleton search is what would be needed to get
+genuinely different bodies for different roles. That premise is now partly
+wrong: CompetEvo's design space **does** produce role-specialised bodies, once
+the design policy is allowed to condition on the role. The specialisation is
+within a fixed skeleton — same four legs, same joints — so Transform2Act is
+still the only route to *topological* difference. But the cheap version of the
+heterogeneous-team goal turns out to be one extra input, not a new paper.
+
+### Caveat
+
+One measurement, at one checkpoint per seed, of the mean-action design. The
+per-world genome spread is ~0.22, so a distributional comparison (not just
+means) would be a stronger form of this result.

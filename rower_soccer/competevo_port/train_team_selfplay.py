@@ -106,6 +106,12 @@ def main():
     p.add_argument("--down-rule", default="team_down")
     p.add_argument("--win-rule", default="team_first")
     p.add_argument("--goal-credit", default="team")
+    p.add_argument("--role-in-design", action="store_true",
+                   help="let the DESIGN head see the role one-hot. Off, both "
+                        "teammates run the same function of the same random "
+                        "draw and converge on the same body (measured: 0.052 "
+                        "SMD). This is the smallest change that makes "
+                        "morphological specialisation expressible.")
     p.add_argument("--warm-start", default=None,
                    help="a 1v1 policies.pt; ac_0/ac_1 widen into the two team "
                         "nets. Legal because team_policy orders opp_near first")
@@ -135,10 +141,13 @@ def main():
         for key in ("ac_0", "ac_1"):
             src = DevActorCritic()
             src.load_state_dict(blob[key])
-            acs.append(widen_from_1v1(src, n_agents=env.n_agents))
+            acs.append(widen_from_1v1(src, n_agents=env.n_agents,
+                                      role_in_design=args.role_in_design))
         print(f"warm start from {args.warm_start}")
     else:
-        acs = [TeamActorCritic(n_agents=env.n_agents) for _ in range(2)]
+        acs = [TeamActorCritic(n_agents=env.n_agents,
+                               role_in_design=args.role_in_design)
+               for _ in range(2)]
 
     # The wrapper presents the POLICY's 58-dim observation; every consumer --
     # the trainer, the opponent stack, the evaluator -- must see the same one,

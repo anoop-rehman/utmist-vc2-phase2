@@ -196,6 +196,60 @@ def main():
           and float(reborn.control_norm.n) > 0,
           f"n = {float(reborn.control_norm.n):.0f}")
 
+    print("\n[5] role_in_design -- the 2g plumbing")
+    # The claim being tested by the 2g experiment is that the design head
+    # CANNOT currently see the role. Both halves of that need checking: that it
+    # cannot when the flag is off, and that it can when the flag is on.
+    torch.manual_seed(7)
+    off = TeamActorCritic(n_agents=env.n_agents).to(dev).eval()
+    torch.manual_seed(7)
+    on = TeamActorCritic(n_agents=env.n_agents,
+                         role_in_design=True).to(dev).eval()
+    xf = off.expand_obs(flat56, 0)          # front role
+    xb = off.expand_obs(flat56, 2)          # back role, same states
+    D = off.design_dim
+    with torch.no_grad():
+        # Compare the DESIGN block only; the control block legitimately differs
+        # because the control head has always seen the role.
+        d_off = (off.mean_action(xf)[..., :D]
+                 - off.mean_action(xb)[..., :D]).abs().max().item()
+        d_on = (on.mean_action(xf)[..., :D]
+                - on.mean_action(xb)[..., :D]).abs().max().item()
+    check("flag OFF: the design head is blind to the role", d_off == 0.0,
+          f"max |d design| = {d_off:.3e}")
+    check("flag ON: the design head responds to the role", d_on > 1e-6,
+          f"max |d design| = {d_on:.3e}")
+    check("the design head widened by exactly ROLE_DIM",
+          on.scale_norm.mean.numel() == off.scale_norm.mean.numel() + ROLE_DIM,
+          f"{off.scale_norm.mean.numel()} -> {on.scale_norm.mean.numel()}")
+
+    # And a warm start into the role-aware net must STILL reproduce the 1v1
+    # policy: the new columns start at zero, so it begins life ignoring the
+    # role and has to learn to use it.
+    tac_r = widen_from_1v1(ac1, n_agents=env.n_agents,
+                           role_in_design=True).to(dev).eval()
+    worst = 0.0
+    for ai in range(env.n_agents):
+        x = tac_r.expand_obs(flat56, ai)
+        with torch.no_grad():
+            worst = max(worst, (tac_r.mean_action(x)
+                                - ac1.mean_action(one_v_one_view(x)))
+                        .abs().max().item())
+    # NOT exact-zero, and the reason was measured rather than assumed. The
+    # role-aware design head is a k=22 matmul where the 1v1 one is k=20, and
+    # cuBLAS splits those reductions differently, so the zeroed role columns
+    # contribute 0.0 in exact arithmetic but shift the rounding. Isolated by
+    # device and dtype:
+    #     cpu  fp32 0.0        cpu  fp64 1.1e-16
+    #     cuda fp32 1.0e-07    cuda fp64 0.0
+    # fp64 on the same device is exact, which is what says the weights are
+    # right and only the accumulation order differs. The control head's
+    # widening (k=31 -> 37) happens to reassociate identically and stays at
+    # 0.0 in section [2]; this one does not.
+    check("a role-aware warm start still reproduces the 1v1 net",
+          worst < 1e-6, f"max |da| = {worst:.3e} (fp32 reassociation; "
+                        f"exactly 0 in fp64)")
+
     n_ok = sum(ok for _, ok, _ in RESULTS)
     print(f"\n{n_ok}/{len(RESULTS)} checks passed")
     if n_ok != len(RESULTS):

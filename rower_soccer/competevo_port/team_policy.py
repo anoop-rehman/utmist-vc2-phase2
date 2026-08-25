@@ -91,13 +91,32 @@ class TeamActorCritic(DevActorCritic):
     unchanged, because the widening is entirely in the input width.
     """
 
-    def __init__(self, n_agents=4, design_dim=20, n_motor=8, **kw):
+    def __init__(self, n_agents=4, design_dim=20, n_motor=8,
+                 role_in_design=False, scale_hidden=(64, 64), **kw):
         n_others = n_agents - 1
         self.n_agents = n_agents
+        self.role_in_design = bool(role_in_design)
         self.env_sim_dim = OWN_DIM + 2 * n_others
         super().__init__(design_dim=design_dim,
                          sim_obs_dim=self.env_sim_dim + ROLE_DIM,
-                         n_motor=n_motor, **kw)
+                         n_motor=n_motor, scale_hidden=scale_hidden, **kw)
+        if self.role_in_design:
+            # THE 2g EXPERIMENT, in two lines. `self.scale` is already
+            # per-agent, so the env can carry two different bodies on a team --
+            # what stops it is that the design head sees ONLY the scale vector
+            # (design doc section 5: "the design head cannot see the world at
+            # all"). Both teammates therefore run the same function of the same
+            # random draw and converge on the same body, which is exactly what
+            # was measured: front-vs-back SMD 0.052, masses 0.974 vs 0.973 kg.
+            #
+            # Widening the design head's INPUT by the role one-hot is the
+            # smallest change that makes morphological specialisation
+            # expressible. It does not make it happen -- that is the question.
+            import torch.nn as _nn
+            from rower_soccer.competevo_port.ppo import RunningNorm, _mlp
+            self.scale_norm = RunningNorm(design_dim + ROLE_DIM)
+            self.scale_mlp, _d = _mlp(design_dim + ROLE_DIM, scale_hidden)
+            assert isinstance(self.scale_mean, _nn.Linear)
         perm = others_permutation(n_agents)
         # Column indices into the env's sim block, in policy order.
         cols = list(range(OWN_DIM))
@@ -107,6 +126,26 @@ class TeamActorCritic(DevActorCritic):
                              persistent=False)
         roles = torch.stack([role_onehot(i, n_agents) for i in range(n_agents)])
         self.register_buffer("roles", roles, persistent=False)
+
+    def dists(self, obs):
+        """As `DevActorCritic.dists`, but the design head may also see the role.
+
+        Only the design head changes; the control head and critic already see
+        the role because it is part of the observation they consume.
+        """
+        if not self.role_in_design:
+            return super().dists(obs)
+        import torch.distributions as D
+        from rower_soccer.competevo_port.dev_ppo import SCALE_STD_DIVISOR
+        obs = self._clean(obs)
+        scale = obs[..., 1:1 + self.design_dim]
+        sim = obs[..., 1 + self.design_dim:]
+        role = obs[..., -ROLE_DIM:]
+        s_in = torch.cat([scale, role], dim=-1)
+        s_mean = self.scale_mean(self.scale_mlp(self.scale_norm(s_in)))
+        c_mean = self.control_mean(self.control_mlp(self.control_norm(sim)))
+        return (D.Normal(s_mean, self.scale_log_std.exp() / SCALE_STD_DIVISOR),
+                D.Normal(c_mean, self.control_log_std.exp()))
 
     def expand_obs(self, obs, agent_idx):
         """Env observation `[..., 56]` for one agent -> policy input `[..., 58]`.
@@ -170,8 +209,19 @@ def widen_from_1v1(ac, n_agents=4, **kw):
     # The design head is untouched -- it reads only the scale vector, whose
     # width does not change with the number of agents (doc §5: the design head
     # cannot see the world at all).
-    out.scale_norm.load_state_dict(ac.scale_norm.state_dict())
-    out.scale_mlp.load_state_dict(ac.scale_mlp.state_dict())
+    if getattr(out, "role_in_design", False):
+        # Same leading-columns-copy as the control head: the role bit is
+        # appended after the scale vector, so a 1v1 net's weights are a prefix
+        # and the new columns start at zero -- the widened net begins life
+        # ignoring the role exactly.
+        _widen_norm(out.scale_norm, ac.scale_norm)
+        _widen_linear(out.scale_mlp[0], ac.scale_mlp[0])
+        for d, s_ in zip(list(out.scale_mlp)[1:], list(ac.scale_mlp)[1:]):
+            if isinstance(d, nn.Linear):
+                d.load_state_dict(s_.state_dict())
+    else:
+        out.scale_norm.load_state_dict(ac.scale_norm.state_dict())
+        out.scale_mlp.load_state_dict(ac.scale_mlp.state_dict())
     out.scale_mean.load_state_dict(ac.scale_mean.state_dict())
     with torch.no_grad():
         out.scale_log_std.copy_(ac.scale_log_std)

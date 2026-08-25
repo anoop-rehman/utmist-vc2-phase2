@@ -360,6 +360,22 @@ class CoEvoPPO:
         # `opp_nets` stays the source of truth (it is what `resample_opponents`
         # loads into and what the gate inspects); the stack is re-synced from it
         # at the top of every rollout, so it can never be stale.
+        # StackedDevActors is a hand-stacked mirror of DevActorCritic's action
+        # path, and it slices the design head's input at `design_dim`. A
+        # role-aware design head reads `design_dim + ROLE_DIM`, so the mirror
+        # is silently the wrong shape -- it fails loudly here (20 vs 22) but
+        # would be far worse if it broadcast. Fall back to the per-slot
+        # reference path, which drives the REAL modules and therefore picks up
+        # any policy override for free. Costs the ~1.57x the stacking bought.
+        #
+        # Teaching the mirror about the wider head is the faster fix and wants
+        # its own equivalence gate before it is trusted; until then, correct
+        # beats fast for an exploratory arm.
+        if batched_opponents and getattr(self.acs[0], "role_in_design", False):
+            print("[CoEvoPPO] role_in_design: using the per-slot opponent path "
+                  "(StackedDevActors does not know the wider design head)",
+                  flush=True)
+            batched_opponents = False
         self.batched_opponents = bool(batched_opponents)
         self.opp_stack = StackedDevActors(self.opp_nets[0][0], 2,
                                           self.blocks).to(device)

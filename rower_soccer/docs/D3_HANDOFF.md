@@ -231,3 +231,37 @@ Recommend the first, because M1 is the point of D3 and it is a comparison.
 | `t2a_port/physics_bridge_gate.py` | two-venv model + trajectory comparison |
 | `t2a_port/legacy_capsule_fit.py` | the sweep that recovered the formula |
 | `t2a_port/displacement_probe.py` | net vs path displacement; settled the `\|Δx\|` question |
+
+### Watch this: the two new seeds are running well ahead of the run that scored 6,836
+
+`exec_R_eps` at matched epochs, against the completed run's recorded 100-epoch
+block means:
+
+| epoch | old run (block mean) | seed 1 | seed 2 |
+|---|---|---|---|
+| 200 | 2,500 | 3,375 | 2,382 |
+| 300 | 3,366 | **5,405** | **6,098** |
+| ~330 | — | **5,640** | **6,637** |
+
+The completed run's *final* figure was 6,836 after **1,000** epochs. Seed 2 is at
+6,637 by epoch **339**, and the two new seeds track each other, so this is not
+one lucky draw.
+
+Epochs are epochs here — `min_batch_size` is 50,000 either way — so this is not
+a wall-clock artefact. If the new seeds plateau anywhere near ~9,000, **M1 flips
+from "not met" to "met, and the 6,836 run was simply a bad one"**, which would
+retract the headline finding above. Do not restate M1 either way until they
+finish (~18-22 h from 2026-08-25 01:00 UTC).
+
+**The leading hypothesis is `--num_threads`, and if true it is a finding in its
+own right.** The old run used 32 threads; these use 24 and 16.
+`sample_worker` loops until *its share* of `min_batch_size` is collected and
+then finishes the episode in progress, so thread count changes the fraction of
+each batch that is a truncated tail: at 32 threads each worker collects 1,562
+steps against episodes up to 1,000 long, at 16 it collects 3,125. **`num_threads`
+is not only a speed knob in this codebase — it changes the data distribution.**
+
+Cheap to test once the seeds land: one more seed at `--num_threads 32`,
+everything else identical. If it reproduces ~6,800 while 16 and 24 reach higher,
+the mechanism is confirmed and every previous Transform2Act number here needs
+its thread count recorded beside it.

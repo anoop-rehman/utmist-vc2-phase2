@@ -1118,3 +1118,38 @@ it — the claim is parity, and parity is what one run of theirs already support
 Also: their win split at epoch 200 is [0.212, 0.733], strongly asymmetric.
 §9 already retired "agent 0 never wins" as a mid-training transient; this is a
 second run showing the asymmetry is real, large, and not fixed to one agent.
+
+### 13b. Their reference varies as much across its own checkpoints as ours does across seeds
+
+§13 compared our three seeds against one checkpoint of theirs. Their run has now
+passed epoch 700, so the same tool can be pointed at several — 96 mean-action
+games each, `reference_endings.py`:
+
+| their epoch | goal | fell | timeout | length |
+|---|---|---|---|---|
+| 100 | 17.7% | 54.2% | 28.1% | 294.3 |
+| 200 | 94.4% | 5.6% | 0.0% | 160.4 |
+| 300 | **96.9%** | 3.1% | 0.0% | 148.4 |
+| 500 | **90.6%** | 9.4% | 0.0% | 146.7 |
+| 700 | 94.8% | 5.2% | 0.0% | 171.9 |
+
+**Their converged run spans 90.6% to 96.9% — a 6.3-point range across its own
+checkpoints**, which is comparable to the 1.8-point range across our three
+seeds and larger than the gap either side has ever had over the other.
+
+So the picture, averaging their four converged checkpoints against our three
+seeds:
+
+| | goal | fell |
+|---|---|---|
+| **ours, 3 seeds** | **96.2%** | **2.7%** |
+| **theirs, 4 checkpoints (200-700)** | **94.2%** | **5.8%** |
+
+Parity stands, and is now supported on both sides by more than one number.
+
+**The methodological point is the same one §13 made about our seeds, applied to
+theirs.** Every comparison in §5-§11 quoted a single checkpoint of their run as
+though it were a property of their implementation. It is not: 96.9/1.0 (the
+number those sections chased a 14.6-point fall gap against) sits at the top of
+their own spread, and 90.6/9.4 sits at the bottom. A gap measured against the
+top of a distribution is not a gap.

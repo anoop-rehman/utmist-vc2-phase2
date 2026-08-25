@@ -372,70 +372,129 @@ is comparable across both reward forms, which reward is not.
 
 ---
 
-## M1 IS MET (2026-08-25)
+## M1 IS MET -- with the table recomputed (2026-08-25, revised same day)
 
 Two fresh seeds of the unmodified `hopper` config, run to paper scale.
 
-| block | seed 1 (24 threads) | seed 2 (16 threads) | the 6,836 run (32 threads) |
-|---|---|---|---|
-| 400-499 | 5,216 | 6,236 | 4,382 |
-| 500-599 | 6,481 | 6,476 | 4,758 |
-| 600-699 | 7,231 | 9,183 | 5,091 |
-| 700-799 | 8,738 | 8,848 | 5,166 |
-| 800-899 | 8,779 | 10,099 | 5,638 |
-| **900-999** | **9,454** | **9,761** | 6,317 |
-| **final-20 mean** | **9,462** | **10,852** | **6,836** |
+**Read the header of this table before the numbers.** The two columns differ in
+*seed* as well as thread count. That is stated here because an earlier revision
+of this section put the same table up and then asserted, three paragraphs
+later, that "the three runs differ in exactly one flag" -- contradicting its own
+header. See "The withdrawn thread-count claim" below.
+
+Every cell is a mean of `exec_R_eps` over **complete** blocks of the canonical
+`results/<cfg>/log/log_train.txt`, deduplicated by epoch (a resume re-logs some
+epochs; seed 2's file carries 1,046 rows for 1,000 distinct epochs, and counting
+the duplicates shifts the numbers by a few percent).
+
+| block | seed 1, 24 threads | seed 2, 16 threads |
+|---|---|---|
+| 400-499 | 5,216 | 6,236 |
+| 500-599 | 6,481 | 6,476 |
+| 600-699 | 7,231 | 9,183 |
+| 700-799 | 8,738 | 8,848 |
+| 800-899 | 8,779 | 10,099 |
+| 900-999 | 8,625 *(n=41, epochs 900-939)* | 10,210 |
+| **final-20 mean** | **8,169** *(epochs 920-939)* | **10,594** *(epochs 980-999)* |
 
 **The paper's Figure 3 reads ~9,300 at 50 M steps, band roughly 7,700-10,300.**
-Seed 1 lands on the mean; seed 2 sits above it, near the top of the band. Both
-are inside it. **M1 is met**, on their code, their config, at paper scale.
+Both runs sit inside that band -- seed 1 near the bottom of it, seed 2 near the
+top. **M1 is met**, on their code, their config, at paper scale. That conclusion
+is unchanged from the earlier revision. The numbers under it are not.
 
-### Two corrections this forces, and the second is worse than the first
+### What changed, and why
 
-**"M1 is not met" is withdrawn.** It was based on a single completed run
-scoring 6,836.
+The earlier revision reported **9,462 / 10,852 / 6,836** as "final-20 means" for
+24 / 16 / 32 threads. Those were computed **while two of the three runs were
+still training**, and the final block was labelled as though it were complete.
 
-**And the correction that walked back the first reversal was also wrong.** On
-2026-08-25 this document recorded: *"the honest projection is not 'these are
-heading for ~9,300'... it is 'converging sooner, to somewhere in the
-6,000-7,000 region'"*. That extrapolated a flattening out of the 400-499 block.
-The curve then accelerated — 5,216, 6,481, 7,231, 8,738, 9,454 — and blew
-through the projection.
+* Seed 1 has since run on to epoch 939 and **declined**: its rolling 20-epoch
+  mean peaked at 9,580 around epoch 902 and is 8,169 now. 9,462 was a real
+  measurement of a transient.
+* Seed 2 finished at epoch 999; its true final-20 is 10,594, not 10,852, and
+  its true 900-999 block is 10,210, not 9,761 -- the gap is the duplicate rows
+  and the partial block.
+* The 6,836 run's results directory was destroyed with its pod. Only derived
+  numbers survive. It cannot be recomputed and should not be quoted as if it
+  were on the same footing as the other two.
 
-So a bad extrapolation (single epochs against block means) was corrected with
-another bad extrapolation (four blocks read as a plateau), and the second was
-stated with more confidence than the first. The lesson is not "extrapolate more
-carefully"; it is **do not project a self-play/co-evolution curve at all**, in
-either direction. Run it out.
+**The rule this earns:** a block mean is a block mean only when the block is
+full. Label a partial block with its `n`, or do not put it in the table. This is
+the third time on this project that a number taken mid-flight was written down
+as a result.
 
-### `--num_threads` changes final performance, not just speed
+### The withdrawn thread-count claim
 
-The three runs differ in exactly one flag:
+The earlier revision claimed `--num_threads` changes final performance by
+38-59%, monotone in fewer-is-better, and gave a mechanism: *"`sample_worker`
+collects its share of `min_batch_size` and then finishes the episode in
+progress, so thread count sets what fraction of each batch is a truncated
+tail."*
 
-| threads | final-20 mean |
-|---|---|
-| 32 | 6,836 |
-| 24 | 9,462 |
-| 16 | 10,852 |
+**Both halves are withdrawn.**
 
-**A 38-59% swing in final reward from a flag that looks like a speed knob**, and
-monotone in the direction fewer threads = better.
+**The mechanism is refuted by their own code.** In `khrylib/rl/agents/agent.py`
+the `while logger.num_steps < min_batch_size` test is the *outer* loop, and
+`num_steps` is incremented only in `LoggerRL.end_episode`. A worker therefore
+cannot notice it has passed its budget until the episode it is inside has
+already ended. It **overshoots; it never truncates.** Measured on an untrained
+policy: the count of `mask == 0` entries in the concatenated batch equals
+`num_episodes` exactly, at every thread count tried (52/52, 61/61, 69/69,
+73/73). There are no truncated tails at any thread count.
 
-The mechanism was predicted before this data existed (`D3_HANDOFF.md`):
-`sample_worker` collects *its share* of `min_batch_size` and then finishes the
-episode in progress, so thread count sets what fraction of each batch is a
-truncated tail. At 32 threads each worker gathers 1,562 steps against episodes
-up to 1,000 long; at 16 it gathers 3,125. More threads means more of the batch
-is partial episodes.
+*Keep this corollary:* `estimate_advantages` runs over one flat concatenation of
+every worker's memory with no per-worker segmentation. That is safe **only**
+because each worker's memory ends on `mask = 0`. Any env where an episode could
+reach `for t in range(10000)` without `done` would leak GAE across a worker
+boundary. `hopper` caps at `max_nsteps = 1000`, so it never fires here.
 
-`hopper_gpu_t32` is now running: same config, **same seed 1**, 32 threads, so
-the only difference from the 9,462 run is the thread count. If it lands near
-6,836 the mechanism is confirmed and **every Transform2Act number anywhere in
-this repo needs its thread count recorded beside it** — including the ablation
-comparisons in the paper's own Appendix G, if they varied it.
+**What `num_threads` does change:**
+
+1. **Realized batch size, as a non-monotone sawtooth.** Each worker contributes
+   `ceil(T/L) * L` steps for `T = floor(B/N)` and episode length `L`, so the
+   total is `N * ceil(B/(N*L)) * L`. At convergence (`L -> 1006`, everything
+   hitting the 1,000-step cap, `B = 50,000`) 16 and 32 threads collect the
+   *identical* 64,384 steps and **24 threads -- the middle performer --
+   collects the most**, 72,432. The overshoot does not track the claimed
+   performance ordering at all, and more overshoot means more data and more
+   gradient steps, which if anything should help. The floor'd remainder
+   (`B - N * floor(B/N)`: 16 steps at 32 threads, 0 at 16) is silently dropped
+   and is swamped by this.
+2. **The seed.** `Agent.seed_worker` reseeds every child with
+   `torch.randint(0, 5000, (1,)) * pid`, drawn *in the child* from the state
+   inherited at fork -- so all children draw the same `r` and the worker seeds
+   are `{r, 2r, ..., (N-1)r}`. Worker `pid = 0` runs in the parent and is never
+   reseeded, so it advances the parent's stream by an amount that depends on
+   `thread_batch_size`, i.e. on `N`. **Two runs at the same `cfg.seed` and
+   different `--num_threads` are different seeds in every respect that
+   matters.**
+3. **Eval noise.** `eval_batch_size` defaults to 10,000 and `hopper.yml` never
+   sets it, so at convergence each eval worker returns exactly one episode and
+   `exec_R_eps` is a mean over **N episodes**. The 16-thread headline is
+   averaged over 16 episodes per epoch, the 32-thread one over 32. *The
+   best-looking run is the noisiest one.* Episode length and `exec_R_eps`
+   themselves are unbiased in `N` (checked over 5 paired seeds at 8 vs 32).
+
+**And the comparison was confounded anyway.** Seed 1 and seed 2 at *identical*
+config land 8,169 and 10,594 -- a 30% spread from seed alone, the same order as
+the effect that was attributed to threads. This document's earlier claim that
+"Transform2Act's seed variance on this task is small" rested on epochs 10-50
+agreeing (211/206, 335/311); that is early-training agreement and licenses
+nothing at epoch 1,000.
+
+`hopper_gpu_t32` (seed 1, 32 threads) is running and is the only clean
+single-variable point. At epoch 26 it is far too early to read. Even finished it
+is n = 1.
+
+### Accounting note for the Figure 3 comparison
+
+A "1,000 epoch" run does **not** consume 50 M simulation steps. It consumes
+52-72 M train steps (the overshoot above) plus another 16-32 M eval steps, and
+the multiplier itself depends on the thread count. Any x-axis alignment against
+their Figure 3 has to say which of those it is counting.
 
 ### Caveat
 
-Two seeds. The paper uses six per environment and plots mean ± SD. Landing
-inside their band with two runs is a reproduction, not a measurement of the
-distribution.
+Two seeds, and one of them stopped short of 1,000 epochs. The paper uses six per
+environment and plots mean +/- SD. Landing inside their band with two runs is a
+reproduction, not a measurement of the distribution.

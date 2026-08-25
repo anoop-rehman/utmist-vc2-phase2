@@ -298,3 +298,58 @@ does not rescue the gap.
 
 Do not restate M1 until epoch 1,000. But the earlier note's framing — that a
 reversal was likely — was built on a bad comparison and should not be relied on.
+
+#### Correction 2: the truncated-tail mechanism above is FALSE, and M1 is met
+
+Both of the above are superseded. See `repro/TRANSFORM2ACT_M1_REPRO_NOTES.md`,
+"M1 IS MET -- with the table recomputed".
+
+**M1 is met.** Seed 1 (24 threads) finishes its 900-939 block at 8,625 and seed
+2 (16 threads) its 900-999 block at 10,210, against the paper's ~9,300 with a
+band of roughly 7,700-10,300. The "converging to 6,000-7,000" projection above
+was wrong; so was the projection it corrected. **Do not project these curves in
+either direction. Run them out.**
+
+**The truncated-tail mechanism is refuted.** `while logger.num_steps <
+min_batch_size` is the *outer* loop in `sample_worker`, and `num_steps` moves
+only in `LoggerRL.end_episode`, so a worker cannot notice it has passed its
+budget until the episode it is in has ended. It **overshoots and never
+truncates** -- verified by counting `mask == 0` entries against `num_episodes`
+in a real batch: equal at every thread count tried. There are no truncated tails
+at any thread count, so thread count cannot set their fraction.
+
+What `num_threads` really varies is (1) realized batch size, as a *non-monotone*
+sawtooth that does not track the performance ordering, (2) the effective RNG
+stream, via `seed_worker` -- so it is a de facto `--seed` -- and (3) the number
+of eval episodes each logged point averages over. Details and measurements in
+the M1 notes.
+
+**This inverts the port's problem.** Their sampler emits *only complete
+episodes*; a fixed-`T` batched sampler truncates *every* world at the rollout
+boundary. The port has partial episodes their code never has, and needs a
+bootstrap `V(s_T)` at every cut that their GAE never performs.
+
+##### M2 acceptance criterion, settled
+
+1. **Time-limit semantics: follow Transform2Act, not CompetEvo.** `hopper.py`
+   computes `done = not (... and (self.control_nsteps < max_nsteps))`, so the
+   1,000-step time limit sets `done = True` and `mask = 0`, and their GAE
+   bootstraps **zero** at the limit. This is the *opposite* of
+   `competevo_port/ppo.py:187` ("mask = 1 on truncation, so GAE bootstraps
+   across the boundary"). **Do not carry the CompetEvo convention into the
+   Transform2Act port.** Bootstrap only at true rollout-boundary cuts.
+2. **Batch target: what their sampler delivers, not the nominal 50,000.** At the
+   operating point that is ~57,000-64,000 agent-steps per PPO iteration, i.e.
+   ~280-315 gradient steps at minibatch 2,048 x 10 epochs.
+3. **Sampler shape: reset all worlds together, roll `T = k * max_ep_len` with
+   per-world auto-reset**, so the batch is exactly `N * k` complete episodes and
+   there are zero rollout-boundary truncations -- the same *kind* of learning
+   signal as theirs. With `max_ep_len = 1006` (1,000 exec + 5 skeleton + 1
+   attribute), `T = 1024` and `N = 56` gives 57,344: the 16-thread batch.
+4. **Eval: record how many complete episodes back each logged point.** Theirs is
+   `N` at convergence. Evaluating over 256 worlds gives a visibly smoother and
+   differently-biased curve than their reference; match it deliberately or say
+   so.
+5. **STRICKEN from the criterion: "reproduce the fewer-threads-is-better
+   effect."** There is no such mechanism to reproduce, and the observation it
+   came from is confounded with seed.

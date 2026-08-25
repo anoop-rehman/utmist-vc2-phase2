@@ -1153,3 +1153,85 @@ though it were a property of their implementation. It is not: 96.9/1.0 (the
 number those sections chased a 14.6-point fall gap against) sits at the top of
 their own spread, and 90.6/9.4 sits at the bottom. A gap measured against the
 top of a distribution is not a gap.
+
+## 14. Their reference ran to 1,000 epochs, and it does not hold its peak (2026-08-25)
+
+§13 compared against their run at epoch 200 because that is all that existed.
+Their run finished today -- 1,000 iterations, clean `training done!`, 22.7 h --
+so the whole curve can be scored instead of one checkpoint.
+
+`reference_endings_eval.py`, their venv, their env, their policies, 400 episodes
+per point, seed 0 unless noted.
+
+| epoch | goal | fell | ep length | win split (agent 0 / 1) |
+|---|---|---|---|---|
+| 100 | 19.0% | 51.5% | 300.0 | 0.058 / 0.133 |
+| 200 | **98.2%** | 1.0% | 158.4 | 0.198 / **0.785** |
+| 400 | 88.2% | 10.2% | 160.1 | **0.503** / 0.380 |
+| 600 | 91.5% | 6.8% | 128.6 | **0.765** / 0.150 |
+| 600 *(seed 1)* | *89.0%* | *10.0%* | *128.7* | *0.768 / 0.123* |
+| 800 | 88.0% | 11.0% | 129.0 | 0.175 / **0.705** |
+| 900 | 70.0% | 29.8% | 120.0 | 0.030 / **0.670** |
+| 940 | 67.2% | 31.8% | 121.3 | 0.073 / **0.600** |
+| 970 | 71.0% | 28.2% | 119.5 | 0.148 / **0.563** |
+| 990 | 76.5% | 21.8% | 122.3 | 0.168 / **0.598** |
+| 1000 | 66.5% | 31.8% | 120.1 | 0.200 / 0.465 |
+| 1000 *(seed 1)* | *64.8%* | *34.0%* | *118.3* | *0.170 / 0.478* |
+
+### Eval noise, measured rather than assumed
+
+The two seed repeats give **1.7 points** (66.5 vs 64.8 at epoch 1000) and **2.5
+points** (91.5 vs 89.0 at epoch 600) on 400 episodes. So ~2-3 points is the
+resolution of a single point in this table.
+
+### There are two regimes, and the drop is real
+
+Epochs 400-800 sit at **88-92%**. Epochs 900-1000 sit at **65-76%**, with falls
+roughly tripled (11% -> 22-34%) and episodes ~8 steps shorter. The gap between
+the regimes is ~20 points against a ~2.5 point resolution, and **five
+consecutive tail checkpoints** all sit in the low band. The transition happens
+between epoch 800 and epoch 900.
+
+*Two earlier readings of this were wrong and both are withdrawn.* First, "their
+own run got worse" was asserted from the epoch-1000 point alone, before any
+intermediate point existed. Then, after 400-800 came back flat, that was
+corrected to "a plateau plus one low endpoint" -- which was an over-correction,
+made before the 900-990 points existed. The tail is uniformly depressed. **The
+rule is the same one §12 and the M1 notes already earned: sample the region
+before describing its shape.** One point is not a trend and two points are not a
+plateau.
+
+### Dominance alternates between the agents
+
+Agent 1 leads at 200, agent 0 at 400 and 600, agent 1 again from 800 onward --
+two switches over the run. So the long-standing observation that "agent 0 never
+wins while agent 1 does" (§2, §5) describes **an epoch, not the run**: the
+asymmetry is real at every checkpoint but its direction is not stable. That is
+what co-evolutionary cycling looks like and it is the first direct evidence of it
+in this reference.
+
+In the tail, agent 0 is near-collapsed (0.03-0.20) while agent 1 holds
+0.47-0.67, and ~30% of episodes end with a fall and no winner.
+
+### What this does to the parity claim
+
+**§13's comparison is unaffected and still stands**, because it is matched at
+epoch 200: ours 96.2% over three seeds against theirs at 94.4% (§13, 288 games)
+and 98.2% (this table, 400 games). Ours sits between the two readings of theirs.
+The two reference measurements differ by 3.8 points, above the ~2.5 point
+resolution above, so they are not quite consistent -- different scripts and game
+counts -- and the safe statement remains **parity, not superiority**.
+
+What changes is that **epoch 200 is near their peak and the run does not hold
+it.** Any future D2 comparison has to name its epoch, because "the reference
+number" ranges from 19% to 98% depending on where it is read. Recommended: quote
+the **400-800 plateau (88-92%)** as their converged level and epoch 200 as the
+matched-budget point, and never quote a final checkpoint as "their number".
+
+### Not established
+
+Why the tail degrades. Falls triple and agent 0 nearly stops winning, which is
+consistent with either a genuine co-evolutionary collapse or one agent finding a
+disruptive strategy that costs both the goal. Distinguishing those needs a
+rendered clip of a tail checkpoint, which has not been done. **Do not attribute a
+cause.**

@@ -1205,3 +1205,50 @@ mid-pack, so inherited posture is not the whole ceiling); the 4.4% does not.
 ### Promoted
 
 `prog` and `prog_up` to 200M steps. `paper` mode is retired.
+
+## 24. Kick is fixed (2026-08-25)
+
+`kick_ant_v14_prog`, the arm §23 promoted: `progress` shaping, `w_strike 0.3`,
+frozen decoder, `timed` objective, 200M steps, 2048 worlds.
+
+| | fitness (batched) | strikes/ep | flat starts |
+|---|---|---|---|
+| do-nothing floor | 0.105 | — | — |
+| every failed `timed` arm (v4-v9) | 0.075 - 0.12 | ~0 | up to 49.5% |
+| v13 screen at 50M | 0.135 | 0.01 | 7.3% |
+| **v14_prog at 200M** | **0.303** ±0.011 | **3.63** | **2.9%** |
+| v14_prog_up at 200M | 0.266 ±0.011 | 3.55 | 2.7% |
+
+**This is the first `timed` arm that substantially beats do-nothing**, and the
+first of any kind to strike the ball as a matter of course: `strikes/ep` goes
+from ~0.01 across every previous arm to **3.63**. The creature is kicking.
+
+Three things the diagnosis predicted, all of which held:
+
+* **The flat-start pathology never developed.** 2.9% at 200M, against the 49.5%
+  the plateaued run reached. The gait did not degrade, because the thing that
+  paid for degrading it is gone.
+* **`progress` beat `progress + w_upright`** (0.303 against 0.266), as it did at
+  50M. Once thrashing stops paying, pricing posture again is not just
+  redundant — it costs.
+* **Fitness kept climbing well past where the screen stopped**, 0.135 at 50M to
+  0.303 at 200M. The screen picked the right direction and badly understated
+  the size of the effect, which is what a screen is for.
+
+### Against v3, carefully
+
+v3 scored 0.376 and is the only arm that ever worked before this. That number is
+on the **point** objective and this one is on **timed**; they are different
+denominators and should not be subtracted. What is comparable is the relation to
+each arm's own floor, and the qualitative fact: two arms have now struck the
+ball on purpose, and both paid for striking.
+
+### What is still open
+
+`w_strike` was restored on the user's call and the screen showed it does nothing
+on `paper` shaping — so its contribution *on `progress` shaping* is still
+unmeasured. A `progress` + `w_strike 0` arm at 200M would isolate it, and is the
+obvious next single experiment.
+
+The NPMP fork (§17) can stay closed. Aim was never the binding constraint; the
+reward form was.

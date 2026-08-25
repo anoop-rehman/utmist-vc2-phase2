@@ -324,3 +324,92 @@ The gate corrected two things written above.
 Deliberately not ported: the `cumsum`-and-difference reduction of section 5. In
 the dense form each graph's nodes have their own axis, so a per-graph sum is
 `.sum(1)` and the cancellation that forces float64 never arises.
+
+## 13. Ran the physics bridge gate: the model ports EXACTLY, the trajectory does not
+
+Section 9 step 4 is "execution stage on batched physics". Its unstated
+precondition is that their MuJoCo and ours agree on the same morphology, and
+`physics_bridge_gate.py` existed to check that but had never been run. It has
+now, both halves: emit from `hopper_gpu_s2`'s epoch-1000 checkpoint under
+mujoco-py 2.1.2.14 / mujoco210, check under `mujoco` 3.12.0.
+
+### The model is exact -- but ONLY with `--legacy-inertial`
+
+| | default | `--legacy-mass` | `--legacy-inertial` |
+|---|---|---|---|
+| `body_mass` | 1.582e-01 (**1.66% of range**) | 3.5e-10 | **4.9e-12** |
+| `body_inertia` | 4.780e-02 (**5.18% of range**) | 3.2e-02 (3.47%) | **3.5e-13** |
+| traj max over 1,000 steps | 6.31e-01 (at 300) | 6.03e-01 (at 300) | **3.55e-01** |
+
+`body_pos`, `geom_pos`, `geom_size`, `geom_ipos` and `dof_damping` are exact
+(<= 5.6e-17) in every case, so the global->local conversion itself is not in
+question.
+
+**`--legacy-mass` alone is not enough and is the trap.** It fixes the mass and
+leaves the inertia 3.5% wrong, which reads as a pass on the field most people
+would check. `--legacy-inertial` writes an explicit `<inertial>` carrying both
+and subsumes it. **The batched port must emit legacy inertials.** Without them
+it simulates a robot 1.7% off in mass and 5.2% off in inertia -- a different
+robot, whose numbers are not comparable to their published curves, failing in
+exactly the shape of "the port trains to a lower reward".
+
+*(Reminder from `xml_global_to_local`: the explicit `<inertial>` is silently
+ignored unless `inertiafromgeom="auto"` is also set.)*
+
+### Every solver option already matches, and the remaining gap is not settable
+
+Dumped from both stacks and compared: `timestep`, `integrator`, `solver`,
+`iterations`, `tolerance`, `jacobian`, `cone`, `impratio`, `noslip_*`,
+`density`, `viscosity`, `disableflags`, `enableflags`, `gravity`, and the
+per-element `geom_solref`, `geom_solimp`, `geom_friction`, `geom_margin`,
+`dof_armature`, `actuator_gear`, `actuator_ctrlrange` -- **all identical**, the
+array fields to 0.0e+00.
+
+One field differs: `mpr_iterations` 50 vs modern `ccd_iterations` 35, a changed
+default. Setting ours to 50 leaves the trajectory **bit-identical** (max
+3.550e-01 either way), because capsule-plane and capsule-capsule use analytic
+primitives and never enter MPR. So there is no knob left to turn: the residual
+is MuJoCo 2.1 vs 3.12 integrator/solver code.
+
+### What the trajectory divergence actually looks like
+
+Open-loop replay of a fixed pseudo-random control sequence, `legacy_inertial`
+on, 1,000 steps. Per coordinate, against that coordinate's own range of motion
+in the reference:
+
+| coordinate | max abs diff | ref range | % of range |
+|---|---|---|---|
+| `1_joint` | 1.184e-01 | 7.03e-01 | **16.8%** |
+| `11_joint` | 1.195e-01 | 9.30e-01 | 12.9% |
+| `211_joint` | 3.550e-01 | 2.92e+00 | 12.2% |
+| `31_joint` | 2.942e-01 | 3.62e+00 | 8.1% |
+| `21_joint` | 3.393e-01 | 4.32e+00 | 7.9% |
+| `rootx` | 6.458e-02 | 1.10e+00 | 5.9% |
+| `rootz` | 1.732e-02 | 9.58e-01 | **1.8%** |
+
+It crosses 1e-3 at step 10 and 1e-2 at step 68, then grows and **stays bounded**
+-- it does not blow up. The divergence is concentrated in the *joints*, not the
+root: the two builds put the hopper in slightly different poses while it stays
+in roughly the same place.
+
+Note this is the **worst case**. Open-loop replay has nothing correcting the
+drift; a closed-loop policy pushes back on it. Measuring the closed-loop version
+needs the observation pipeline, i.e. step 4 itself, so it is deferred to the
+step-4 gate rather than guessed at here.
+
+### Consequence for M2's validation
+
+**The port cannot be gated on trajectories, and should not be.** Per-step
+agreement was already ruled out in `D3_HANDOFF.md`; this puts a number on it and
+shows it is not a bug to be fixed. So:
+
+* **Gate the model, exactly.** Field-by-field against a compile, which is what
+  `xml_to_fields.py --gate` already does and what this gate now does for the
+  conversion. That part *is* reproducible to 1e-12 and any regression is a real
+  defect.
+* **Gate the port on distributions.** Learning curve and final-return
+  distribution against their run, not episode traces. Combined with section 11's
+  M1 finding that seed alone spreads final return ~30%, that means **several
+  seeds, comparing distributions** -- a single matched run proves nothing in
+  either direction.
+* **Do not chase the residual.** Every settable option is already matched.

@@ -242,6 +242,30 @@ def check(args):
         where = f"step {idx + 1}" if idx is not None else "never"
         print(f"    first exceeds {thr:.0e}: {where}")
     print(f"\n    max over the whole trajectory: {err.max():.3e}")
+
+    # A max over coordinates conflates a root-position drift with a joint-angle
+    # drift, and those mean different things: the hopper is rewarded for how far
+    # it travels, so a 0.3 drift in root x after travelling 30 m is a 1% effect,
+    # while 0.3 rad on a hinge is a different pose. Normalise each coordinate by
+    # its OWN range of motion in the reference trajectory.
+    names = []
+    for j in range(model.njnt):
+        nm = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, j) or f"joint{j}"
+        adr = model.jnt_qposadr[j]
+        width = {mujoco.mjtJoint.mjJNT_FREE: 7, mujoco.mjtJoint.mjJNT_BALL: 4}.get(
+            model.jnt_type[j], 1)
+        for k in range(width):
+            names.append(f"{nm}[{k}]" if width > 1 else nm)
+    names += [f"q{i}" for i in range(len(names), ref.shape[1])]
+
+    per = np.abs(got - ref).max(axis=0)
+    rng = ref.max(axis=0) - ref.min(axis=0)
+    print(f"\nper-COORDINATE divergence, against that coordinate's own range:")
+    print(f"    {'coordinate':16s} {'max |d|':>10s} {'ref range':>11s} {'% of range':>11s}")
+    for i in np.argsort(-per / np.maximum(rng, 1e-9)):
+        print(f"    {names[i]:16s} {per[i]:10.3e} {rng[i]:11.3e} "
+              f"{100 * per[i] / max(rng[i], 1e-9):10.2f}%")
+
     print("\nNOTE: different MuJoCo builds; exact agreement is not expected. "
           "What matters is whether they stay together for an episode.")
 

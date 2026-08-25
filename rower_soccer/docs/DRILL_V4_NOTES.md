@@ -1145,3 +1145,63 @@ rather than inferred.
 * The prediction going in was that inherited GEOMETRY explains the variance. It
   does not — the correlations are ~0. Inherited POSTURE does. Recorded because
   the wrong hypothesis was specific enough to have been believed.
+
+## 23. The v13 reward-form screen (2026-08-25)
+
+§22 diagnosed the plateau as "97% of the reward is shaping" and proposed
+shrinking it. Reading the code closer gives a better fix: `paper` mode pays
+
+    w_p2b * max(0, v_player->ball) + w_b2c * max(0, v_ball->cmd)
+
+two raw velocities **clamped at zero**, so the creature is paid for moving
+toward the ball and never charged for moving away. The integral over a segment
+is total distance thrashed, not net progress — **the term is farmable, and the
+splayed scramble is how you farm it.** Shrinking a farmable term makes it a
+smaller exploit, not a non-exploit.
+
+`progress` mode, which already existed and which **none of the six failed arms
+used**, pays `approach_scale * (prev_dist - dist)` — a potential difference. It
+telescopes over a segment, so thrashing earns exactly nothing.
+
+Five arms, 50M steps each, 1024 worlds, frozen decoder, `timed` objective:
+
+| arm | shaping | `w_strike` | batched fitness | above floor | flat@50M |
+|---|---|---|---|---|---|
+| control | `paper` | 0.0 | 0.117 | +0.012 | 9.3% |
+| strike | `paper` | 0.3 | 0.120 | +0.015 | **11.7%** |
+| **prog** | **`progress`** | **0.3** | **0.135** | **+0.030** | 7.3% |
+| prog_up | `progress` | 0.3, `w_upright 2` | 0.131 | +0.026 | 9.9% |
+| prog_reset | `progress` | 0.3, pose reset | 0.122 | +0.017 | 4.4% |
+
+Do-nothing floor 0.105.
+
+**`progress` wins.** It is 2.5x further above the floor than the control, and
+the ordering is the same on the leading indicator for most of the run.
+
+**`w_strike` alone does not help, and may hurt.** On `paper` mode it bought
+nothing on fitness (0.120 vs 0.117) and the *worst* flat-start rate of any arm
+(11.7% vs 9.3%). Paying for strike speed is one more reason to charge the ball.
+It is the shaping FORM that is load-bearing, not the strike weight — which is
+worth stating plainly because the opposite was the intuition going in.
+
+**Raising `w_upright` did not add to `progress`** (0.131 vs 0.135). Once
+thrashing stops paying, pricing posture again is redundant.
+
+### What the screen does NOT show
+
+**No arm learned to kick.** `strikes/ep` is 0.00-0.01 everywhere — roughly one
+clean strike per hundred episodes. Fitness of 0.135 against a 0.105 floor is a
+policy that nudges the ball slightly, not one that strikes it. 50M steps is 1/5
+of what the shortest failed arm ran and 1/58 of the longest, so this is a
+direction-picking result and nothing more.
+
+**`prog_reset`'s flat-start number is not comparable to the others.** The tally
+samples uprightness immediately before `_spawn_worlds`, which is exactly where
+`--reset-pose-each-segment` re-poses the creature — so for that arm it measures
+the posture carried in *before* the reset wipes it, which is not what that
+arm's segments actually start with. The diagnostic value stands (its fitness is
+mid-pack, so inherited posture is not the whole ceiling); the 4.4% does not.
+
+### Promoted
+
+`prog` and `prog_up` to 200M steps. `paper` mode is retired.

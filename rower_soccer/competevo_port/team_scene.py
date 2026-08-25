@@ -102,18 +102,29 @@ def _their_agent_default_xml(agent_id, rgb):
 
 def dev_team_xml(n_agents=4, solver="Newton", iterations=100, integrator="RK4",
                  timestep=TIMESTEP, poses=None, naive_bitmask=False,
-                 world_conaffinity=None):
+                 world_conaffinity=None, creatures=None):
     """The merged N-agent dev scene at its base design.
 
     `naive_bitmask=True` reproduces their 2-agent formula for every agent; it
     exists so the control test has something that is actually wrong to compare
     against.
+
+    `creatures` is a per-agent list of keys into `creatures.CREATURES`
+    (2h: heterogeneous teams). `None` means "ant everywhere", which is the
+    2f/2g scene -- and `gate_creatures.py` requires the ant built through the
+    general parsed path to compile to the SAME MjModel, field for field, as the
+    hand-transcribed `_dev_ant_body_xml` this replaced.
     """
+    from rower_soccer.competevo_port.creatures import (body_xml, motor_xml,
+                                                       team_composition)
     poses = poses or team_init_pose(n_agents)
     assert len(poses) == n_agents
+    specs = team_composition(creatures or ["ant"] * n_agents)
+    assert len(specs) == n_agents, (
+        f"{len(specs)} creatures for {n_agents} agents")
     all_bits = (1 << n_agents) - 1
     world = all_bits if world_conaffinity is None else world_conaffinity
-    bodies = "\n".join(_dev_ant_body_xml(i, p, e)
+    bodies = "\n".join(body_xml(specs[i], i, p, e)
                        for i, (p, e) in enumerate(poses))
     rgbs = _team_rgb(n_agents)
     if naive_bitmask:
@@ -122,11 +133,12 @@ def dev_team_xml(n_agents=4, solver="Newton", iterations=100, integrator="RK4",
     else:
         defaults = "\n".join(_team_agent_default_xml(i, rgbs[i], n_agents)
                              for i in range(n_agents))
-    motors = "\n".join(
-        f'    <motor ctrllimited="true" ctrlrange="-1.0 1.0"'
-        f' joint="agent{i}/{j}" gear="{GEAR:g}" name="agent{i}/{j}"'
-        f' class="agent{i}"/>'
-        for i in range(n_agents) for j in _DEV_MOTOR_JOINTS)
+    # Actuator order comes from each creature's own asset. The ant is hip-major
+    # (11,12,13,14,111,...) and the bug and spider are leg-interleaved
+    # (11,111,12,112,...); constructing the order instead of reading it would
+    # permute every leg on two of the three and still train. See
+    # `creatures.py` note 2.
+    motors = "\n".join(motor_xml(specs[i], i) for i in range(n_agents))
     return f"""<mujoco model="mutiagent_world">
   <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
   <option integrator="{integrator}" timestep="{timestep}" solver="{solver}" iterations="{iterations}"/>
@@ -179,6 +191,18 @@ class TeamSceneMeta(SceneMeta):
     teammate: tuple = ()           # index of the (single) teammate
     opponents: tuple = ()          # indices of the two opponents, ordered
     n_others: int = 0
+    # 2h: a mixed team's members differ in genome width, motor count and
+    # therefore observation width, so these are per agent. `homogeneous` is
+    # True for every 2f/2g scene and is what code should branch on rather than
+    # assuming the scalar fields above describe every agent.
+    creatures: tuple = ()
+    specs: tuple = ()
+    design_dims: tuple = ()
+    sim_obs_dims: tuple = ()
+    n_motors: tuple = ()
+    obs_dims: tuple = ()
+    act_dims: tuple = ()
+    homogeneous: bool = True
 
 
 def _team_agent_slices(model, agent_id, order):
@@ -204,7 +228,7 @@ def _team_agent_slices(model, agent_id, order):
 
 
 def build_dev_team_scene(n_agents=4, back_x=GOAL_X, front_x=1.0, back_y=0.0,
-                         poses=None, **xml_kwargs):
+                         poses=None, creatures=None, **xml_kwargs):
     """Compile the N-agent dev scene and resolve the per-agent plumbing.
 
     obs = [stage flag (1) | scale (20) | own qpos (15) | own qvel (14)
@@ -213,8 +237,10 @@ def build_dev_team_scene(n_agents=4, back_x=GOAL_X, front_x=1.0, back_y=0.0,
     """
     poses = poses or team_init_pose(n_agents, back_x=back_x, front_x=front_x,
                                     back_y=back_y)
+    from rower_soccer.competevo_port.creatures import team_composition
+    specs = team_composition(creatures or ["ant"] * n_agents)
     model = mujoco.MjModel.from_xml_string(
-        dev_team_xml(n_agents, poses=poses, **xml_kwargs))
+        dev_team_xml(n_agents, poses=poses, creatures=creatures, **xml_kwargs))
     team = team_of(n_agents)
     # Canonical other-ordering, per agent: teammate first, then the opponents
     # nearest-spawn-first. This is what makes the observation ROLE-SYMMETRIC --
@@ -227,12 +253,32 @@ def build_dev_team_scene(n_agents=4, back_x=GOAL_X, front_x=1.0, back_y=0.0,
         orders.append(order)
         agents.append(_team_agent_slices(model, i, order))
     a0 = agents[0]
-    sim_obs_dim = ((a0.qpos[1] - a0.qpos[0]) + (a0.qvel[1] - a0.qvel[0])
-                   + 2 * (n_agents - 1))
-    n_motor = a0.ctrl[1] - a0.ctrl[0]
+    # Per-agent now, because a mixed team's members differ in all three. The
+    # scalar `sim_obs_dim` / `n_motor` / `DESIGN_DIM` fields are kept and hold
+    # agent 0's values, so every homogeneous caller (2f, 2g) is unchanged; a
+    # heterogeneous caller MUST read the per-agent tuples instead, and
+    # `homogeneous` says which case it is in one place.
+    sim_obs_dims = tuple((a.qpos[1] - a.qpos[0]) + (a.qvel[1] - a.qvel[0])
+                         + 2 * (n_agents - 1) for a in agents)
+    n_motors = tuple(a.ctrl[1] - a.ctrl[0] for a in agents)
+    design_dims = tuple(sp.design_dim for sp in specs)
+    sim_obs_dim, n_motor = sim_obs_dims[0], n_motors[0]
     meta = TeamSceneMeta(n_agents, model.nq, model.nv, model.nu, agents,
-                         1 + DESIGN_DIM + sim_obs_dim, DESIGN_DIM + n_motor)
+                         1 + design_dims[0] + sim_obs_dim,
+                         design_dims[0] + n_motor)
     meta.sim_obs_dim, meta.n_motor = sim_obs_dim, n_motor
+    meta.creatures = tuple(sp.key for sp in specs)
+    meta.specs = tuple(specs)
+    meta.sim_obs_dims, meta.n_motors = sim_obs_dims, n_motors
+    meta.design_dims = design_dims
+    meta.homogeneous = len(set(meta.creatures)) == 1
+    meta.obs_dims = tuple(1 + d + s
+                          for d, s in zip(design_dims, sim_obs_dims))
+    meta.act_dims = tuple(d + m for d, m in zip(design_dims, n_motors))
+    for i, sp in enumerate(specs):
+        assert n_motors[i] == sp.n_motor, (
+            f"agent {i} ({sp.key}): scene gave {n_motors[i]} motors, "
+            f"spec says {sp.n_motor}")
     meta.team = tuple(team)
     meta.teammate = tuple(o[0] for o in orders)
     meta.opponents = tuple(tuple(o[1:]) for o in orders)

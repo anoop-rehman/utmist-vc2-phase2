@@ -394,12 +394,19 @@ the duplicates shifts the numbers by a few percent).
 | 600-699 | 7,231 | 9,183 |
 | 700-799 | 8,738 | 8,848 |
 | 800-899 | 8,779 | 10,099 |
-| 900-999 | 8,625 *(n=41, epochs 900-939)* | 10,210 |
-| **final-20 mean** | **8,169** *(epochs 920-939)* | **10,594** *(epochs 980-999)* |
+| 900-999 | 8,397 | 10,210 |
+| **final-20 mean** | **7,482** *(epochs 980-999)* | **10,594** *(epochs 980-999)* |
+
+*(Seed 1 finished at epoch 999 on 2026-08-25, after the revision below was
+written. Its partial 900-939 block read 8,625 and its final-20 at that moment
+8,169; the completed values are above. It kept falling to the end -- a third
+demonstration of the same point, so the numbers here are the complete-block ones
+and nothing in this table is now partial.)*
 
 **The paper's Figure 3 reads ~9,300 at 50 M steps, band roughly 7,700-10,300.**
-Both runs sit inside that band -- seed 1 near the bottom of it, seed 2 near the
-top. **M1 is met**, on their code, their config, at paper scale. That conclusion
+Seed 2 sits near the top of that band. Seed 1's 900-999 block (8,397) is inside
+it; its final-20 (7,482) sits just below the band's lower edge. **M1 is met** on the
+block means, on their code, their config, at paper scale. That conclusion
 is unchanged from the earlier revision. The numbers under it are not.
 
 ### What changed, and why
@@ -408,9 +415,10 @@ The earlier revision reported **9,462 / 10,852 / 6,836** as "final-20 means" for
 24 / 16 / 32 threads. Those were computed **while two of the three runs were
 still training**, and the final block was labelled as though it were complete.
 
-* Seed 1 has since run on to epoch 939 and **declined**: its rolling 20-epoch
-  mean peaked at 9,580 around epoch 902 and is 8,169 now. 9,462 was a real
-  measurement of a transient.
+* Seed 1 **declined all the way to the end**: its rolling 20-epoch mean peaked
+  at 9,580 around epoch 902, read 8,169 at epoch 939, and finished at **7,482**.
+  9,462 was a real measurement of a transient, and every later reading of the
+  same run was lower than the one before it.
 * Seed 2 finished at epoch 999; its true final-20 is 10,594, not 10,852, and
   its true 900-999 block is 10,210, not 9,761 -- the gap is the duplicate rows
   and the partial block.
@@ -476,8 +484,8 @@ boundary. `hopper` caps at `max_nsteps = 1000`, so it never fires here.
    themselves are unbiased in `N` (checked over 5 paired seeds at 8 vs 32).
 
 **And the comparison was confounded anyway.** Seed 1 and seed 2 at *identical*
-config land 8,169 and 10,594 -- a 30% spread from seed alone, the same order as
-the effect that was attributed to threads. This document's earlier claim that
+config land 7,482 and 10,594 -- a 42% spread from seed alone, larger than the
+effect that was attributed to threads. This document's earlier claim that
 "Transform2Act's seed variance on this task is small" rested on epochs 10-50
 agreeing (211/206, 335/311); that is early-training agreement and licenses
 nothing at epoch 1,000.
@@ -495,6 +503,6 @@ their Figure 3 has to say which of those it is counting.
 
 ### Caveat
 
-Two seeds, and one of them stopped short of 1,000 epochs. The paper uses six per
+Two seeds, both now complete to 1,000 epochs. The paper uses six per
 environment and plots mean +/- SD. Landing inside their band with two runs is a
 reproduction, not a measurement of the distribution.

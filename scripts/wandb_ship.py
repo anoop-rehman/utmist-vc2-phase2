@@ -117,18 +117,44 @@ def ship_t2a(args):
     print(f"[ship] {run.url}")
     # `ETA 2:02:28` is a duration, not a number; everything else is a float.
     pair = re.compile(r"([A-Za-z_]+)\s+(-?\d+\.?\d*)(?=\s|$)")
-    n = 0
-    for line in open(args.t2a_log):
-        m = re.match(r"^(\d+)\t(.*)$", line)
-        if not m:
-            continue
-        epoch = int(m.group(1))
-        row = {k: float(v) for k, v in pair.findall(m.group(2))}
-        if not row:
-            continue
-        wandb.log({f"t2a/{k}": v for k, v in row.items()}, step=epoch)
-        n += 1
-    print(f"[ship] backfilled {n} epochs from {args.t2a_log}")
+    # A resume re-logs epochs it has already done; the LAST value for an epoch
+    # is the live one, and wandb keeps the last write at a given step anyway.
+    seen = set()
+
+    def push(fh):
+        n = 0
+        for line in fh:
+            m = re.match(r"^(\d+)\t(.*)$", line)
+            if not m:
+                continue
+            epoch = int(m.group(1))
+            row = {k: float(v) for k, v in pair.findall(m.group(2))}
+            if not row:
+                continue
+            wandb.log({f"t2a/{k}": v for k, v in row.items()}, step=epoch)
+            seen.add(epoch)
+            n += 1
+        return n
+
+    fh = open(args.t2a_log)
+    n = push(fh)
+    print(f"[ship] backfilled {n} epochs from {args.t2a_log}", flush=True)
+
+    if args.follow:
+        # Tail from where the backfill stopped, so a growing log costs one
+        # read per poll rather than a full re-parse.
+        print("[ship] following; ctrl-c to stop", flush=True)
+        idle = 0
+        while idle < args.idle_giveup:
+            time.sleep(args.poll)
+            got = push(fh)
+            if got:
+                idle = 0
+                print(f"[ship] +{got} epochs (through {max(seen)})", flush=True)
+            else:
+                idle += args.poll
+                fh.seek(fh.tell())      # clear EOF so the next read sees growth
+        print(f"[ship] no new epochs for {args.idle_giveup}s; stopping")
     run.finish()
 
 

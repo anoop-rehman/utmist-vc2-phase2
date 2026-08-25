@@ -65,11 +65,23 @@ def main():
                               goal_credit="team",
                               scene_kwargs={"back_x": args.back_x})
     torch.manual_seed(args.seed)
-    acs = [TeamActorCritic(n_agents=env.n_agents) for _ in range(2)]
+    role = False
+    blob = None
     if not args.untrained:
         blob = torch.load(args.policies, map_location="cpu")
+        # Infer role_in_design from the checkpoint, as score_policies does:
+        # building the wrong variant fails on load, and a renderer that must be
+        # told which variant it holds will be pointed at the wrong one.
+        from rower_soccer.competevo_port.team_policy import ROLE_DIM
+        probe = TeamActorCritic(n_agents=env.n_agents)
+        role = (blob["ac_0"]["scale_norm.mean"].numel()
+                == probe.scale_norm.mean.numel() + ROLE_DIM)
+    acs = [TeamActorCritic(n_agents=env.n_agents, role_in_design=role)
+           for _ in range(2)]
+    if blob is not None:
         for ac, key in zip(acs, ("ac_0", "ac_1")):
             ac.load_state_dict(blob[key])
+        print(f"role_in_design={role} (inferred)")
     acs = [ac.to(device).eval() for ac in acs]
     driver = TeamPolicyObsEnv(env, acs[0])
     lanes = [torch.tensor(l, device=env.device) for l in ([0, 2], [1, 3])]

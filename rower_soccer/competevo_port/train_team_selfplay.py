@@ -85,6 +85,51 @@ def team_eval(env, acs, team_lanes, max_steps=None):
             **{f"end_{k}": v / total for k, v in endings.items()}}
 
 
+
+def _flat(row, prefix=""):
+    """Flatten one log row into wandb scalars.
+
+    The row carries per-agent lists (`train_ret`, `fwd_per_step`, `ring`) and a
+    nested `eval` dict; wandb wants scalars, and a list logged as a list is not
+    plottable. Everything becomes `group/name` or `group/name_i`.
+    """
+    out = {}
+    for k, v in row.items():
+        if isinstance(v, dict):
+            out.update(_flat(v, f"{prefix}{k}/"))
+        elif isinstance(v, (list, tuple)):
+            for i, x in enumerate(v):
+                if isinstance(x, (int, float)):
+                    out[f"{prefix}{k}_{i}"] = float(x)
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[f"{prefix}{k}"] = float(v)
+    return out
+
+
+def _wandb_init(args, kind):
+    """Start a wandb run, or return None if disabled/unavailable.
+
+    Never fatal: a training run must not die because a metrics service is
+    unreachable. `--no-wandb` and a missing WANDB_API_KEY both just turn it off.
+    """
+    if getattr(args, "no_wandb", False):
+        return None
+    if not os.environ.get("WANDB_API_KEY"):
+        print("[wandb] no WANDB_API_KEY -- logging to disk only", flush=True)
+        return None
+    try:
+        import wandb
+        name = os.path.basename(os.path.normpath(args.out))
+        run = wandb.init(project=args.wandb_project, name=name, id=name,
+                         config=vars(args), tags=["D2", kind],
+                         resume="allow")
+        print(f"[wandb] {run.url}", flush=True)
+        return wandb
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[wandb] disabled ({exc})", flush=True)
+        return None
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--worlds", type=int, default=512)
@@ -116,6 +161,8 @@ def main():
                    help="a 1v1 policies.pt; ac_0/ac_1 widen into the two team "
                         "nets. Legal because team_policy orders opp_near first")
     p.add_argument("--out", default="runs/competevo_port/team_selfplay")
+    p.add_argument("--wandb-project", default="creature-soccer")
+    p.add_argument("--no-wandb", action="store_true")
     args = p.parse_args()
 
     from rower_soccer.competevo_port.dev_ppo import DevActorCritic
@@ -126,6 +173,7 @@ def main():
     from rower_soccer.competevo_port.train_team_smoke import TeamPolicyObsEnv
 
     os.makedirs(args.out, exist_ok=True)
+    _wb = _wandb_init(args, "2v2")
     torch.manual_seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -185,6 +233,8 @@ def main():
             [ac.eval() for ac in acs]
             row["eval"] = team_eval(eval_wrapped, acs, lanes)
         rows.append(row)
+        if _wb is not None:
+            _wb.log(_flat(row), step=int(row["steps"]))
         with open(os.path.join(args.out, "log.json"), "w") as f:
             json.dump({"args": vars(args), "iters": rows}, f, indent=1)
         ev = row.get("eval")

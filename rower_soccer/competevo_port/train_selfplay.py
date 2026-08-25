@@ -35,6 +35,51 @@ from rower_soccer.competevo_port.selfplay import (CoEvoPPO, DEV_DELTA,
                                                   evaluate_pair)
 
 
+
+def _flat(row, prefix=""):
+    """Flatten one log row into wandb scalars.
+
+    The row carries per-agent lists (`train_ret`, `fwd_per_step`, `ring`) and a
+    nested `eval` dict; wandb wants scalars, and a list logged as a list is not
+    plottable. Everything becomes `group/name` or `group/name_i`.
+    """
+    out = {}
+    for k, v in row.items():
+        if isinstance(v, dict):
+            out.update(_flat(v, f"{prefix}{k}/"))
+        elif isinstance(v, (list, tuple)):
+            for i, x in enumerate(v):
+                if isinstance(x, (int, float)):
+                    out[f"{prefix}{k}_{i}"] = float(x)
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[f"{prefix}{k}"] = float(v)
+    return out
+
+
+def _wandb_init(args, kind):
+    """Start a wandb run, or return None if disabled/unavailable.
+
+    Never fatal: a training run must not die because a metrics service is
+    unreachable. `--no-wandb` and a missing WANDB_API_KEY both just turn it off.
+    """
+    if getattr(args, "no_wandb", False):
+        return None
+    if not os.environ.get("WANDB_API_KEY"):
+        print("[wandb] no WANDB_API_KEY -- logging to disk only", flush=True)
+        return None
+    try:
+        import wandb
+        name = os.path.basename(os.path.normpath(args.out))
+        run = wandb.init(project=args.wandb_project, name=name, id=name,
+                         config=vars(args), tags=["D2", kind],
+                         resume="allow")
+        print(f"[wandb] {run.url}", flush=True)
+        return wandb
+    except Exception as exc:                       # noqa: BLE001
+        print(f"[wandb] disabled ({exc})", flush=True)
+        return None
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--worlds", type=int, default=1024)
@@ -72,9 +117,12 @@ def main():
                         "run can be scored at a chosen epoch rather than only "
                         "at whatever epoch it happened to stop on")
     p.add_argument("--out", default="runs/competevo_port/selfplay_smoke")
+    p.add_argument("--wandb-project", default="creature-soccer")
+    p.add_argument("--no-wandb", action="store_true")
     args = p.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    _wb = _wandb_init(args, "1v1")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
 
@@ -165,6 +213,8 @@ def main():
                   f"kl {stats['kl_0']:+.1e}/{stats['kl_1']:+.1e} | opp_lag "
                   f"{row['opp_lag']:.1f} ring {rings} nan {env.n_diverged}")
         log["iters"].append(row)
+        if _wb is not None:
+            _wb.log(_flat(row), step=int(row["steps"]))
         with open(os.path.join(args.out, "log.json"), "w") as f:
             json.dump(log, f, indent=1)
         # Weights on disk at a known epoch. Without this the only artefact is

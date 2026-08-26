@@ -65,6 +65,36 @@ from rower_soccer.competevo_port.scene import (CONTROL_DT, DESIGN_DIM,
 STAND_Z_MAX = 1.2
 
 
+def _padded_list(rows, device, dtype):
+    """Like `_padded_idx` but for explicit index lists of differing length."""
+    W = max(len(r) for r in rows)
+    idx = torch.zeros(len(rows), W, dtype=torch.long, device=device)
+    mask = torch.zeros(len(rows), W, device=device, dtype=dtype)
+    for i, r in enumerate(rows):
+        idx[i, :len(r)] = torch.tensor(r, device=device, dtype=torch.long)
+        mask[i, :len(r)] = 1.0
+    return idx, mask
+
+
+def _padded_idx(ranges, device, dtype):
+    """`[(lo, hi), ...]` -> an `[A, max_w]` index tensor and an `[A, max_w]`
+    mask that is 1 on real entries and 0 on padding.
+
+    Padding entries index 0 rather than anything out of bounds, so the gather
+    is always legal; the mask is what makes them harmless. Returning both
+    (rather than a ragged list) is what keeps `sim_obs` a single gather and
+    preserves the rectangular observation the batched trainer requires.
+    """
+    widths = [hi - lo for lo, hi in ranges]
+    W = max(widths)
+    idx = torch.zeros(len(ranges), W, dtype=torch.long, device=device)
+    mask = torch.zeros(len(ranges), W, device=device, dtype=dtype)
+    for i, ((lo, hi), w) in enumerate(zip(ranges, widths)):
+        idx[i, :w] = torch.arange(lo, hi, device=device, dtype=torch.long)
+        mask[i, :w] = 1.0
+    return idx, mask
+
+
 class RunToGoalDevEnv:
     """Batched two-dev-ant run-to-goal with per-world morphology.
 
@@ -115,20 +145,69 @@ class RunToGoalDevEnv:
 
         m = self.meta
         self.n_agents = m.n_agents
-        self.obs_dim, self.act_dim = m.obs_dim, m.act_dim
-        self.sim_obs_dim, self.n_motor = m.sim_obs_dim, m.n_motor
-        self.design_dim = DESIGN_DIM
+        # 2h: on a mixed team these are per agent. The observation and action
+        # tensors stay RECTANGULAR at the widest agent's width, with each
+        # agent's real entries in the leading columns of each padded sub-block.
+        # The action layout is [design(max_design) | motor(max_motor)], so the
+        # motor block starts at the same offset for every agent regardless of
+        # its genome width -- a per-agent offset would be an invitation to read
+        # one creature's torques into another's actuators.
+        self.n_motors = tuple(getattr(m, "n_motors", None)
+                              or [m.n_motor] * m.n_agents)
+        self.n_motor = max(self.n_motors)
+        self.sim_obs_dim = max(getattr(m, "sim_obs_dims", None)
+                               or [m.sim_obs_dim])
+        # Per-agent genome widths (2h). `meta.design_dims` exists only on a
+        # TeamSceneMeta; everything else is a homogeneous ant scene, where the
+        # widths are all DESIGN_DIM and nothing below changes behaviour.
+        self.design_dims = tuple(getattr(m, "design_dims", None)
+                                 or [DESIGN_DIM] * m.n_agents)
+        self.design_dim = max(self.design_dims)
+        self.design_mask_row = torch.zeros(m.n_agents, self.design_dim,
+                                           device=self.device, dtype=self.dtype)
+        for i, w in enumerate(self.design_dims):
+            self.design_mask_row[i, :w] = 1.0
+        self.homogeneous_design = len(set(self.design_dims)) == 1
+        self.obs_dim = 1 + self.design_dim + self.sim_obs_dim
+        self.act_dim = self.design_dim + self.n_motor
+        # Which flat ctrl slots each agent's motor block writes, and a mask
+        # zeroing the padded motor columns so a creature can never actuate a
+        # joint it does not have.
+        self.motor_mask = torch.zeros(m.n_agents, self.n_motor,
+                                      device=self.device, dtype=self.dtype)
+        for i, w in enumerate(self.n_motors):
+            self.motor_mask[i, :w] = 1.0
+        self.ctrl_cols = torch.cat([
+            torch.arange(a.ctrl[0], a.ctrl[1], device=self.device,
+                         dtype=torch.long) for a in m.agents])
         d, L = self.device, torch.long
-        self.qpos_idx = torch.stack([torch.arange(*a.qpos, device=d, dtype=L)
-                                     for a in m.agents])
-        self.qvel_idx = torch.stack([torch.arange(*a.qvel, device=d, dtype=L)
-                                     for a in m.agents])
+        # 2h: a mixed team's members differ in qpos/qvel width (ant 15/14, bug
+        # 21/20, spider 27/26) and genome width (20/30/40). The old
+        # `torch.stack` over per-agent ranges required them equal and would
+        # raise on a mixed team -- the right failure, but not a usable one.
+        # `_padded_idx` pads each agent's index row out to the widest and
+        # returns a mask zeroing the padding, so `sim_obs` stays ONE
+        # rectangular gather and the batched trainer keeps its rectangular
+        # [n, A, obs_dim] contract. This is the same zero-pad-and-index
+        # approach STAGE2_MULTITASK section 3 specifies for per-task obs.
+        #
+        # Homogeneous teams are unaffected: all widths are already equal, the
+        # mask is all ones, and the gather is exactly the one that ran before.
+        self.qpos_idx, self.qpos_mask = _padded_idx(
+            [a.qpos for a in m.agents], d, self.dtype)
+        self.qvel_idx, self.qvel_mask = _padded_idx(
+            [a.qvel for a in m.agents], d, self.dtype)
         self.other_xy_idx = torch.tensor([a.other_qpos_xy for a in m.agents],
                                          device=d, dtype=L)
         self.torso_body = torch.tensor([a.torso_body for a in m.agents],
                                        device=d, dtype=L)
-        self.body_ids = torch.stack(
-            [torch.tensor(a.body_ids, device=d, dtype=L) for a in m.agents])
+        # Padded like qpos/qvel: a mixed team's creatures have 13/19/25 bodies.
+        # Only the cfrc_ext contact cost reads this, and the mask keeps a
+        # padded row from contributing (it would index body 0, the world body,
+        # whose cfrc is zero anyway -- but relying on that would be an
+        # accident, not a design).
+        self.body_ids, self.body_ids_mask = _padded_list(
+            [list(a.body_ids) for a in m.agents], d, self.dtype)
         self.root_z_idx = torch.tensor([a.qpos[0] + 2 for a in m.agents],
                                        device=d, dtype=L)
         self.goal_x = torch.tensor([a.goal_x for a in m.agents], device=d,
@@ -147,11 +226,11 @@ class RunToGoalDevEnv:
         # ablation need; None = their behaviour, a fresh U(-1,1) draw per reset.
         self.fixed_design = None if fixed_design is None else torch.as_tensor(
             np.broadcast_to(np.asarray(fixed_design, dtype=np.float64),
-                            (m.n_agents, DESIGN_DIM)).copy(),
+                            (m.n_agents, self.design_dim)).copy(),
             device=d, dtype=self.dtype)
 
         self.stage = torch.ones(self.n, device=d, dtype=torch.bool)
-        self.scale = torch.zeros(self.n, m.n_agents, DESIGN_DIM, device=d,
+        self.scale = torch.zeros(self.n, m.n_agents, self.design_dim, device=d,
                                  dtype=self.dtype)
         self.ep_step = torch.zeros(self.n, device=d, dtype=L)
         self.ep_return = torch.zeros(self.n, m.n_agents, device=d,
@@ -185,10 +264,45 @@ class RunToGoalDevEnv:
     def _root_z(self):
         return self.qpos[:, self.root_z_idx]
 
+    def _build_obs_cols(self):
+        """`obs_cols[i]` = the columns of `obs()` that are REAL for agent i.
+
+        obs is `[flag(1) | scale(max_design) | qpos(max_q) | qvel(max_v) |
+        others(2*n_others)]`, and on a mixed team agent i occupies only the
+        leading part of each padded sub-block. A per-slot policy therefore
+        cannot take a contiguous slice -- it needs this gather. Homogeneous
+        teams get `arange(obs_dim)`, i.e. the identity.
+        """
+        cols, W = [], self.design_dim
+        Q = self.qpos_idx.shape[1]
+        V = self.qvel_idx.shape[1]
+        n_other = self.other_xy_idx.shape[1]
+        for i in range(self.n_agents):
+            dq = int(self.qpos_mask[i].sum().item())
+            dv = int(self.qvel_mask[i].sum().item())
+            c = ([0]
+                 + list(range(1, 1 + self.design_dims[i]))
+                 + list(range(1 + W, 1 + W + dq))
+                 + list(range(1 + W + Q, 1 + W + Q + dv))
+                 + list(range(1 + W + Q + V, 1 + W + Q + V + n_other)))
+            cols.append(torch.tensor(c, device=self.device, dtype=torch.long))
+        return cols
+
+    @property
+    def obs_cols(self):
+        if getattr(self, "_obs_cols", None) is None:
+            self._obs_cols = self._build_obs_cols()
+        return self._obs_cols
+
     def sim_obs(self):
-        """The 31-dim block: own qpos, own qvel, opponent root x,y."""
-        q = self.qpos[:, self.qpos_idx]
-        v = self.qvel[:, self.qvel_idx]
+        """The 31-dim block: own qpos, own qvel, opponent root x,y.
+
+        On a mixed team the qpos/qvel sub-blocks are padded to the widest
+        agent's width and the padding masked to zero, so the block stays
+        rectangular and no agent ever reads another creature's state.
+        """
+        q = self.qpos[:, self.qpos_idx] * self.qpos_mask
+        v = self.qvel[:, self.qvel_idx] * self.qvel_mask
         o = self.qpos[:, self.other_xy_idx]
         return torch.cat([q, v, o], dim=-1)
 
@@ -234,9 +348,14 @@ class RunToGoalDevEnv:
         self.ep_return[idx] = 0.0
         self.stage[idx] = True
         if self.fixed_design is None:
-            self.scale[idx] = torch.rand(
-                n, self.n_agents, DESIGN_DIM, generator=self.gen,
+            # Masked: a padded genome column must stay 0, not carry a random
+            # draw. Otherwise the design writer would read noise for a joint
+            # the creature does not have, and the policy would see a channel
+            # that changes every episode and means nothing.
+            self.scale[idx] = (torch.rand(
+                n, self.n_agents, self.design_dim, generator=self.gen,
                 device=self.device, dtype=self.dtype) * 2 - 1
+                ) * self.design_mask_row
         else:
             self.scale[idx] = self.fixed_design.unsqueeze(0)
         # No `forward()` here, unlike the fixed-morph env: the only thing read
@@ -274,7 +393,8 @@ class RunToGoalDevEnv:
         forward_r = self.move_sign * (com_x - self._com_before) / CONTROL_DT
         ctrl_cost = CTRL_COST_COEF * (a.to(self.dtype) ** 2).sum(-1)
         if self.contact_cost_from_cfrc:
-            f = self.cfrc_ext[:, self.body_ids].clamp(-1.0, 1.0)
+            f = (self.cfrc_ext[:, self.body_ids].clamp(-1.0, 1.0)
+                 * self.body_ids_mask.unsqueeze(-1))
             contact_cost = CONTACT_COST_COEF * (f ** 2).sum((-1, -2))
         else:
             contact_cost = torch.zeros_like(ctrl_cost)
@@ -329,8 +449,13 @@ class RunToGoalDevEnv:
         motor_eff = torch.where(zero_design, torch.zeros_like(motor), motor)
         cost_action = torch.where(zero_design, torch.zeros_like(motor_raw),
                                   motor_raw)
-        motor_eff = self._mask_motors(motor_eff)
-        self.ctrl.copy_(motor_eff.reshape(self.n, -1).to(self.ctrl.dtype))
+        motor_eff = self._mask_motors(motor_eff) * self.motor_mask
+        # Scatter each agent's REAL motor columns into the flat ctrl vector.
+        # `reshape(n, -1)` was correct only while every agent had the same
+        # motor count; on a mixed team it would smear one creature's torques
+        # across the next creature's actuators and still run.
+        flat = motor_eff[:, self.motor_mask.bool()].reshape(self.n, -1)
+        self.ctrl[:, self.ctrl_cols] = flat.to(self.ctrl.dtype)
         self._com_before = self._agent_com_x().clone()
         self.backend.step()
 

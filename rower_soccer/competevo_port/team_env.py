@@ -163,7 +163,8 @@ class TeamRunToGoalDevEnv(RunToGoalDevEnv):
         forward_r = self.move_sign * (com_x - self._com_before) / CONTROL_DT
         ctrl_cost = CTRL_COST_COEF * (a.to(self.dtype) ** 2).sum(-1)
         if self.contact_cost_from_cfrc:
-            f = self.cfrc_ext[:, self.body_ids].clamp(-1.0, 1.0)
+            f = (self.cfrc_ext[:, self.body_ids].clamp(-1.0, 1.0)
+                 * self.body_ids_mask.unsqueeze(-1))
             contact_cost = CONTACT_COST_COEF * (f ** 2).sum((-1, -2))
         else:
             contact_cost = torch.zeros_like(ctrl_cost)

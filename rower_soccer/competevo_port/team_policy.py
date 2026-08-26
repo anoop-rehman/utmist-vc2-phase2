@@ -52,7 +52,10 @@ import torch.nn as nn
 
 from rower_soccer.competevo_port.dev_ppo import DevActorCritic
 
-# `sim_obs` is [own qpos | own qvel | 2 per other] (dev_env.sim_obs).
+# `sim_obs` is [own qpos | own qvel | 2 per other] (dev_env.sim_obs). These are
+# THE ANT's widths and remain the default, so every 2f/2g caller is unchanged;
+# 2h passes `own_dim` explicitly, because a bug is 21+20 = 41 and a spider
+# 27+26 = 53.
 OWN_QPOS_DIM = 15
 OWN_QVEL_DIM = 14
 OWN_DIM = OWN_QPOS_DIM + OWN_QVEL_DIM
@@ -91,12 +94,16 @@ class TeamActorCritic(DevActorCritic):
     unchanged, because the widening is entirely in the input width.
     """
 
-    def __init__(self, n_agents=4, design_dim=20, n_motor=8,
+    def __init__(self, n_agents=4, design_dim=20, n_motor=8, own_dim=OWN_DIM,
                  role_in_design=False, scale_hidden=(64, 64), **kw):
         n_others = n_agents - 1
         self.n_agents = n_agents
+        # 2h: the own-state block is the creature's, not the ant's. Defaults to
+        # the ant so the 2f/2g construction is character-for-character the one
+        # `gate_team_policy` measured.
+        self.own_dim = int(own_dim)
         self.role_in_design = bool(role_in_design)
-        self.env_sim_dim = OWN_DIM + 2 * n_others
+        self.env_sim_dim = self.own_dim + 2 * n_others
         super().__init__(design_dim=design_dim,
                          sim_obs_dim=self.env_sim_dim + ROLE_DIM,
                          n_motor=n_motor, scale_hidden=scale_hidden, **kw)
@@ -119,9 +126,9 @@ class TeamActorCritic(DevActorCritic):
             assert isinstance(self.scale_mean, _nn.Linear)
         perm = others_permutation(n_agents)
         # Column indices into the env's sim block, in policy order.
-        cols = list(range(OWN_DIM))
+        cols = list(range(self.own_dim))
         for o in perm:
-            cols += [OWN_DIM + 2 * o, OWN_DIM + 2 * o + 1]
+            cols += [self.own_dim + 2 * o, self.own_dim + 2 * o + 1]
         self.register_buffer("sim_perm", torch.tensor(cols, dtype=torch.long),
                              persistent=False)
         roles = torch.stack([role_onehot(i, n_agents) for i in range(n_agents)])

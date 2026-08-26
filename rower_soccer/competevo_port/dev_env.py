@@ -370,6 +370,12 @@ class RunToGoalDevEnv:
         # Actions arrive in the network's dtype (fp32); the CPU mirror's state
         # is float64 for the parity gate, so cast rather than assume.
         design = design.to(self.dtype)
+        # 2h: a narrower creature's trailing genome columns stay 0. Nothing
+        # downstream reads them (the design writer indexes only that agent's
+        # own parameters) but the OBSERVATION carries them, and a channel that
+        # changes every episode and means nothing is exactly the kind of input
+        # a policy learns to read. On a homogeneous scene the mask is all ones.
+        design = design * self.design_mask_row
         self.scale[idx] = design
         self.writer.write(idx, design)
         if hasattr(self.backend, "mark_model_dirty"):

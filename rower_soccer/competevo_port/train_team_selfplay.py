@@ -151,6 +151,12 @@ def main():
     p.add_argument("--down-rule", default="team_down")
     p.add_argument("--win-rule", default="team_first")
     p.add_argument("--goal-credit", default="team")
+    p.add_argument("--creatures", default=None,
+                   help="2h: comma-separated creature per agent, in the port's "
+                        "agent order (A1, B1, A2, B2) -- e.g. "
+                        "'ant,ant,spider,spider' for an ant/spider team on both "
+                        "sides. Default: ant everywhere, i.e. the 2f/2g scene. "
+                        "A MIXED composition requires --per-slot.")
     p.add_argument("--per-slot", action="store_true",
                    help="2h Option A: an independent actor-critic per (side, "
                         "slot) instead of one per side with a role one-hot. "
@@ -174,7 +180,6 @@ def main():
     from rower_soccer.competevo_port.team_env import TeamRunToGoalDevEnv
     from rower_soccer.competevo_port.team_policy import (TeamActorCritic,
                                                          widen_from_1v1)
-    from rower_soccer.competevo_port.train_team_smoke import TeamPolicyObsEnv
 
     os.makedirs(args.out, exist_ok=True)
     _wb = _wandb_init(args, "2v2")
@@ -183,9 +188,31 @@ def main():
 
     env_kw = dict(down_rule=args.down_rule, win_rule=args.win_rule,
                   goal_credit=args.goal_credit)
+    if args.creatures:
+        # Left as `scene_kwargs` rather than a first-class env argument: the
+        # composition is a property of the SCENE, and `build_dev_team_scene`
+        # is the one place that validates it.
+        env_kw["scene_kwargs"] = {
+            "creatures": [c.strip() for c in args.creatures.split(",")]}
     env = TeamRunToGoalDevEnv(num_worlds=args.worlds,
                               use_gpu=(device == "cuda"), seed=args.seed,
                               **env_kw)
+    from rower_soccer.competevo_port.slot_policy import env_is_mixed, wrap_env
+    mixed = env_is_mixed(env)
+    if mixed:
+        # A shared net per side cannot drive two different creatures: one
+        # `design_dim`, one motor count, one own-state width. Option A is the
+        # architecture 2h is built on, so this is a hard requirement, not a
+        # default.
+        assert args.per_slot, (
+            f"composition {env.meta.creatures} is heterogeneous; it needs "
+            "--per-slot (one actor-critic per (side, slot))")
+        assert not args.warm_start, (
+            "--warm-start widens a 1v1 ANT policy; there is no warm start for "
+            "a mixed composition")
+        print(f"heterogeneous composition {env.meta.creatures}: "
+              f"design {env.meta.design_dims}, motors {env.meta.n_motors}, "
+              f"obs {env.meta.obs_dims} -> padded {env.obs_dim}")
 
     if args.warm_start:
         blob = torch.load(args.warm_start, map_location="cpu")
@@ -218,8 +245,10 @@ def main():
 
     # The wrapper presents the POLICY's 58-dim observation; every consumer --
     # the trainer, the opponent stack, the evaluator -- must see the same one,
-    # so it wraps the env once here rather than at each call site.
-    wrapped = TeamPolicyObsEnv(env, acs[0])
+    # so it wraps the env once here rather than at each call site. On a mixed
+    # composition `wrap_env` returns `MixedPolicyObsEnv` instead, which expands
+    # the PADDED observation and leaves the per-slot gather to the policy.
+    wrapped = wrap_env(env, acs[0])
     trainer = CoEvoPPO(wrapped, acs=acs, delta=args.delta,
                        ring_capacity=args.ring_capacity,
                        checkpoint_every=args.checkpoint_every,
@@ -228,14 +257,19 @@ def main():
                        minibatch_size=args.minibatch,
                        policy_lr=args.policy_lr, value_lr=args.value_lr)
     lanes = trainer.team_lanes
+    # The policy width is per SLOT on a mixed team, so report what each net
+    # actually consumes rather than slot 0's, which was the only one that ever
+    # differed from the buffer width before 2h.
+    widths = ([n.obs_dim for n in acs[0].nets] if hasattr(acs[0], "n_slots")
+              else acs[0].obs_dim)
     print(f"worlds {env.n} x {env.n_agents} agents, teams "
           f"{[l.tolist() for l in lanes]}, rollout {args.rollout}, "
-          f"obs {env.obs_dim} -> {acs[0].obs_dim}")
+          f"obs {env.obs_dim} -> buffer {wrapped.obs_dim} -> nets {widths}")
 
     eval_env = TeamRunToGoalDevEnv(num_worlds=args.eval_worlds,
                                    use_gpu=(device == "cuda"),
                                    seed=args.seed + 7, **env_kw)
-    eval_wrapped = TeamPolicyObsEnv(eval_env, acs[0])
+    eval_wrapped = wrap_env(eval_env, acs[0])
 
     rows, t0 = [], time.time()
     for it in range(args.iters):

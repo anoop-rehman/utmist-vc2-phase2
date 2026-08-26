@@ -34,12 +34,53 @@ dispatching over the lane axis, so nothing in the trainer changes.
 Per-slot observation widths are supported (`obs_cols`) for the heterogeneous
 case, where each net gathers only the columns that are real for its creature;
 on a homogeneous team those are the identity and the gather is a no-op.
+
+--------------------------------------------------------------------------
+2h: the column map has to live in EXPANDED space, not scene space
+--------------------------------------------------------------------------
+`env.obs_cols[i]` indexes the RAW scene observation. A policy is never handed
+that: `TeamPolicyObsEnv._expand` runs `TeamActorCritic.expand_obs` first, which
+PERMUTES the others block (scene `[teammate, opp_near, opp_far]` -> policy
+`[opp_near, teammate, opp_far]`) and APPENDS the 2-dim role one-hot. Passing
+the raw columns through therefore dropped the role and handed the control head
+a 35-wide sim block where it wanted 37 -- which is why `from_env` refused the
+mixed case rather than building a net that runs and is wrong.
+
+`MixedPolicyObsEnv` below is the fix, and it inverts the layering. Instead of
+expanding per agent with one net's widths (impossible: a mixed team's agents
+have different `design_dim` and different own-state widths, so there is no
+single `expand_obs`), it expands the PADDED scene observation as a whole:
+
+    expanded = [flag(1) | scale(max_design) | qpos(max_q) | qvel(max_v)
+                | others PERMUTED (2 * n_others) | role(2)]
+
+which is exactly the env's own padded layout with the others block permuted in
+place and two columns appended. The permutation is a gather inside a block
+whose width does not depend on the creature, so it is well defined for a mixed
+team; the padding stays where `dev_env` put it. `expanded_obs_cols` then maps
+each slot to its real columns of THAT tensor, and the gathered result is
+`[flag | scale_i | qpos_i | qvel_i | others_permuted | role]` -- precisely what
+`TeamActorCritic(design_dim=d_i, own_dim=q_i+v_i)` consumes.
+
+THE ROLE ONE-HOT IS KEPT for mixed teams even though under Option A it is
+constant per net (the role IS the net, so it carries no information). Keeping
+it means the mixed and homogeneous paths build the identical `TeamActorCritic`
+shape -- `sim_obs_dim = own + 2*n_others + ROLE_DIM` in both -- and it costs
+two dead input columns. Dropping it would have made the two paths' nets
+different shapes for no gain.
+
+Homogeneous compositions do NOT go through any of this: `train_team_selfplay`
+keeps wrapping them in `TeamPolicyObsEnv` with `obs_cols=None`, which is the
+2f/2g path untouched.
 """
 
 import torch
 import torch.nn as nn
 
-from rower_soccer.competevo_port.team_policy import TeamActorCritic
+from rower_soccer.competevo_port.team_policy import (OWN_DIM, ROLE_DIM,
+                                                     TeamActorCritic,
+                                                     others_permutation,
+                                                     role_onehot)
 
 
 class SlotTeamActorCritic(nn.Module):
@@ -51,12 +92,17 @@ class SlotTeamActorCritic(nn.Module):
     """
 
     def __init__(self, n_agents=4, design_dims=(20, 20), n_motors=(8, 8),
-                 obs_cols=None, act_dim=None, **kw):
+                 own_dims=None, obs_cols=None, act_dim=None, max_design=None,
+                 **kw):
         super().__init__()
         assert len(design_dims) == len(n_motors), "one width pair per slot"
         self.n_slots = len(design_dims)
         self.design_dims = tuple(design_dims)
         self.n_motors = tuple(n_motors)
+        # Per-slot own-state width (qpos + qvel). Defaults to the ant's, which
+        # is what every homogeneous 2f/2g caller means.
+        self.own_dims = tuple(own_dims or [OWN_DIM] * self.n_slots)
+        assert len(self.own_dims) == self.n_slots
         # role_in_design is meaningless here and is refused rather than
         # silently ignored: with one net per slot the role is the network, and
         # accepting the flag would imply a 2g-style comparison this
@@ -65,12 +111,20 @@ class SlotTeamActorCritic(nn.Module):
             "role_in_design has no meaning under Option A -- the role IS the "
             "net. Use TeamActorCritic for the 2g architecture.")
         self.nets = nn.ModuleList([
-            TeamActorCritic(n_agents=n_agents, design_dim=d, n_motor=m, **kw)
-            for d, m in zip(design_dims, n_motors)])
+            TeamActorCritic(n_agents=n_agents, design_dim=d, n_motor=m,
+                            own_dim=o, **kw)
+            for d, m, o in zip(design_dims, n_motors, self.own_dims)])
         # Padded action width, shared across slots so the env's [n, A, act_dim]
         # tensor stays rectangular. Each slot writes its own leading columns of
         # the design block and of the motor block.
-        self.max_design = max(design_dims)
+        #
+        # `max_design` is the ENV's design block width, NOT this side's. They
+        # differ as soon as the two sides carry different creatures (an
+        # [ant, spider] side against a [bug, bug] side: 40 vs 30), and taking
+        # the side's own maximum would start the motor block 10 columns early
+        # and drive the wrong actuators with a perfectly rectangular tensor.
+        self.max_design = int(max_design or max(design_dims))
+        assert self.max_design >= max(design_dims)
         self.act_dim = act_dim or (self.max_design + max(n_motors))
         if obs_cols is None:
             obs_cols = [None] * self.n_slots
@@ -112,15 +166,22 @@ class SlotTeamActorCritic(nn.Module):
         return torch.cat([n.control_log_std.reshape(-1) for n in self.nets])
 
     def expand_obs(self, obs, agent_idx):
-        assert len(set(self.design_dims)) == 1 and len(set(self.n_motors)) == 1, (
+        assert (len(set(self.design_dims)) == 1
+                and len(set(self.n_motors)) == 1
+                and len(set(self.own_dims)) == 1), (
             "expand_obs via the shared wrapper assumes shape-identical slots; "
-            "a mixed composition must expand per slot")
+            "a mixed composition must use MixedPolicyObsEnv, which expands the "
+            "padded scene observation once and lets each slot gather its own "
+            "columns of it")
         return self.nets[0].expand_obs(obs, agent_idx)
 
-    def _slot_obs(self, obs, l):
+    def _take(self, o, l):
+        """Slot `l`'s columns of a `[..., D]` observation."""
         c = getattr(self, f"cols_{l}")
-        o = obs[..., l, :]
         return o if c is None else o.index_select(-1, c.to(o.device))
+
+    def _slot_obs(self, obs, l):
+        return self._take(obs[..., l, :], l)
 
     def _pad_action(self, a, l):
         """A slot's `[..., d_l + m_l]` action into the shared `act_dim` layout
@@ -184,8 +245,13 @@ class SlotTeamActorCritic(nn.Module):
             if not bool(m.any()):
                 continue
             args = [r[m] for r in rest]
-            y = fn(self.nets[l], self._slot_obs(obs[m].unsqueeze(-2), 0)
-                   if False else obs[m], l, *args)
+            # `_take`, not the raw rows: the lane axis is already gone here, so
+            # `_slot_obs` does not apply, but the per-slot column gather still
+            # does. Without it a mixed slot's net was handed the full padded
+            # width in the UPDATE while `collect` handed it the gathered one --
+            # a shape error at best and, at equal widths, silently different
+            # inputs between the rollout and the ratio it is trained on.
+            y = fn(self.nets[l], self._take(obs[m], l), l, *args)
             if out is None:
                 out = torch.zeros(obs.shape[0], *y.shape[1:], device=y.device,
                                   dtype=y.dtype)
@@ -209,6 +275,126 @@ class SlotTeamActorCritic(nn.Module):
              for l in range(self.n_slots)], dim=-2)
 
 
+def env_own_dims(env):
+    """Each agent's REAL own-state width (qpos + qvel), read off `dev_env`'s
+    padding masks rather than from a creature table -- the masks are what the
+    observation is actually built with."""
+    return [int(env.qpos_mask[i].sum().item())
+            + int(env.qvel_mask[i].sum().item())
+            for i in range(env.n_agents)]
+
+
+def env_is_mixed(env):
+    """True when the agents differ in any width a policy has to match."""
+    return (len(set(env.design_dims)) != 1 or len(set(env.n_motors)) != 1
+            or len(set(env_own_dims(env))) != 1)
+
+
+def _raw_blocks(env):
+    """`(others_offset, others_width)` of `dev_env`'s padded observation."""
+    base_o = (1 + env.design_dim + env.qpos_idx.shape[1]
+              + env.qvel_idx.shape[1])
+    n_other = env.other_xy_idx.shape[1]
+    assert base_o + n_other == env.obs_dim, (base_o, n_other, env.obs_dim)
+    return base_o, n_other
+
+
+def expansion_permutation(env):
+    """`[env.obs_dim]` gather that turns the padded SCENE observation into the
+    padded EXPANDED one, minus the appended role.
+
+    Identity everywhere except inside the others block, which is reordered
+    `[teammate, opp_near, opp_far] -> [opp_near, teammate, opp_far]`. That is
+    `team_policy.others_permutation`, applied to the whole tensor at once
+    instead of per agent -- legal precisely because the others block is
+    `2 * (n_agents - 1)` wide for every creature.
+    """
+    base_o, n_other = _raw_blocks(env)
+    cols = list(range(base_o))
+    for o in others_permutation(env.n_agents):
+        cols += [base_o + 2 * o, base_o + 2 * o + 1]
+    assert len(cols) == base_o + n_other
+    return torch.as_tensor(cols, dtype=torch.long, device=env.device)
+
+
+def expanded_obs_cols(env):
+    """`cols[i]` = the columns of the PADDED EXPANDED observation that are real
+    for agent `i`, including the two role columns at the end.
+
+    Built from `env.obs_cols` (which is scene-space) rather than re-derived, so
+    the two cannot drift: the own-state part of a scene column map is unchanged
+    by the expansion (the permutation only touches the others block, and every
+    agent takes that block whole), and the role columns are appended.
+    """
+    base_o, n_other = _raw_blocks(env)
+    others = list(range(base_o, base_o + n_other))
+    role = [env.obs_dim + k for k in range(ROLE_DIM)]
+    out = []
+    for c in env.obs_cols:
+        c = c.tolist()
+        own = [j for j in c if j < base_o]
+        assert c[len(own):] == others, (
+            "env.obs_cols does not end in the whole others block; the "
+            "expansion's in-place permutation assumes it does")
+        out.append(torch.as_tensor(own + others + role, dtype=torch.long,
+                                   device=env.device))
+    return out
+
+
+class MixedPolicyObsEnv:
+    """`train_team_smoke.TeamPolicyObsEnv` for a MIXED composition.
+
+    Same contract -- delegate everything, present the policy's observation --
+    but the expansion is driven by the ENV rather than by one actor-critic,
+    because on a mixed team no single `expand_obs` is correct for all four
+    agents (see this module's docstring). The output is the env's padded
+    observation with the others block permuted and a per-agent role one-hot
+    appended, and each slot gathers its own columns of that via
+    `expanded_obs_cols`.
+
+    Deliberately a separate class: the homogeneous path keeps using
+    `TeamPolicyObsEnv` unchanged, so 2f/2g runs are not perturbed by 2h.
+    """
+
+    def __init__(self, env):
+        self._env = env
+        self.obs_dim = env.obs_dim + ROLE_DIM
+        self._perm = expansion_permutation(env)
+        self._roles = torch.stack(
+            [role_onehot(i, env.n_agents, device=env.device, dtype=env.dtype)
+             for i in range(env.n_agents)])
+
+    def __getattr__(self, name):
+        return getattr(self._env, name)
+
+    def _expand(self, obs):
+        """`[n, A, obs_dim]` -> `[n, A, obs_dim + ROLE_DIM]`."""
+        o = obs.index_select(-1, self._perm.to(obs.device))
+        role = self._roles.to(device=obs.device, dtype=obs.dtype)
+        role = role.unsqueeze(0).expand(obs.shape[0], -1, -1)
+        return torch.cat([o, role], dim=-1)
+
+    def reset(self):
+        return self._expand(self._env.reset())
+
+    def step(self, action):
+        obs, rew, done, info = self._env.step(action)
+        return self._expand(obs), rew, done, info
+
+
+def wrap_env(env, ac):
+    """The right observation wrapper for this composition.
+
+    One call site in the trainer instead of an `if` there, so the choice is
+    made from the SCENE (which knows whether it is mixed) rather than from a
+    command-line flag that could disagree with it.
+    """
+    if env_is_mixed(env):
+        return MixedPolicyObsEnv(env)
+    from rower_soccer.competevo_port.train_team_smoke import TeamPolicyObsEnv
+    return TeamPolicyObsEnv(env, ac)
+
+
 def from_env(env, lanes, **kw):
     """Build the policy for one side of `env`, given that side's lane indices.
 
@@ -217,23 +403,21 @@ def from_env(env, lanes, **kw):
     (it was possible before: `TeamActorCritic`'s defaults are 20/8, the ant's,
     and a spider scene would have built an ant-shaped net that still ran).
 
-    **Homogeneous compositions only, deliberately.** `env.obs_cols` indexes the
-    RAW scene observation, but a policy is handed the EXPANDED one --
-    `TeamPolicyObsEnv` runs `expand_obs` first, which permutes the others block
-    and appends the role one-hot. Passing the raw columns through was silently
-    dropping the role and handing the control head a 35-wide sim block where it
-    wanted 37. The mixed path needs its column map recomputed in EXPANDED
-    space; until that exists this refuses rather than building a net that runs
-    and is wrong.
+    Heterogeneous compositions are supported as of 2h. Each slot gets its own
+    `design_dim`, `n_motor` and own-state width, plus a column map into the
+    PADDED EXPANDED observation `MixedPolicyObsEnv` produces. A homogeneous
+    composition still gets `obs_cols=None` -- the whole observation, no gather
+    -- which is byte-for-byte the 2f/2g path.
     """
-    if not getattr(env, "homogeneous_design", True) or \
-            len(set(env.n_motors)) != 1:
-        raise NotImplementedError(
-            "SlotTeamActorCritic.from_env supports homogeneous compositions "
-            "only: a mixed team needs obs_cols expressed in EXPANDED "
-            "observation space (post expand_obs), which is not built yet")
+    own = env_own_dims(env)
+    cols = None if not env_is_mixed(env) else [
+        c for i, c in enumerate(expanded_obs_cols(env)) if i in set(lanes)]
+    # `lanes` is ascending (team_lanes is built by a filter over range), so the
+    # comprehension above is in lane order; asserted rather than assumed.
+    assert list(lanes) == sorted(lanes), f"lanes must be ascending: {lanes}"
     return SlotTeamActorCritic(
         n_agents=env.n_agents,
         design_dims=[env.design_dims[l] for l in lanes],
         n_motors=[env.n_motors[l] for l in lanes],
-        obs_cols=None, act_dim=env.act_dim, **kw)
+        own_dims=[own[l] for l in lanes],
+        obs_cols=cols, act_dim=env.act_dim, max_design=env.design_dim, **kw)

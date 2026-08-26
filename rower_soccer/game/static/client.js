@@ -209,11 +209,19 @@ function paintOverlay(st) {
   // readable at a glance -- everything else is already in the render.
   const me = (st.players || []).find((p) => p.slot === S.slot);
   if (me) {
-    const x = me.u * w, y = me.v * h, tx = me.tu * w, ty = me.tv * h;
-    ctx.strokeStyle = "#4cc38a"; ctx.lineWidth = 2;
+    const x = me.u * w, y = me.v * h;
+    // The aim line follows `me.path`, a ground polyline the server already
+    // projected through the active camera. Drawing a single straight segment
+    // to (tu, tv) instead was only right for the topdown affine -- under the
+    // chase cameras it lifted off the pitch and cut through the scene.
+    ctx.strokeStyle = me.color || "#4cc38a"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(x, y, 16, 0, 6.284); ctx.stroke();
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(tx, ty); ctx.stroke();
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    const pts = me.path || [[me.u, me.v], [me.tu, me.tv]];
+    pts.forEach(([pu, pv], i) => (i ? ctx.lineTo(pu * w, pv * h)
+                                   : ctx.moveTo(pu * w, pv * h)));
+    ctx.stroke();
     ctx.setLineDash([]);
   }
   if (S.drag) {

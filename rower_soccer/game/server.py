@@ -244,6 +244,10 @@ class GameServer:
                 cams = sim.CAMERAS
                 sim.set_camera(c.get("value") or
                                cams[(cams.index(sim.camera) + 1) % len(cams)])
+                # `playercam` follows ONE seat; point it at whoever asked, so a
+                # human toggling to it gets their own view rather than seat 0's.
+                if sim.camera == "playercam" and c.get("player") is not None:
+                    sim.player_view = int(c["player"])
                 sim._pending_events.append(dict(
                     tick=int(sim.tick), t=float(sim.match_time),
                     type="camera", camera=sim.camera))
@@ -539,7 +543,11 @@ class _Handler(BaseHTTPRequestHandler):
             if d.get("action") not in ("start", "stop", "camera"):
                 return self._json(dict(ok=False,
                                        error="action must be start|stop|camera"), 400)
-            gs.push_control(d["action"], value=d.get("value"))
+            # Carry WHO asked: `playercam` follows one seat, and a viewer
+            # toggling to it must get their own seat, not seat 0's.
+            gs.push_control(d["action"], value=d.get("value"),
+                            player=(None if c is None or c.slot is None
+                                    else SLOTS.index(c.slot)))
             return self._json(dict(ok=True))
 
         return self._send(404, b"not found", "text/plain")

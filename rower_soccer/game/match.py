@@ -19,6 +19,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+import mujoco
 import numpy as np
 
 from rower_soccer.game import recording as rec
@@ -49,6 +50,8 @@ MARKER_HALF_H = 0.012   # flush with the turf -- it must never occlude the ball
 BALLCAM_BACK = 9.0      # metres behind the ball, along -y
 BALLCAM_UP = 5.5        # metres above it -> ~31 deg downtilt
 BALLCAM_FOVY = 50.0     # close enough that the 0.35 m ball is clearly visible
+PATH_SEGMENTS = 16      # samples along the ground aim line; enough that the
+                        # projected polyline hugs the turf under perspective
 
 
 def marker_rgba(i, alpha=0.9):
@@ -201,7 +204,12 @@ class MatchSim:
         # Default to the ball camera: it is close enough that the 0.35 m ball
         # and the ants are both clearly visible, which the pitch-fitting topdown
         # is not. Players can cycle to topdown/broadcast.
-        self.camera = "ballcam"
+        self.camera = "playercam"
+        # Which seat `playercam` follows. The server points this at the human's
+        # slot; with one human that is one render per tick, which is what makes
+        # a per-player view affordable at all (four of them cost 112 ms against
+        # a 50 ms budget -- see the render-cost note on the chase cameras).
+        self.player_view = 0
         if not shadows:
             # The pitch ships 4 lights each rendering an 8192x8192 shadowmap: ~90 ms
             # a frame, a fixed cost that dwarfs the physics step and would cap the
@@ -235,8 +243,7 @@ class MatchSim:
             up = np.cross(right, fwd)
             spec = wb.add("camera", name=f"chase_{slot}", pos=off.tolist(),
                           xyaxes=[*right.tolist(), *up.tolist()],
-                          mode="track", fovy=CHASE_FOVY,
-                          target=self.task.players[i].walker.root_body)
+                          fovy=CHASE_FOVY)
             self._chase_specs.append(spec)
             tanf = math.tan(math.radians(CHASE_FOVY) / 2.0)
             self._chase.append(dict(off=off,
@@ -258,12 +265,22 @@ class MatchSim:
         self._ballcam_off = np.array([0.0, -BALLCAM_BACK, BALLCAM_UP])
         wb.add("camera", name="ballcam", pos=self._ballcam_off.tolist(),
                xyaxes=[*bright.tolist(), *bup2.tolist()],
-               mode="track", fovy=BALLCAM_FOVY,
-               target=self.task.ball.root_body)
+               fovy=BALLCAM_FOVY)
         self._ballcam = dict(off=self._ballcam_off,
                              R=np.stack([bright, bup2, -bfwd], axis=1),
                              tanf=math.tan(math.radians(BALLCAM_FOVY) / 2.0),
                              aspect=aspect)
+
+        # -- the creatures wear their own target's colour --------------------
+        # Both members of a team shipped the same rgba, so on screen you could
+        # see which disc was yours but not which ANT was. Painting every geom of
+        # player i with marker hue i makes the pairing unambiguous: your ant and
+        # your disc are the same colour, your partner's are a visibly different
+        # shade of the same team colour.
+        for i, pl in enumerate(self.task.players):
+            rgba = marker_rgba(i, alpha=1.0)
+            for g in pl.walker.mjcf_model.find_all("geom"):
+                g.rgba = rgba
 
         # -- target markers: a DISC on the pitch, not a floating sphere ------
         # A sphere at z = 0.35 sits exactly where the ball is and hides it,
@@ -304,7 +321,7 @@ class MatchSim:
         self._goal_latch = False
 
     # -- geometry ----------------------------------------------------------
-    CAMERAS = ("topdown", "broadcast", "ballcam")
+    CAMERAS = ("playercam", "ballcam", "topdown", "broadcast")
 
     def set_camera(self, name):
         if name not in self.CAMERAS:
@@ -360,6 +377,9 @@ class MatchSim:
     def _uv_to_world_fixed(self, u, v):
         if self.camera == "ballcam":
             return self._ray_to_ground(self._ballcam, self._ballcam_origin(), u, v)
+        if self.camera == "playercam":
+            i = self.player_view
+            return self._ray_to_ground(self._chase[i], self._chase_origin(i), u, v)
         """Normalized click (u, v in [0, 1], origin top-left of the frame) -> world xy.
 
         topdown: image-right -> world +x, image-UP -> world +y, a pure affine.
@@ -383,6 +403,8 @@ class MatchSim:
                 float((1.0 - v * 2.0) * self.half_y))
 
     def world_to_uv(self, x, y, z=0.0, view=None):
+        if view is None and self.camera == "playercam":
+            view = self.player_view
         if view is None and self.camera == "ballcam":
             c = self._ballcam
             p = c["R"].T @ (np.array([x, y, z]) - self._ballcam_origin())
@@ -705,12 +727,38 @@ class MatchSim:
         w.record_tick(**row)
 
     # -- rendering ---------------------------------------------------------
+    def _aim_moving_cameras(self):
+        """Put the tracking cameras where `uv_to_world` says they are.
+
+        MuJoCo's `mode="track"` follows the camera's PARENT body, and these are
+        worldbody cameras with no parent -- so they silently never moved, while
+        the ray maths assumed they did. The picture and the click coordinates
+        then disagreed, which is the worst version of this bug because both
+        halves look fine alone. Writing `cam_pos` from the SAME origin function
+        the raycast uses makes them one thing by construction.
+        """
+        cp = self.physics.model.cam_pos
+        cp[self.ballcam_id] = self._ballcam_origin()
+        for i, cid in enumerate(self.chase_cam_ids):
+            cp[cid] = self._chase_origin(i)
+        # `cam_pos` is MODEL data; the renderer reads `data.cam_xpos`, which is
+        # derived from it by `mj_camlight` (NOT by mj_kinematics -- checked).
+        # Without this the camera moves in the model and the picture does not,
+        # which is how the first version of this looked correct in every number
+        # and wrong in every frame.
+        mujoco.mj_camlight(self.physics.model.ptr, self.physics.data.ptr)
+
     def render(self, view=None):
+        self._aim_moving_cameras()
         """`view=None` -> the shared spectator frame; `view=i` -> player i's
         chase camera, at the smaller per-player size."""
         if view is not None:
             return self.physics.render(camera_id=self.chase_cam_ids[view],
                                        width=self.chase_w, height=self.chase_h)
+        if self.camera == "playercam":
+            return self.physics.render(
+                camera_id=self.chase_cam_ids[self.player_view],
+                width=self.render_w, height=self.render_h)
         cam = {"broadcast": self.bcast_cam_id,
                "ballcam": self.ballcam_id}.get(self.camera, self.cam_id)
         return self.physics.render(camera_id=cam,
@@ -728,7 +776,20 @@ class MatchSim:
             u, v = self.world_to_uv(xyz[0], xyz[1], xyz[2])
             c = self.commands[p]
             tu, tv = self.world_to_uv(c.target[0], c.target[1])
+            # The aim line, sampled ALONG THE GROUND and projected point by
+            # point. A straight 2-D line between the creature's uv and the
+            # target's uv is only correct for the topdown affine; under any
+            # perspective camera it cuts through 3-D space and floats above the
+            # pitch. Projecting a ground polyline instead makes it lie on the
+            # turf, like the disc it points at.
+            path = [self.world_to_uv(
+                        xyz[0] + (c.target[0] - xyz[0]) * k / PATH_SEGMENTS,
+                        xyz[1] + (c.target[1] - xyz[1]) * k / PATH_SEGMENTS, 0.0)
+                    for k in range(PATH_SEGMENTS + 1)]
+            r, g, b, _ = marker_rgba(p)
             players.append(dict(slot=SLOTS[p], u=u, v=v, tu=tu, tv=tv,
+                                path=[[round(pu, 4), round(pv, 4)] for pu, pv in path],
+                                color=f"#{int(255*r):02x}{int(255*g):02x}{int(255*b):02x}",
                                 skill=c.skill, controller=c.controller, name=c.name))
         bpos, _ = self.task.ball.get_pose(self.physics)
         bu, bv = self.world_to_uv(bpos[0], bpos[1], bpos[2])

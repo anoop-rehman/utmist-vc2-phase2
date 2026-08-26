@@ -202,7 +202,7 @@ class SelfPlayPPO:
               if n.startswith(("vf", "value_net"))]
         return pi, vf
 
-    def _logp_entropy(self, obs, act):
+    def _logp_entropy(self, obs, act, slots=None):
         """(log pi(act|obs), entropy). Overridden by the dev trainer, whose
         actor has two heads and picks one per sample from the stage flag."""
         d = self.ac.dist(obs)
@@ -264,20 +264,31 @@ class SelfPlayPPO:
         act = self.act_buf.reshape(n, -1)
         logp_old = self.logp_buf.reshape(n)
         adv, ret = adv.reshape(n), ret.reshape(n)
+        # 2h Option A: with one net per SLOT the flattening above destroys the
+        # only thing that says which net owns a row, and the minibatch `perm`
+        # then shuffles rows from both slots together. `obs_buf` is
+        # [T, N, A, D] and A is the lane axis, so the slot of flat row r is
+        # r % A. None for a shared-net policy, where every call below keeps its
+        # original single-argument form.
+        slot_all = (torch.arange(n, device=self.device) % self.A
+                    if hasattr(self.ac, "n_slots") else None)
         self.ac.train()                      # RunningNorm advances here, only
         stats = {"pi_loss": 0.0, "vf_loss": 0.0, "kl": 0.0, "nb": 0}
         for _ in range(self.epochs):
             perm = torch.randperm(n, device=self.device)
             for s in range(0, n, self.mb):
                 i = perm[s:s + self.mb]
-                logp, ent = self._logp_entropy(obs[i], act[i])
+                sl = None if slot_all is None else slot_all[i]
+                logp, ent = self._logp_entropy(obs[i], act[i], slots=sl)
                 ratio = (logp - logp_old[i]).exp()
                 pi_loss = -torch.min(
                     ratio * adv[i],
                     ratio.clamp(1 - self.clip, 1 + self.clip) * adv[i]).mean()
                 if self.ent_coef:
                     pi_loss = pi_loss - self.ent_coef * ent.mean()
-                vf_loss = (self.ac.value(obs[i]) - ret[i]).pow(2).mean()
+                v_i = (self.ac.value(obs[i]) if sl is None
+                       else self.ac.value_flat(obs[i], sl))
+                vf_loss = (v_i - ret[i]).pow(2).mean()
                 # Their explicit L2 penalty, in the loss where they put it.
                 vf_total = vf_loss
                 if self.value_l2:

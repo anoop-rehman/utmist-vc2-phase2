@@ -344,11 +344,30 @@ class DevSelfPlayPPO(SelfPlayPPO):
         super().__init__(env, ac, curriculum_steps=curriculum_steps, **kw)
 
     def _param_groups(self):
-        pi = [p for n, p in self.ac.named_parameters()
-              if n.startswith(("scale_", "control_"))]
-        vf = [p for n, p in self.ac.named_parameters()
-              if n.startswith(("vf", "value_net"))]
+        # Match on ANY dot-component, not just the first. Un-nested names
+        # (`scale_norm.mean`, `vf.0.weight`) behave exactly as before; nested
+        # ones (`nets.0.scale_mlp.0.weight`, from Option A's per-slot
+        # ModuleList) now land in the right group instead of silently in
+        # NEITHER -- which would have left those parameters with no optimizer
+        # and a policy that trains its value function and nothing else.
+        def has(n, pre):
+            return any(part.startswith(pre) for part in n.split("."))
+        pi, vf, seen = [], [], 0
+        for n, p in self.ac.named_parameters():
+            seen += 1
+            if has(n, ("scale_", "control_")):
+                pi.append(p)
+            elif has(n, ("vf", "value_net")):
+                vf.append(p)
+        assert len(pi) + len(vf) == seen, (
+            f"{seen - len(pi) - len(vf)} parameter(s) matched neither group; "
+            f"they would never be optimized")
         return pi, vf
 
-    def _logp_entropy(self, obs, act):
-        return self.ac.log_prob(obs, act), self.ac.entropy(obs)
+    def _logp_entropy(self, obs, act, slots=None):
+        # `slots` is non-None only for a per-slot policy (2h Option A),
+        # where a flat minibatch mixes rows owned by different nets.
+        if slots is None:
+            return self.ac.log_prob(obs, act), self.ac.entropy(obs)
+        return (self.ac.log_prob_flat(obs, act, slots),
+                self.ac.entropy_flat(obs, slots))

@@ -151,6 +151,10 @@ def main():
     p.add_argument("--down-rule", default="team_down")
     p.add_argument("--win-rule", default="team_first")
     p.add_argument("--goal-credit", default="team")
+    p.add_argument("--per-slot", action="store_true",
+                   help="2h Option A: an independent actor-critic per (side, "
+                        "slot) instead of one per side with a role one-hot. "
+                        "Mutually exclusive with --role-in-design")
     p.add_argument("--role-in-design", action="store_true",
                    help="let the DESIGN head see the role one-hot. Off, both "
                         "teammates run the same function of the same random "
@@ -192,6 +196,21 @@ def main():
             acs.append(widen_from_1v1(src, n_agents=env.n_agents,
                                       role_in_design=args.role_in_design))
         print(f"warm start from {args.warm_start}")
+    elif args.per_slot:
+        # 2h Option A: one net per (side, SLOT) instead of one per side with a
+        # role one-hot. Role becomes the identity of the network rather than an
+        # input, so `--role-in-design` is meaningless here and refused rather
+        # than silently ignored.
+        from rower_soccer.competevo_port.slot_policy import from_env
+        assert not args.role_in_design, (
+            "--per-slot and --role-in-design are mutually exclusive: under "
+            "per-slot the role IS the net")
+        team = env.meta.team
+        sides = [[i for i in range(env.n_agents) if team[i] == t]
+                 for t in (0, 1)]
+        acs = [from_env(env, s) for s in sides]
+        print(f"per-slot policies (Option A): lanes {sides}, "
+              f"{sum(p.numel() for p in acs[0].parameters()):,} params/side")
     else:
         acs = [TeamActorCritic(n_agents=env.n_agents,
                                role_in_design=args.role_in_design)

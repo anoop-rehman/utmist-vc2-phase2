@@ -376,9 +376,25 @@ class CoEvoPPO:
                   "(StackedDevActors does not know the wider design head)",
                   flush=True)
             batched_opponents = False
+        # 2h Option A: a side is a ModuleList of independent per-slot nets, and
+        # StackedDevActors mirrors ONE net's shape across slots. Same fallback,
+        # same reason: correct beats fast for an exploratory arm, and a stacked
+        # mirror that averaged two different slots' weights would be wrong in a
+        # way nothing downstream would report.
+        if batched_opponents and hasattr(self.acs[0], "n_slots"):
+            print("[CoEvoPPO] per-slot policies: using the per-slot opponent "
+                  "path (StackedDevActors mirrors a single net shape)",
+                  flush=True)
+            batched_opponents = False
         self.batched_opponents = bool(batched_opponents)
-        self.opp_stack = StackedDevActors(self.opp_nets[0][0], 2,
-                                          self.blocks).to(device)
+        # Only built when the fast path is on. Both uses (`sync_from` in
+        # `collect`, `act` in `_opponent_actions_batched`) are already behind
+        # `self.batched_opponents`, and constructing it unconditionally means a
+        # policy the stack cannot represent crashes at CONSTRUCTION even though
+        # the run would never have used it.
+        self.opp_stack = (
+            StackedDevActors(self.opp_nets[0][0], 2, self.blocks).to(device)
+            if self.batched_opponents else None)
         # Which sampled epoch each slot currently holds, and the epoch the draw
         # was made AT (the two differ by the lag, and `train_iter` increments
         # `self.epoch` after the draw, so the lag must not be measured against

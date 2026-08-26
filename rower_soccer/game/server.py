@@ -239,8 +239,11 @@ class GameServer:
                     self.demos.append(p)
             elif c["action"] == "camera":
                 # Explicit value, or toggle. Render-only: no physics, no demo row.
-                sim.set_camera(c.get("value") or (
-                    "broadcast" if sim.camera == "topdown" else "topdown"))
+                # No value -> cycle. ballcam is in the rotation because it is
+                # the default and a player who toggles away needs a way back.
+                cams = sim.CAMERAS
+                sim.set_camera(c.get("value") or
+                               cams[(cams.index(sim.camera) + 1) % len(cams)])
                 sim._pending_events.append(dict(
                     tick=int(sim.tick), t=float(sim.match_time),
                     type="camera", camera=sim.camera))

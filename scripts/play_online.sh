@@ -40,7 +40,12 @@ fi
 # The code goes in the environment, not in argv: `ps aux` is readable by everyone
 # with a shell on this box, and this box is shared.
 export ROWER_JOIN_CODE="$CODE"
-export MUJOCO_GL=egl
+# EGL is broken on this pod (`EGLError` from `eglQueryString` on a NoneType) and
+# osmesa renders the same pixels on the CPU. Honour an explicit MUJOCO_GL so a
+# machine with working EGL still gets the fast path; default to what works here
+# rather than to what fails.
+export MUJOCO_GL="${MUJOCO_GL:-osmesa}"
+echo "[online] MUJOCO_GL=$MUJOCO_GL"
 export PYTHONPATH="$REPO"
 
 echo "[online] starting the game server on :$PORT (scene compile takes ~15 s)"

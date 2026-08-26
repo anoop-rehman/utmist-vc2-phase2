@@ -45,6 +45,7 @@ def make_env(args, num_worlds, seed, use_graph=True):
         goal_time_coef=args.goal_time_coef,
         w_player_to_ball=args.w_player_to_ball, w_ball_to_cmd=args.w_ball_to_cmd,
         approach_scale=args.approach_scale, reward_mode=args.reward_mode,
+        w_aim=args.w_aim, live_cmd_dir=args.live_cmd_dir,
         energy_coef=args.energy_coef, smooth_coef=args.smooth_coef,
         fixed_start=args.fixed_start)
 
@@ -122,6 +123,17 @@ def main():
 
     # -- reward -------------------------------------------------------------
     p.add_argument("--reward-mode", default="paper", choices=["paper", "progress"])
+    p.add_argument("--w-aim", type=float, default=0.0,
+                   help="v5 DENSE aim term: w_aim * exp(-reward_coef * "
+                        "d_mouth_best), paid once at segment end. 0 reproduces "
+                        "v4, whose reward had no aim signal at all -- see "
+                        "ShootReward.w_aim for the measurement that motivates "
+                        "it (16/16 v4 segments saturated speed_clip, so aim "
+                        "entered only through a cos() the clip then erased)")
+    p.add_argument("--live-cmd-dir", action="store_true",
+                   help="recompute cmd_dir from the ball's CURRENT position "
+                        "each step. Off reproduces v4, which freezes it at "
+                        "segment start from the ball's SPAWN position")
     p.add_argument("--w-strike", type=float, default=0.5,
                    help="weight on the banked ball speed toward the goal, paid "
                         "at contact-break")

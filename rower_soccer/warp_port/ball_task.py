@@ -664,10 +664,32 @@ class ShootReward(_StrikeReward):
     """
 
     def __init__(self, goal_bonus=5.0, reward_coef=0.5, goal_time_coef=0.4,
-                 w_upright=1.0, **kw):
+                 w_upright=1.0, w_aim=0.0, **kw):
         super().__init__(**kw)
         self.goal_bonus = goal_bonus
         self.reward_coef = reward_coef
+        # v5: the DENSE aim term, paid once at segment end as
+        # `w_aim * exp(-reward_coef * d_mouth_best)`, mirroring kick's
+        # `w_arrive * exp(-c * ||ball(T) - target||)`.
+        #
+        # Why it is needed. Before this, `d_mouth_best` appeared ONLY in
+        # `fitness` -- so best.pt was selected on accuracy the reward never paid
+        # for. The v4 docstring above records fixing exactly that mismatch in
+        # the TIMING dimension; this is its mirror image in AIM, which v4 left
+        # in place. The only aim signal in the reward was `w_strike * credit`,
+        # and `credit` is `clamp(v_ball . cmd_dir, 0, speed_clip)`: measured on
+        # shoot_ant_v4, 16/16 segments exceeded speed_clip=8.0 (median peak
+        # 11.6 m/s = 1.45x), so aim entered only through a cos() that the clip
+        # then erased. At 11.6 m/s a shot could be 46 degrees off-axis and
+        # collect the identical clipped credit -- against a goal whose own
+        # half-angle from 3.5 m is 47 degrees. The reward literally could not
+        # tell a shot down the middle from one sailing past the post.
+        #
+        # A scored segment has d_mouth_best = 0 (the ball was inside the mouth),
+        # so a goal collects the full aim term AND the goal bonus.
+        #
+        # Defaults to 0.0: a run that does not ask for it reproduces v4 exactly.
+        self.w_aim = w_aim
         # k in exp(-k * t_score). The env holds the same number (it needs it for
         # the fitness accumulator); shoot_env passes one value into both.
         self.goal_time_coef = goal_time_coef
@@ -680,8 +702,12 @@ class ShootReward(_StrikeReward):
         # bonus for every goal, silently undoing the urgency term. Same
         # snapshot discipline as kick's last_arrival.
         urgency = torch.exp(-self.goal_time_coef * env.last_score_t)
+        # env.last_aim: same snapshot discipline as last_score_t and kick's
+        # last_arrival -- taken before _close_segments resets seg_goal_best,
+        # and zero on every step except the one a segment ends on.
         r = (self.w_strike * env.credit
              + self.goal_bonus * urgency * env.scored_now.float()
+             + self.w_aim * env.last_aim
              + env.shaping_scale * self._shaping(env))
         return r * upright(env) ** self.w_upright
 

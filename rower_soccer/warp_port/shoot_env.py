@@ -55,7 +55,8 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
                  speed_clip=8.0, w_strike=0.5, goal_bonus=5.0,
                  goal_time_coef=0.4,
                  w_player_to_ball=0.15, w_ball_to_cmd=0.1, approach_scale=0.5,
-                 reward_coef=0.5, reward_mode="paper", device=None, seed=0,
+                 reward_coef=0.5, reward_mode="paper", w_aim=0.0,
+                 live_cmd_dir=False, device=None, seed=0,
                  use_graph=True, ball: BallSpec = None, nconmax=64, njmax=512,
                  energy_coef=0.0, smooth_coef=0.0, rew_clip=(-10.0, 10.0),
                  fixed_start=False, reward=None, use_gpu=True,
@@ -82,7 +83,8 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
             goal_geometry(pitch_scale)
         self.shaping_scale = 1.0
         self.fixed_start = fixed_start
-        reward = reward or ShootReward(w_upright=w_upright,
+        self.live_cmd_dir = bool(live_cmd_dir)
+        reward = reward or ShootReward(w_upright=w_upright, w_aim=w_aim,
             mode=reward_mode, w_strike=w_strike, goal_bonus=goal_bonus,
             reward_coef=reward_coef, goal_time_coef=goal_time_coef,
             w_player_to_ball=w_player_to_ball,
@@ -134,6 +136,9 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self.seg_scored = torch.zeros(n, dtype=torch.bool, device=dev)
         self.seg_score_t = torch.zeros(n, device=dev)
         self.last_score_t = torch.zeros(n, device=dev)
+        # v5 dense aim term (ShootReward.w_aim). Snapshotted at segment end,
+        # zero otherwise -- the same discipline as last_score_t.
+        self.last_aim = torch.zeros(n, device=dev)
 
     def _task_obs(self):
         return torch.cat([self._ball_ego6(),
@@ -160,6 +165,12 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
                 & (b[:, 2] < self.goal_height))
 
     def _update_task(self):
+        if self.live_cmd_dir:
+            # v5: re-aim from where the ball IS, not where it spawned. The
+            # frozen version is set once in _spawn_worlds from the ball's SPAWN
+            # position to the goal centre, so once the ball is nudged sideways
+            # the reward keeps paying for velocity along a stale direction.
+            self.cmd_dir = self._unit(self.target_xy - self._ball_xy())
         _, released = self._strike_update()
         self.seg_t += 1.0
         # Credit the strike the moment the ball leaves the creature -- the same
@@ -195,6 +206,12 @@ class WarpShootEnv(SegmentedBallTask, WormEnv):
         self._bank(end)
         # Bank the segment's fitness BEFORE _close_segments respawns and
         # overwrites seg_goal_best / seg_scored with the next attempt's state.
+        # BEFORE _close_segments: it respawns and overwrites seg_goal_best with
+        # the next attempt's state, so reading the aim afterwards would score
+        # every segment against a ball that has just been teleported.
+        self.last_aim = torch.where(
+            end, torch.exp(-self._reward_coef * self.seg_goal_best),
+            torch.zeros_like(self.seg_goal_best))
         if bool(end.any()):
             idx = end.nonzero(as_tuple=True)[0]
             self.goal_fit_sum[idx] += self.seg_fitness()[idx]

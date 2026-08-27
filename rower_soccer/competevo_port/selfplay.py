@@ -284,7 +284,7 @@ class CoEvoPPO:
     def __init__(self, env, acs=None, delta=DEV_DELTA,
                  ring_capacity=RING_CAPACITY, checkpoint_every=CHECKPOINT_EVERY,
                  blocks=OPPONENT_BLOCKS, use_opponent_sample=True,
-                 batched_opponents=True,
+                 batched_opponents=True, idle_opponent=False,
                  rollout_len=64, seed=0, device="cuda", **ppo_kw):
         assert env.n % 2 == 0, "the ego split needs an even world count"
         self.env, self.device = env, device
@@ -316,6 +316,15 @@ class CoEvoPPO:
         assert self.L == len(self.team_lanes[1]), "sides must be the same size"
         self.blocks = max(int(blocks), 1)
         self.use_opponent_sample = use_opponent_sample
+        # DIAGNOSTIC MODE, off by default. The opponent lanes are left at
+        # exactly zero torque, so a learner trains against unactuated bodies.
+        # This exists because the 2h sweep could not tell two failures apart: a
+        # morphology that cannot reach the goal, and one that cannot reach it
+        # THROUGH an opponent. Against statues only the first is possible.
+        # It is not self-play and must never be reported as such -- the ring,
+        # the opponent nets and the curriculum all still run, they simply do
+        # not drive anything.
+        self.idle_opponent = idle_opponent
         self.checkpoint_every = max(int(checkpoint_every), 1)
         self.epoch = 0
 
@@ -498,7 +507,7 @@ class CoEvoPPO:
             obs = self._obs.float()
             act = torch.zeros(self.N, self.A, env.act_dim, device=env.device,
                               dtype=obs.dtype)
-            if self.batched_opponents:
+            if self.batched_opponents and not self.idle_opponent:
                 opp = self._opponent_actions_batched(obs)
                 act[:self.n_ego][:, self.team_lanes[1]] = opp[0]
                 act[self.n_ego:][:, self.team_lanes[0]] = opp[1]
@@ -508,7 +517,7 @@ class CoEvoPPO:
                 lr = self.learners[e]
                 a, logp, v = lr.ac.act(obs[w][:, mine])
                 act[w.unsqueeze(-1), mine.unsqueeze(0)] = a
-                if not self.batched_opponents:
+                if not self.batched_opponents and not self.idle_opponent:
                     # The opponents occupy the OTHER side's lanes of the SAME
                     # worlds.
                     act[w.unsqueeze(-1), theirs.unsqueeze(0)] = (

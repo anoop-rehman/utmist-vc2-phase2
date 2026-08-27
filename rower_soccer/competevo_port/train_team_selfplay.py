@@ -157,6 +157,14 @@ def main():
                         "'ant,ant,spider,spider' for an ant/spider team on both "
                         "sides. Default: ant everywhere, i.e. the 2f/2g scene. "
                         "A MIXED composition requires --per-slot.")
+    p.add_argument("--idle-opponent", action="store_true",
+                   help="DIAGNOSTIC, not self-play: the opponent lanes get "
+                        "zero torque, so a learner trains against unactuated "
+                        "bodies. Separates 'this morphology cannot reach the "
+                        "goal' from 'it cannot reach it through an opponent', "
+                        "which the 2h sweep could not tell apart. Results from "
+                        "this mode are not comparable to a self-play run and "
+                        "must not be reported as one.")
     p.add_argument("--per-slot", action="store_true",
                    help="2h Option A: an independent actor-critic per (side, "
                         "slot) instead of one per side with a role one-hot. "
@@ -255,7 +263,8 @@ def main():
                        blocks=args.blocks, rollout_len=args.rollout,
                        seed=args.seed, device=device, epochs=args.epochs,
                        minibatch_size=args.minibatch,
-                       policy_lr=args.policy_lr, value_lr=args.value_lr)
+                       policy_lr=args.policy_lr, value_lr=args.value_lr,
+                       idle_opponent=args.idle_opponent)
     lanes = trainer.team_lanes
     # The policy width is per SLOT on a mixed team, so report what each net
     # actually consumes rather than slot 0's, which was the only one that ever

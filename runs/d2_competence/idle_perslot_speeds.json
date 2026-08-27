@@ -1,0 +1,80 @@
+{
+ "args": {
+  "runs": [
+   "runs/competevo_port/t2h_perslot_s42",
+   "runs/competevo_port/t2h_bubu_s42",
+   "runs/competevo_port/t2h_spsp_s42"
+  ],
+  "opponent": "idle",
+  "action": "mean",
+  "worlds": 32,
+  "steps": 1600,
+  "seed": 0,
+  "out": "runs/d2_competence/idle_perslot_speeds.json"
+ },
+ "rows": [
+  {
+   "run": "t2h_bubu_s42",
+   "creatures": [
+    "bug",
+    "bug",
+    "bug",
+    "bug"
+   ],
+   "episodes": 96,
+   "goal": 0.0,
+   "wipeout": 0.0,
+   "timeout": 1.0,
+   "speed_A": 0.4091122498114904,
+   "speed_B": -0.028445977174366515,
+   "speed_A_slots": [
+    0.23958024879296622,
+    0.5786443750063579
+   ],
+   "upright_A": 0.9624549655388471,
+   "upright_B": 1.0
+  },
+  {
+   "run": "t2h_perslot_s42",
+   "creatures": [
+    "ant",
+    "ant",
+    "ant",
+    "ant"
+   ],
+   "episodes": 97,
+   "goal": 0.27835051546391754,
+   "wipeout": 0.0,
+   "timeout": 0.7216494845360825,
+   "speed_A": 0.749582921465238,
+   "speed_B": -0.059929144723961755,
+   "speed_A_slots": [
+    0.5506088336308798,
+    0.9485570092995962
+   ],
+   "upright_A": 0.9797834429824561,
+   "upright_B": 0.9981888314536341
+  },
+  {
+   "run": "t2h_spsp_s42",
+   "creatures": [
+    "spider",
+    "spider",
+    "spider",
+    "spider"
+   ],
+   "episodes": 96,
+   "goal": 0.0,
+   "wipeout": 0.0,
+   "timeout": 1.0,
+   "speed_A": 0.06732625576357047,
+   "speed_B": -0.0006923228890324633,
+   "speed_A_slots": [
+    0.12782986741513014,
+    0.006822637321117024
+   ],
+   "upright_A": 0.8127741228070176,
+   "upright_B": 1.0
+  }
+ ]
+}

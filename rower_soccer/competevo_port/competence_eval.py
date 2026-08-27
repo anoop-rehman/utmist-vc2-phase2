@@ -76,6 +76,15 @@ def evaluate(run, worlds, seed, opponent, action, steps):
     # in different worlds. A single global step count would divide every world
     # by the same denominator and quietly understate the ones that reset most.
     pcount = torch.zeros(env.n, 1, device=env.device, dtype=env.dtype)
+    # Per-EPISODE displacement, banked at each reset. Mean speed cannot decide
+    # reachability: an agent that scores in a third of its episodes sprints in
+    # those and mills about in the rest, so its mean understates what it can
+    # cover when it tries. The ant proves the point -- 27.8% goals with both
+    # slot MEANS below the distance/time threshold. What settles it is the
+    # DISTRIBUTION of how far each episode actually got.
+    ep_run = torch.zeros(env.n, env.n_agents, device=env.device,
+                         dtype=env.dtype)
+    ep_disp = []
     nstep = 0
     obs = driver.reset()
     env.reset_win_stats()
@@ -109,6 +118,7 @@ def evaluate(run, worlds, seed, opponent, action, steps):
                 # with room to spare rather than by tuning.
                 ok = (d.abs() < 0.5).all(-1, keepdim=True)
                 prog += d * ok
+                ep_run += d * ok
                 pcount += ok.to(env.dtype)
                 upright += (env._root_z() >= 0.28).to(env.dtype)
                 nstep += 1
@@ -116,12 +126,20 @@ def evaluate(run, worlds, seed, opponent, action, steps):
                 idx = done.nonzero(as_tuple=True)[0]
                 for e in env.last_end[idx].tolist():
                     endings[END[e]] += 1
+                ep_disp.append(ep_run[idx].detach().cpu().clone())
+                ep_run[idx] = 0.0
 
     tot = max(1, sum(endings.values()))
     m = max(1, nstep)
     # Per-side means: agents 0,2 are side A and 1,3 are side B.
     side = [[i for i in range(env.n_agents) if env.meta.team[i] == t]
             for t in (0, 1)]
+    D = (torch.cat(ep_disp) if ep_disp
+         else torch.zeros(1, env.n_agents, dtype=env.dtype))
+    disp_stats = [{"median": float(D[:, i].median()),
+                   "p90": float(D[:, i].quantile(0.90)),
+                   "max": float(D[:, i].max()),
+                   "n": int(D.shape[0])} for i in side[0]]
     return {
         "run": os.path.basename(run),
         "creatures": env.meta.creatures,
@@ -136,6 +154,14 @@ def evaluate(run, worlds, seed, opponent, action, steps):
         # Hardcoding the drill value understated every speed here by 1.67x.
         "speed_A": float((prog[:, side[0]] / pcount.clamp(min=1)).mean()) / CONTROL_DT,
         "speed_B": float((prog[:, side[1]] / pcount.clamp(min=1)).mean()) / CONTROL_DT,
+        # PER SLOT, because the reachability threshold is per slot: the front
+        # agent's line is 5 m away and the back agent's is 8 m, so a pooled
+        # front+back mean cannot be compared against either. Side A's lanes are
+        # ordered (front, back).
+        "speed_A_slots": [float((prog[:, i] / pcount.squeeze(-1).clamp(min=1))
+                                .mean()) / CONTROL_DT for i in side[0]],
+        # metres actually covered in one episode, per slot of side A
+        "disp_A_slots": disp_stats,
         "upright_A": float(upright[:, side[0]].mean()) / m,
         "upright_B": float(upright[:, side[1]].mean()) / m,
     }
@@ -160,9 +186,13 @@ def main():
         rows.append(evaluate(r, args.worlds, args.seed, args.opponent,
                              args.action, args.steps))
         d = rows[-1]
+        slots = "  ".join(f"{v:+.3f}" for v in d["speed_A_slots"])
+        dsp = "  ".join(f"med {x['median']:.1f}/max {x['max']:.1f}"
+                        for x in d["disp_A_slots"])
         print(f"  {d['run']:22s} {'/'.join(c[:2] for c in d['creatures'])}  "
               f"goal {100 * d['goal']:5.1f}%  "
-              f"speedA {d['speed_A']:+6.3f} m/s  upA {100 * d['upright_A']:5.1f}%",
+              f"speedA {d['speed_A']:+6.3f} (front/back {slots})  "
+              f"upA {100 * d['upright_A']:5.1f}%  [m/episode {dsp}]",
               flush=True)
 
     print(f"\nopponent={args.opponent}  action={args.action}  "

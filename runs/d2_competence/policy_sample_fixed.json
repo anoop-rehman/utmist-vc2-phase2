@@ -1,0 +1,168 @@
+{
+ "args": {
+  "runs": [
+   "runs/competevo_port/t2h_*_s42"
+  ],
+  "opponent": "policy",
+  "action": "sample",
+  "worlds": 32,
+  "steps": 1600,
+  "seed": 0,
+  "out": "runs/d2_competence/policy_sample_fixed.json"
+ },
+ "rows": [
+  {
+   "run": "t2h_anbu_s42",
+   "creatures": [
+    "ant",
+    "bug",
+    "ant",
+    "bug"
+   ],
+   "episodes": 102,
+   "goal": 0.3333333333333333,
+   "wipeout": 0.12745098039215685,
+   "timeout": 0.5392156862745098,
+   "speed_A": 0.5921525259812673,
+   "speed_B": 0.20256534529229006,
+   "upright_A": 0.9499040570175439,
+   "upright_B": 0.886141134085213
+  },
+  {
+   "run": "t2h_ansp_s42",
+   "creatures": [
+    "ant",
+    "spider",
+    "ant",
+    "spider"
+   ],
+   "episodes": 97,
+   "goal": 0.0,
+   "wipeout": 0.061855670103092786,
+   "timeout": 0.9381443298969072,
+   "speed_A": 0.48006766786177957,
+   "speed_B": 0.035460530004153654,
+   "upright_A": 0.7839422775689223,
+   "upright_B": 0.6121064379699248
+  },
+  {
+   "run": "t2h_buan_s42",
+   "creatures": [
+    "bug",
+    "ant",
+    "bug",
+    "ant"
+   ],
+   "episodes": 96,
+   "goal": 0.08333333333333333,
+   "wipeout": 0.13541666666666666,
+   "timeout": 0.78125,
+   "speed_A": 0.22676043833295506,
+   "speed_B": 0.5405226722359657,
+   "upright_A": 0.9533110119047619,
+   "upright_B": 0.9710996240601504
+  },
+  {
+   "run": "t2h_bubu_s42",
+   "creatures": [
+    "bug",
+    "bug",
+    "bug",
+    "bug"
+   ],
+   "episodes": 97,
+   "goal": 0.0,
+   "wipeout": 0.17525773195876287,
+   "timeout": 0.8247422680412371,
+   "speed_A": 0.28256786366303766,
+   "speed_B": 0.29618429640928906,
+   "upright_A": 0.9444705513784462,
+   "upright_B": 0.8840852130325815
+  },
+  {
+   "run": "t2h_busp_s42",
+   "creatures": [
+    "bug",
+    "spider",
+    "bug",
+    "spider"
+   ],
+   "episodes": 96,
+   "goal": 0.0,
+   "wipeout": 0.041666666666666664,
+   "timeout": 0.9583333333333334,
+   "speed_A": 0.39690379053354263,
+   "speed_B": 0.00678567448630929,
+   "upright_A": 0.9161477913533834,
+   "upright_B": 0.5740229479949874
+  },
+  {
+   "run": "t2h_perslot_s42",
+   "creatures": [
+    "ant",
+    "ant",
+    "ant",
+    "ant"
+   ],
+   "episodes": 103,
+   "goal": 0.4368932038834951,
+   "wipeout": 0.04854368932038835,
+   "timeout": 0.5145631067961165,
+   "speed_A": 0.6537527466813724,
+   "speed_B": 0.5269331236680349,
+   "upright_A": 0.961329104010025,
+   "upright_B": 0.9473684210526315
+  },
+  {
+   "run": "t2h_span_s42",
+   "creatures": [
+    "spider",
+    "ant",
+    "spider",
+    "ant"
+   ],
+   "episodes": 98,
+   "goal": 0.0,
+   "wipeout": 0.14285714285714285,
+   "timeout": 0.8571428571428571,
+   "speed_A": 0.052309882206221424,
+   "speed_B": 0.4301888247330984,
+   "upright_A": 0.5753641917293233,
+   "upright_B": 0.8938948934837093
+  },
+  {
+   "run": "t2h_spbu_s42",
+   "creatures": [
+    "spider",
+    "bug",
+    "spider",
+    "bug"
+   ],
+   "episodes": 101,
+   "goal": 0.019801980198019802,
+   "wipeout": 0.13861386138613863,
+   "timeout": 0.8415841584158416,
+   "speed_A": -0.05309719514722626,
+   "speed_B": 0.4742063581943512,
+   "upright_A": 0.6087680137844611,
+   "upright_B": 0.9266623590225563
+  },
+  {
+   "run": "t2h_spsp_s42",
+   "creatures": [
+    "spider",
+    "spider",
+    "spider",
+    "spider"
+   ],
+   "episodes": 96,
+   "goal": 0.0,
+   "wipeout": 0.020833333333333332,
+   "timeout": 0.9791666666666666,
+   "speed_A": 0.04721276151637237,
+   "speed_B": 0.027349036342153948,
+   "upright_A": 0.7416784147869674,
+   "upright_B": 0.704828477443609
+  }
+ ]
+}

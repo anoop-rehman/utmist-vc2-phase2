@@ -1,40 +1,38 @@
 # D2 — can these morphologies play the game at all?
 
-*2026-08-27. Every number here is from `competence_eval.py` at seed 42, 32
-worlds, 1,600 steps, or from arithmetic over measured constants. Commands are
-given so each can be re-run.*
+*2026-08-27. Every number is from `competence_eval.py` at seed 42, 32 worlds,
+1,600 steps, ~100 completed episodes per run, against an IDLE opponent. The
+commands are given so each can be re-run.*
+
+> **Revision note.** An earlier version of this document explained the result
+> with mean-speed arithmetic and used that to reinterpret `DESIGN_2V2.md`'s
+> back-agent finding. **Both of those were wrong and have been removed.** What
+> replaced them is a per-episode displacement measurement, which supports a
+> narrower claim. The retraction is written out in the last section rather than
+> quietly edited away.
 
 ## Why this exists
 
 The 2h sweep trained 27 runs and ranked teams by win rate. The ranking was not
-usable, and not because of noise: every cell containing a bug or a spider ended
-82–99% of its episodes in a timeout, so the "winner" was whichever side lost
-more slowly. Ranking teams presupposes that the creatures in them can reach the
-goal, and nothing had established that.
+usable: every cell containing a bug or a spider ended 82–99% of its episodes in
+a timeout, so the "winner" was whichever side lost more slowly. Ranking teams
+presupposes the creatures in them can reach the goal, and nothing had
+established that.
 
-Two separate errors sit behind that sweep, both mine, and both recorded here so
-the next reader does not re-derive them:
+Two errors sit behind that sweep, both mine:
 
-1. **The sweep never trained a mixed team.** `--creatures` takes agents in the
-   port's order `(A1, B1, A2, B2)` and `team_lanes` is `[[0, 2], [1, 3]]`, so
+1. **It never trained a mixed team.** `--creatures` takes agents in the port's
+   order `(A1, B1, A2, B2)` and `team_lanes` is `[[0, 2], [1, 3]]`, so
    `ant,bug,ant,bug` is team A = (ant, ant) against team B = (bug, bug). I
    passed front,back,front,back. All 27 runs are homogeneous-vs-homogeneous.
-2. **The morphology ranking I first computed was an artifact.** It read spider
-   16.2% > ant 10.7% > bug 1.6%, driven entirely by a degenerate
-   spider-vs-spider cell whose three seeds disagreed 0 / 0 / 88. Reading the
-   *distribution of episode endings* rather than the headline rate is what
-   caught it.
+2. **The morphology ranking I first computed was an artifact** — spider 16.2% >
+   ant 10.7% > bug 1.6%, driven entirely by a degenerate spider-vs-spider cell
+   whose three seeds disagreed 0 / 0 / 88.
 
 ## The measurement
 
-Two questions, deliberately separated, because a team can fail to score in two
-unrelated ways:
-
-* **Can it move?** Mean forward speed toward its own goal, and the fraction of
-  steps spent upright.
-* **Can it score?** Goal rate against an **idle** opponent — one receiving
-  exactly zero torque. With nobody to interfere, reaching the line is
-  locomotion plus navigation and nothing else.
+Against an **idle** opponent — one receiving exactly zero torque — reaching the
+goal is locomotion plus navigation and nothing else.
 
 ```
 PYTHONPATH=. .venv/bin/python -m rower_soccer.competevo_port.competence_eval \
@@ -44,84 +42,73 @@ PYTHONPATH=. .venv/bin/python -m rower_soccer.competevo_port.competence_eval \
 The idle side is a free negative control: an unactuated body must measure ~0
 m/s, and it does (−0.02 to −0.05 across all nine runs).
 
-## Result: no. Neither bug nor spider can score, even unopposed
+## Result: no. Neither bug nor spider scores, even unopposed
 
-Side A, the driven side, against an idle opponent:
-
-| morphology | goal rate | forward speed | upright |
+| morphology | goal rate | speed (front / back) | upright |
 |---|---|---|---|
-| ant | **34.8%** | **+0.788 m/s** | 87.9% |
-| bug | 0.7% | +0.364 m/s | 98.9% |
-| spider | **0.0%** | +0.096 m/s | 64.0% |
+| ant | **33.0%** | +0.554 / +0.962 m/s | 98.4% |
+| bug | **0.0%** | +0.244 / +0.586 m/s | 97.5% |
+| spider | **0.0%** | +0.128 / +0.007 m/s | 81.3% |
 
 The two failures are **not the same failure**:
 
-* **The bug is not falling over.** It is upright 98.9% of the time — more than
-  the ant — and it locomotes. It is simply slow.
-* **The spider barely moves and spends a third of its time down.** 0.096 m/s at
-  64% upright is a locomotion failure in the ordinary sense.
+* **The bug is not falling over.** It is upright 97.5% of the time — as much as
+  the ant — and it locomotes. It is slow.
+* **The spider barely moves**, and its back slot is motionless: +0.007 m/s.
 
-## The mechanism is arithmetic, not tactics
+## What actually settles it: per-episode displacement
 
-Measured from the compiled scene:
+Mean speed cannot decide reachability, and the ant is the proof — see the
+retraction below. The decisive measurement is how far each episode *actually*
+got. Distance required is fixed by the scene: the front agent spawns at ∓1.0
+with its goal line at ±4.0 (**5.0 m**) and the back agent spawns at ∓4.0
+(**8.0 m**), inside a 500-step × 0.015 s = **7.5 s** limit.
 
-| | value |
-|---|---|
-| time limit | 500 steps × 0.015 s = **7.5 s** |
-| front agent spawn → own goal line | −1.0 → +4.0 = **5.0 m** |
-| back agent spawn → own goal line | −4.0 → +4.0 = **8.0 m** |
+| morphology | slot | needs | median | p90 | max | ever arrives? |
+|---|---|---|---|---|---|---|
+| ant | front | 5.0 | 3.39 | 4.98 | **5.03** | yes |
+| ant | back | 8.0 | 6.05 | 7.97 | **8.04** | yes |
+| bug | front | 5.0 | 1.77 | 2.47 | 3.09 | **never** |
+| bug | back | 8.0 | 4.26 | 5.53 | 7.03 | **never** |
+| spider | front | 5.0 | 0.83 | 1.01 | 1.17 | **never** |
+| spider | back | 8.0 | 0.04 | 0.14 | 0.16 | **never** |
 
-So the speed a creature must sustain to score at all:
+The ant's maxima land exactly on the requirement (5.03 against 5.0, 8.04
+against 8.0) because the episode ends on arrival — that equality is the
+signature of reaching, not a coincidence.
 
-| slot | required | ant 0.788 | bug 0.364 | spider 0.096 |
-|---|---|---|---|---|
-| front | **0.667 m/s** | reaches | cannot | cannot |
-| back | **1.067 m/s** | **cannot** | cannot | cannot |
+**So the answer is reachability, on the evidence of displacement rather than
+speed.** Over roughly a hundred episodes each:
 
-That single table accounts for every zero in the sweep. The bug and the spider
-do not fail to score because they cannot navigate or cannot coordinate; at the
-gaits they actually reached, **the goal line is outside the distance they can
-cover before the clock stops.**
+* the **bug never arrives in either slot**, but it is *marginal*: its best back
+  episode covers 7.03 m of the 8.0 required, 88% of the way;
+* the **spider is nowhere near** — 23% of the front distance at best, and 2% of
+  the back.
 
-### This also explains a result the design doc attributes to coordination
-
-`DESIGN_2V2.md` §11 records the back agent as a spectator — 0.0% of crossings
-after 80 epochs of native training — re-opens section 9's decision 1 about
-roles and interference, and concludes "the task survives at four bodies and
-8 m, and the back agent is decorative under a first-crossing rule."
-
-The back agent's line is **8 m away and needs 1.067 m/s.** The best gait
-anything in this sweep reached is 0.788 m/s. The back agent is not decorative
-because the reward structure fails to pay it, and not because roles were learnt
-badly — **its task is unreachable at achievable speed.** The doc's own figure
-is consistent with this: agent 3 moves from +4.0 to +1.47, which is 2.53 m of
-progress against the 8 m it needs.
-
-This does not settle the design question, but it changes what the question is.
-`back_x` is not a preference among three options; it is the difference between
-a task the second player can complete and one it cannot.
+That difference matters for what to do next. A bug that gets 88% of the way is
+a candidate for a longer clock, a shorter distance, or more training. A spider
+whose back slot moves 4 cm per episode is not.
 
 ## What follows
 
-The prerequisite the sweep skipped is now measured, and it fails. **Re-running
-the mixed-team sweep with the ordering corrected would produce nine flavours of
-timeout**, because two of the three morphologies cannot score in any
-composition. Fix reachability first.
+**Re-running the mixed-team sweep with the ordering corrected would produce
+nine flavours of timeout**, because two of the three morphologies never arrive
+in any composition. Fix reachability first.
 
-Three candidates, in increasing order of how much they change the task:
+Three candidates, increasing in how much they change the task:
 
-1. **Shorten `back_x`** so the back agent's distance is inside the same budget
-   as the front's. Cheapest, and it is already one of section 9's options.
-2. **Raise the time limit**, which makes every slot reachable at current gaits
+1. **Train for speed with `--idle-opponent`**, so nothing interferes, and see
+   whether the gait improves past the requirement. This answers "could they
+   learn", which nothing above does — every number here comes from a
+   200-iteration policy trained against a live opponent.
+2. **Shorten `back_x`**, already one of `DESIGN_2V2.md` §9's options.
+3. **Raise the time limit**, which makes every slot reachable at current gaits
    but lengthens every episode.
-3. **Train for speed first** — bug and spider on run-to-goal with
-   `--idle-opponent`, so nothing interferes, and see whether the gait improves
-   past the threshold. This is the one that answers "could they learn", which
-   the numbers above deliberately do not.
 
-`--idle-opponent` was built for (3) and is gated 5/5
-(`gate_idle_opponent.py`); the default self-play path is bit-identical with the
-flag off (`gate_team_selfplay` 13/13, `tests/test_selfplay` 11/11).
+`--idle-opponent` is gated 5/5 (`gate_idle_opponent.py`); the default self-play
+path is bit-identical with the flag off (`gate_team_selfplay` 13/13,
+`tests/test_selfplay` 11/11). Runs for all three morphologies are in flight at
+`runs/competevo_port/idle_{ant,bug,spider}_s42`.
 
 ## A within-morphology result worth its own line
 
@@ -132,42 +119,47 @@ what each policy learnt during training. Ant upright also drops from 96.7% to
 
 The reading that fits: **spiders knock their opponents down early enough that
 the ant never achieves a first goal, and so never bootstraps.** That is a
-hypothesis with two pieces of support (the upright drop, and the total absence
-of learning), not a demonstrated mechanism. It is testable by training an ant
-against idle spiders.
+hypothesis with two pieces of support, not a demonstrated mechanism. It is
+testable by training an ant against idle spiders.
 
 ## Not tested
 
-* Whether longer training produces faster gaits. Every speed here is from a
-  200-iteration run, and the threshold is a moving target if gaits improve.
-* Whether a shorter `back_x` or a longer time limit actually fixes it. Both are
-  arithmetic predictions, unrun.
-* **Front and back speeds are pooled.** The 0.788 m/s ant figure averages both
-  slots, so it is an upper bound on the back agent's own speed and a lower
-  bound on the front's. Separating them would sharpen the table above and is
-  one flag's worth of work.
+* Whether longer training produces faster gaits — (1) above is running.
+* Whether a shorter `back_x` or a longer limit fixes the bug. Both unrun.
 * Whether the bug's slowness is its morphology or its `SCALE_MAX`/gear
   settings. Nothing here distinguishes a body that cannot go faster from a
   policy that never learnt to.
 * Seeds 43 and 44. Everything above is seed 42.
+* The displacement table is one run per morphology (the homogeneous cells).
 
 ## Corrections made while producing this
 
-Recorded because each would have been believed:
+Recorded because each would have been believed, and two of them were:
 
-* **The ending histogram read `info["end_goal"]`**, which does not exist. It
-  printed all zeros — indistinguishable from "no episodes ended". It reads
-  `env.last_end` now.
-* **Speed counted episode resets as motion.** On reset the body teleports to
-  spawn, contributing a field-length of negative progress, and resets land most
-  often on the teams that score most — so the measure ran *backwards*: a
-  67.9%-scoring ant read 0.084 m/s while a 0%-scoring one read 0.362.
-* **The control step is 0.015 s, not the drills' 0.025.** Hardcoding the drill
-  value understated every speed by 1.67×. It imports `CONTROL_DT` from
-  `scene.py` now, so the diagnostic and the reward cannot drift apart.
-* **The spider-vs-spider discrepancy was not stochastic-vs-mean actions**, as I
-  guessed. `t2h_spsp_s42` is 100% wipeout on 36–72 step episodes through iter
-  184 and 100% timeout on 500-step episodes by iter 194. Averaging the last 8
-  evals reported 83.4% wipeout — a state the policy occupied at neither end of
-  the window. Aggregate before comparing rates, but check the window holds one
-  regime first.
+1. **The ending histogram read `info["end_goal"]`**, which does not exist. It
+   printed all zeros — indistinguishable from "no episodes ended".
+2. **Speed counted episode resets as motion.** On reset the body teleports to
+   spawn, contributing a field-length of negative progress, and resets land
+   most often on the teams that score most — so the measure ran *backwards*: a
+   67.9%-scoring ant read 0.084 m/s and a 0%-scoring one read 0.362.
+3. **The control step is 0.015 s, not the drills' 0.025**, understating every
+   speed by 1.67×. It imports `CONTROL_DT` from `scene.py` now.
+4. **The spider-vs-spider discrepancy was not stochastic-vs-mean actions**, as
+   I guessed. `t2h_spsp_s42` is 100% wipeout on 36–72 step episodes through
+   iter 184 and 100% timeout on 500-step episodes by iter 194. Averaging the
+   last 8 evals reported 83.4% wipeout — a state the policy occupied at neither
+   end of the window.
+5. **RETRACTED: "the mechanism is arithmetic, not tactics."** I multiplied mean
+   speed by the time limit, compared it to the distance, and concluded the bug
+   and spider were provably unable to arrive. The control refutes it: the ant
+   scores 33.0% while *both* its slot means sit below the implied thresholds
+   (0.554 against 0.667, 0.962 against 1.067). A mean over all episodes
+   understates what an agent covers in the episodes where it commits, so
+   mean-speed × time-limit is not a reachability test. The conclusion happened
+   to survive; the argument did not, and it was replaced with displacement.
+6. **RETRACTED: "the back agent's task is unreachable at achievable speed."**
+   Built on the same bad arithmetic, and used to reinterpret `DESIGN_2V2.md`
+   §11's spectator finding as a geometry problem rather than a coordination
+   one. The ant's back slot covers the **full 8.04 m** and does arrive, so the
+   back agent is not physically incapable and §11's reading stands untouched by
+   anything measured here.

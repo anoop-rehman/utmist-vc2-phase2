@@ -1,0 +1,122 @@
+{
+ "args": {
+  "runs": [
+   "runs/competevo_port/t2h_perslot_s42",
+   "runs/competevo_port/t2h_bubu_s42",
+   "runs/competevo_port/t2h_spsp_s42"
+  ],
+  "opponent": "idle",
+  "action": "mean",
+  "worlds": 32,
+  "steps": 1600,
+  "seed": 0,
+  "out": "runs/d2_competence/idle_displacement.json"
+ },
+ "rows": [
+  {
+   "run": "t2h_bubu_s42",
+   "creatures": [
+    "bug",
+    "bug",
+    "bug",
+    "bug"
+   ],
+   "episodes": 96,
+   "goal": 0.0,
+   "wipeout": 0.0,
+   "timeout": 1.0,
+   "speed_A": 0.4151186595360438,
+   "speed_B": -0.02840134936074416,
+   "speed_A_slots": [
+    0.2442413785805305,
+    0.5859959249695142
+   ],
+   "disp_A_slots": [
+    {
+     "median": 1.772364854812622,
+     "p90": 2.4687328338623047,
+     "max": 3.09299635887146,
+     "n": 96
+    },
+    {
+     "median": 4.260372638702393,
+     "p90": 5.52646541595459,
+     "max": 7.026739120483398,
+     "n": 96
+    }
+   ],
+   "upright_A": 0.9754170582706767,
+   "upright_B": 1.0
+  },
+  {
+   "run": "t2h_perslot_s42",
+   "creatures": [
+    "ant",
+    "ant",
+    "ant",
+    "ant"
+   ],
+   "episodes": 103,
+   "goal": 0.3300970873786408,
+   "wipeout": 0.009708737864077669,
+   "timeout": 0.6601941747572816,
+   "speed_A": 0.7580901185671489,
+   "speed_B": -0.05951221100986004,
+   "speed_A_slots": [
+    0.5540757129589717,
+    0.9621045241753261
+   ],
+   "disp_A_slots": [
+    {
+     "median": 3.3936374187469482,
+     "p90": 4.980092525482178,
+     "max": 5.034469127655029,
+     "n": 103
+    },
+    {
+     "median": 6.0521039962768555,
+     "p90": 7.971177101135254,
+     "max": 8.035486221313477,
+     "n": 103
+    }
+   ],
+   "upright_A": 0.9836896929824561,
+   "upright_B": 1.0
+  },
+  {
+   "run": "t2h_spsp_s42",
+   "creatures": [
+    "spider",
+    "spider",
+    "spider",
+    "spider"
+   ],
+   "episodes": 96,
+   "goal": 0.0,
+   "wipeout": 0.0,
+   "timeout": 1.0,
+   "speed_A": 0.06731292232871056,
+   "speed_B": -0.0007108304998837411,
+   "speed_A_slots": [
+    0.1278272985170285,
+    0.006798558752052486
+   ],
+   "disp_A_slots": [
+    {
+     "median": 0.8292277455329895,
+     "p90": 1.0140959024429321,
+     "max": 1.1731218099594116,
+     "n": 96
+    },
+    {
+     "median": 0.04493379592895508,
+     "p90": 0.1439279317855835,
+     "max": 0.16381072998046875,
+     "n": 96
+    }
+   ],
+   "upright_A": 0.8131657268170426,
+   "upright_B": 1.0
+  }
+ ]
+}

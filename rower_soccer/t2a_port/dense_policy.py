@@ -18,10 +18,15 @@ What is NOT ported here, deliberately:
   nodes on their own axis, so a per-graph sum is `.sum(1)` -- no cancellation,
   and fp32 becomes viable. Porting the numerically worse version to reproduce it
   bit-for-bit would be reproducing a bug.
-* Training. `RunningNorm` here is eval-only: padded rows would poison the
-  running statistics, so a training port must mask them before the update. The
-  assert in `RunningNorm.forward` makes that a crash rather than a slow drift.
+* Training (superseded). `RunningNorm` was eval-only here: padded rows would
+  poison the running statistics. The
+  dense form has no padded rows at all (grouping by topology guarantees it), so
+  `RunningNorm.update` is their update over a flattened node axis. Sampling,
+  per-graph log-probs and the critic were added for step 5/6 and are gated in
+  `gate_dense_policy.py`.
 """
+
+import math
 
 import torch
 import torch.nn as nn
@@ -44,10 +49,31 @@ class RunningNorm(nn.Module):
         self.register_buffer("var", torch.zeros(dim))
         self.register_buffer("std", torch.zeros(dim))
 
+    def update(self, x):
+        """Their `update`, over a FLATTENED node axis.
+
+        Their statistics are per-node: `x` reaches their RunningNorm as
+        `[total_nodes, F]`. Here it arrives as `[G, N, F]`, and because this
+        port groups by topology there are no padded rows -- every entry of the
+        dense block is a real node. Flattening is therefore exactly their
+        input, not an approximation, and it is why the eval-only assert this
+        method replaced could be lifted. It would NOT be safe under the
+        superset-and-mask representation the port map rejected.
+        """
+        f = x.reshape(-1, x.shape[-1])
+        var_x, mean_x = torch.var_mean(f, dim=0, unbiased=False)
+        m = f.shape[0]
+        w = self.n.to(f.dtype) / (m + self.n).to(f.dtype)
+        self.var[:] = (w * self.var + (1 - w) * var_x
+                       + w * (1 - w) * (mean_x - self.mean).pow(2))
+        self.mean[:] = w * self.mean + (1 - w) * mean_x
+        self.std[:] = torch.sqrt(self.var)
+        self.n += m
+
     def forward(self, x):
-        assert not self.training, (
-            "eval-only: padded nodes would enter the running statistics. A "
-            "training port must update from real nodes only.")
+        if self.training:
+            with torch.no_grad():
+                self.update(x)
         if self.n <= 0:
             return x
         if self.demean:
@@ -254,3 +280,152 @@ class DenseTransform2ActPolicy(nn.Module):
         else:
             raise ValueError(stage)
         return action
+
+    # ------------------------------------------------------------------
+    # Sampling and log-probs (added for 3d step 5/6: the training path)
+    # ------------------------------------------------------------------
+    # Their reduction to a PER-GRAPH log-prob is a cumsum over the whole
+    # concatenated batch differenced at the graph boundaries
+    # (`transform2act_policy.py:238-241`). PORT_MAP section 5 measured that as
+    # the sole reason their codebase runs in float64: fp64 cumsum-diff errs
+    # 1.7e-10, fp32 cumsum-diff errs 1.3e-1. Here each graph owns an axis, so
+    # the same quantity is `.sum(1)` -- no cancellation, and fp32 is fine.
+    def _stage_head(self, stage, obs, adj, ind):
+        if stage == "execution":
+            return self.control(obs, adj, ind)
+        x = self.design_input(obs)
+        return (self.attr if stage == "attr_trans" else self.skel)(x, adj, ind)
+
+    def _gauss(self, stage, head):
+        log_std = (self.control_action_log_std if stage == "execution"
+                   else self.attr_action_log_std)
+        return head, log_std.expand_as(head).exp()
+
+    def slice_for(self, stage):
+        """Where a stage's action lives in the `[.., action_dim]` row."""
+        if stage == "execution":
+            return slice(0, self.control_action_dim)
+        if stage == "attr_trans":
+            return slice(self.control_action_dim, self.action_dim - 1)
+        return slice(self.action_dim - 1, self.action_dim)
+
+    def act(self, stage, obs, adj, ind, mean_action=False, generator=None):
+        """Returns `(action [G, N, action_dim], log_prob [G])`.
+
+        The whole `action_dim` row is returned with the other stages' slices
+        left at zero, exactly as their `select_action` assembles it -- their
+        env asserts those zeros (`hopper.py:146`).
+        """
+        G, N = obs.shape[:2]
+        action = torch.zeros(G, N, self.action_dim, device=obs.device,
+                             dtype=obs.dtype)
+        head = self._stage_head(stage, obs, adj, ind)
+        sl = self.slice_for(stage)
+        if stage == "skel_trans":
+            logp_all = torch.log_softmax(head, dim=-1)
+            if mean_action:
+                a = head.argmax(-1)
+            else:
+                probs = logp_all.exp().reshape(-1, head.shape[-1])
+                a = torch.multinomial(probs, 1, generator=generator
+                                      ).reshape(G, N)
+            lp = logp_all.gather(-1, a.unsqueeze(-1)).squeeze(-1).sum(1)
+            action[..., -1] = a.to(obs.dtype)
+        else:
+            mean, std = self._gauss(stage, head)
+            if mean_action:
+                a = mean
+            else:
+                eps = torch.randn(mean.shape, generator=generator,
+                                  device=("cpu" if generator is not None
+                                          and generator.device.type == "cpu"
+                                          else mean.device),
+                                  dtype=mean.dtype).to(mean.device)
+                a = mean + std * eps
+            lp = _normal_log_prob(a, mean, std).sum(-1).sum(-1)
+            action[..., sl] = a
+        return action, lp
+
+    def log_prob(self, stage, obs, adj, ind, action):
+        """`action` is the full `[G, N, action_dim]` row; the stage's slice is
+        read out of it. Differentiable -- this is the PPO ratio's numerator."""
+        head = self._stage_head(stage, obs, adj, ind)
+        if stage == "skel_trans":
+            a = action[..., -1].long()
+            return torch.log_softmax(head, dim=-1).gather(
+                -1, a.unsqueeze(-1)).squeeze(-1).sum(1)
+        mean, std = self._gauss(stage, head)
+        a = action[..., self.slice_for(stage)]
+        return _normal_log_prob(a, mean, std).sum(-1).sum(-1)
+
+
+def _normal_log_prob(value, mean, std):
+    """`torch.distributions.Normal.log_prob`, written out so the dtype and the
+    device follow the inputs and nothing constructs a distribution object per
+    call inside the PPO inner loop."""
+    var = std ** 2
+    return (-((value - mean) ** 2) / (2 * var) - std.log()
+            - math.log(math.sqrt(2 * math.pi)))
+
+
+class DenseTransform2ActValue(nn.Module):
+    """Their `Transform2ActValue`, dense.
+
+    Two details their critic gets right that a port would plausibly get wrong,
+    both from `transform2act_critic.py`:
+
+    * the value of a graph is read off its **first node**, not pooled
+      (`critic.py:78-81`);
+    * the one-hot **stage flag** is concatenated to the observation
+      (`design_flag_in_state`/`onehot_design_flag`, both set for hopper), which
+      the critic needs because design steps pay 0 reward and execution steps do
+      not.
+
+    Parameter names match theirs (`norm`, `gnn`, `mlp`, `value_head`), so their
+    checkpoint loads with `strict=True`.
+    """
+
+    STAGES = ("skel_trans", "attr_trans", "execution")
+
+    def __init__(self, cfg, state_dim):
+        super().__init__()
+        self.design_flag_in_state = cfg.get("design_flag_in_state", False)
+        self.onehot_design_flag = cfg.get("onehot_design_flag", False)
+        assert self.design_flag_in_state and self.onehot_design_flag, (
+            "only the flag combination hopper uses is ported")
+        assert "pre_mlp" not in cfg, "pre_mlp is not ported"
+        self.state_dim = state_dim + 3
+        self.norm = RunningNorm(self.state_dim)
+        self.gnn = DenseGNN(self.state_dim, cfg["gnn_specs"])
+        cur = self.gnn.out_dim
+        self.mlp = _MLP(cur, cfg["mlp"], cfg.get("htype", "tanh"))
+        self.value_head = nn.Linear(self.mlp.out_dim, 1)
+
+    def forward(self, stage, obs, adj):
+        """`obs [G, N, F]` -> `[G, 1]`."""
+        G, N = obs.shape[:2]
+        flag = torch.zeros(G, N, 3, device=obs.device, dtype=obs.dtype)
+        flag[..., self.STAGES.index(stage)] = 1.0
+        x = self.norm(torch.cat([obs, flag], dim=-1))
+        x = self.mlp(self.gnn(x, adj))
+        return self.value_head(x)[:, 0]
+
+
+class _MLP(nn.Module):
+    """`khrylib/models/mlp.py`, with their parameter names."""
+
+    def __init__(self, in_dim, hdims, activation="tanh"):
+        super().__init__()
+        self.activation = {"tanh": torch.tanh, "relu": torch.relu,
+                           "sigmoid": torch.sigmoid}[activation]
+        self.out_dim = hdims[-1]
+        self.affine_layers = nn.ModuleList()
+        cur = in_dim
+        for h in hdims:
+            self.affine_layers.append(nn.Linear(cur, h))
+            cur = h
+
+    def forward(self, x):
+        for layer in self.affine_layers:
+            x = self.activation(layer(x))
+        return x

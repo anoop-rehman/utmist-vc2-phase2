@@ -29,7 +29,8 @@ import torch  # noqa: E402
 
 from design_opt.agents.transform2act_agent import Transform2ActAgent  # noqa: E402
 from design_opt.utils.config import Config  # noqa: E402
-from rower_soccer.t2a_port.dense_policy import DenseTransform2ActPolicy  # noqa: E402
+from rower_soccer.t2a_port.dense_policy import (  # noqa: E402
+    DenseTransform2ActPolicy, DenseTransform2ActValue)
 
 STAGES = ["skel_trans", "attr_trans", "execution"]
 _results = []
@@ -227,6 +228,71 @@ def main():
           checked > 0 and worst_batch < 1e-12,
           f"{len(groups)} same-topology groups, {checked} graphs, largest G="
           f"{biggest}, max abs diff {worst_batch:.2e}")
+
+    # ---- the training path: per-graph log-probs and the critic -----------
+    # Added for 3d steps 5/6. `mean_action` alone is enough to SAMPLE with, and
+    # nothing above would notice if the log-prob or the value were wrong -- but
+    # PPO is exactly those two quantities, so they get the same treatment: their
+    # network, their weights, their observations.
+    worst_lp = {s: 0.0 for s in STAGES}
+    n_lp = {s: 0 for s in STAGES}
+    gen = torch.Generator().manual_seed(0)
+    for stage, state in states:
+        x, adj, ind = to_dense(state)
+        with torch.no_grad():
+            # A SAMPLED action, not the mean -- a log-prob evaluated only at the
+            # mode would miss any error in the std or in the quadratic term.
+            act, lp_ours = ours.act(stage, x, adj, ind, generator=gen)
+            lp_theirs = theirs.get_log_prob(tensorfy([state]), [act[0]])
+        d = abs(float(lp_ours[0]) - float(lp_theirs.reshape(-1)[0]))
+        worst_lp[stage] = max(worst_lp[stage], d)
+        n_lp[stage] += 1
+        # log_prob() must agree with what act() reported for the same action.
+        with torch.no_grad():
+            d2 = abs(float(ours.log_prob(stage, x, adj, ind, act)[0])
+                     - float(lp_ours[0]))
+        assert d2 < 1e-12, f"act/log_prob disagree by {d2}"
+    for stage in STAGES:
+        check(f"{stage}: per-graph log-prob matches their cumsum reduction",
+              n_lp[stage] > 0 and worst_lp[stage] < 1e-9,
+              f"{n_lp[stage]} sampled actions, max abs diff "
+              f"{worst_lp[stage]:.2e}")
+
+    theirs_v = agent.value_net
+    theirs_v.eval()
+    ours_v = DenseTransform2ActValue(cfg.value_specs, agent.state_dim).double()
+    ours_v.load_state_dict(theirs_v.state_dict(), strict=True)
+    ours_v.eval()
+    worst_v = 0.0
+    for stage, state in states:
+        x, adj, ind = to_dense(state)
+        with torch.no_grad():
+            ref = theirs_v(tensorfy([state]))
+            got = ours_v(stage, x, adj)
+        worst_v = max(worst_v, abs(float(ref.reshape(-1)[0]) - float(got[0])))
+    check("dense critic matches theirs", worst_v < 1e-9,
+          f"{len(states)} real observations, max abs diff {worst_v:.2e}")
+
+    # Negative control for the critic: their value is read off the FIRST node,
+    # not pooled. Averaging instead must move the answer, or the check above
+    # would pass for a critic that pooled.
+    moved = tried = 0
+    for stage, state in states[:60]:
+        x, adj, ind = to_dense(state)
+        if x.shape[1] < 2:
+            continue
+        tried += 1
+        with torch.no_grad():
+            G, N = x.shape[:2]
+            flag = torch.zeros(G, N, 3, dtype=x.dtype)
+            flag[..., STAGES.index(stage)] = 1.0
+            h = ours_v.mlp(ours_v.gnn(ours_v.norm(torch.cat([x, flag], -1)), adj))
+            nodes = ours_v.value_head(h)
+            if abs(float(nodes[0, 0]) - float(nodes.mean())) > 1e-9:
+                moved += 1
+    check("negative control: the critic reads node 0, not a pool",
+          tried > 0 and moved == tried,
+          f"{moved}/{tried} states where pooling would differ")
 
     n_fail = sum(1 for _, ok in _results if not ok)
     print(f"\n{len(_results) - n_fail}/{len(_results)} passed")

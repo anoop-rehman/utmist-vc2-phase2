@@ -108,6 +108,10 @@ class GameServer:
         if token:
             c = self.lobby.get(token)
             out["me"] = None if c is None else dict(name=c.name, slot=c.slot)
+            # The camera THIS caller is looking through, so the button label is
+            # their own state and not seat 0's.
+            if c is not None and c.slot is not None and self.sim is not None:
+                out["camera"] = self.sim.player_cam[SLOTS.index(c.slot)]
         return out
 
     def wait_frame(self, last_no, timeout=2.0, view=None):
@@ -265,12 +269,18 @@ class GameServer:
                 # No value -> cycle. ballcam is in the rotation because it is
                 # the default and a player who toggles away needs a way back.
                 cams = sim.CAMERAS
-                sim.set_camera(c.get("value") or
-                               cams[(cams.index(sim.camera) + 1) % len(cams)])
-                # `playercam` follows ONE seat; point it at whoever asked, so a
-                # human toggling to it gets their own view rather than seat 0's.
-                if sim.camera == "playercam" and c.get("player") is not None:
-                    sim.player_view = int(c["player"])
+                seat = c.get("player")
+                if seat is None:
+                    # A spectator moves the shared view; nobody's seat changes.
+                    sim.set_camera(c.get("value") or
+                                   cams[(cams.index(sim.camera) + 1) % len(cams)])
+                else:
+                    # A seated player cycles THEIR OWN camera. Their stream is
+                    # their own render, so this must not touch anyone else's.
+                    cur = sim.player_cam[int(seat)]
+                    want = c.get("value") or cams[(cams.index(cur) + 1) % len(cams)]
+                    assert want in sim.CAMERAS, want
+                    sim.player_cam[int(seat)] = want
                 sim._pending_events.append(dict(
                     tick=int(sim.tick), t=float(sim.match_time),
                     type="camera", camera=sim.camera))
@@ -704,7 +714,14 @@ def _handle_input(gs, client, d):
         # desync input from picture.
         u = min(max(float(d["u"]), 0.0), 1.0)
         v = min(max(float(d["v"]), 0.0), 1.0)
-        tgt = gs.sim.uv_to_world(u, v)
+        # THROUGH THIS PLAYER'S OWN CAMERA. `uv_to_world()` with no view uses
+        # the sim's global `camera`/`player_view`, which is one seat's POV --
+        # so every other human's clicks were being un-projected through a
+        # camera they were not looking through. For the away team, whose chase
+        # camera faces the opposite way, that came out as an exact mirror:
+        # click bottom-left, target lands top-right.
+        my_view = SLOTS.index(client.slot)
+        tgt = gs.sim.uv_to_world(u, v, view=my_view)
         fields["target"] = tgt
         # Aim = world vector from the drag's START to its END, both mapped
         # through the ACTIVE camera. For the topdown affine this reduces to the
@@ -714,7 +731,7 @@ def _handle_input(gs, client, d):
         au = float(d.get("aim_u", 0.0))
         av = float(d.get("aim_v", 0.0))
         start = gs.sim.uv_to_world(min(max(u - au, 0.0), 1.0),
-                                   min(max(v - av, 0.0), 1.0))
+                                   min(max(v - av, 0.0), 1.0), view=my_view)
         ax, ay = tgt[0] - start[0], tgt[1] - start[1]
         n = float(np.hypot(ax, ay))
         fields["aim"] = (ax / n, ay / n) if n > 1e-6 else (0.0, 0.0)

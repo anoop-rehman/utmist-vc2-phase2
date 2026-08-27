@@ -226,7 +226,14 @@ class MatchSim:
         # Default to the ball camera: it is close enough that the 0.35 m ball
         # and the ants are both clearly visible, which the pitch-fitting topdown
         # is not. Players can cycle to topdown/broadcast.
-        self.camera = "playercam"
+        self.camera = "playercam"          # the SPECTATOR view
+        # Per-seat camera choice. A seated player's stream is their own render,
+        # so their camera must be their own too -- one global would mean the
+        # button either did nothing for them (it did) or moved everyone's view
+        # at once. It also has to be the SAME value `uv_to_world` un-projects
+        # through, or the picture and the click disagree, which is exactly the
+        # bug this pairs with.
+        self.player_cam = ["playercam"] * len(self.task.players)
         # Which seat `playercam` follows. The server points this at the human's
         # slot; with one human that is one render per tick, which is what makes
         # a per-player view affordable at all (four of them cost 112 ms against
@@ -402,7 +409,16 @@ class MatchSim:
         return np.array([p[0] + c["off"][0], p[1] + c["off"][1], c["off"][2]])
 
     def uv_to_world(self, u, v, view=None):
-        """Click -> world xy. `view=i` uses player i's chase camera."""
+        """Click -> world xy, through the camera that seat is ACTUALLY looking
+        through. `view=i` means "seat i clicked"; which projection that implies
+        depends on the camera that seat has chosen, and getting the two out of
+        step is what made away-team clicks land mirrored."""
+        if view is not None and self.player_cam[view] != "playercam":
+            saved, self.camera = self.camera, self.player_cam[view]
+            try:
+                return self._uv_to_world_fixed(u, v)
+            finally:
+                self.camera = saved
         if view is not None:
             c = self._chase[view]
             pos = self._chase_origin(view)
@@ -858,12 +874,12 @@ class MatchSim:
         and one cached Camera per camera id.
         """
         self._aim_moving_cameras()
-        if view is not None:
-            return self._camera(self.chase_cam_ids[view]).render()
-        if self.camera == "playercam":
-            return self._camera(self.chase_cam_ids[self.player_view]).render()
+        mode = self.camera if view is None else self.player_cam[view]
+        seat = self.player_view if view is None else view
+        if mode == "playercam":
+            return self._camera(self.chase_cam_ids[seat]).render()
         cam = {"broadcast": self.bcast_cam_id,
-               "ballcam": self.ballcam_id}.get(self.camera, self.cam_id)
+               "ballcam": self.ballcam_id}.get(mode, self.cam_id)
         return self._camera(cam).render()
 
     # -- client-side rendering feed ----------------------------------------

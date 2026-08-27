@@ -68,7 +68,15 @@ async function _join() {
 async function claim(slot) {
   if (!S.token) await join();
   const r = await post("/claim", { slot });
-  if (!r.ok) log("! " + r.error); else S.slot = r.slot;
+  if (!r.ok) { log("! " + r.error); return; }
+  const changed = S.slot !== r.slot;
+  S.slot = r.slot;
+  // REOPEN the stream. The server picks which camera to send from the token at
+  // the moment the stream is opened, and the stream is opened at JOIN -- before
+  // any seat exists. Without this a player kept the spectator feed for the whole
+  // session, which is one seat's POV: everyone saw whoever's view the shared
+  // frame happened to be rendering, and only the first player looked right.
+  if (changed) { S.streamAt = 0; openStream(); }
 }
 
 async function release() { await post("/release", {}); S.slot = null; }

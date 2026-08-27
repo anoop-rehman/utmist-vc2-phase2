@@ -352,6 +352,18 @@ class MatchSim:
                                  if (ph.model.camera(i).name or "").endswith("broadcast"))
         self._markers = [ph.bind(g) for g in self._marker_specs]
         self._dashes = [[ph.bind(g) for g in row] for row in self._dash_specs]
+        # One Camera per view, built once and reused. `Physics.render()` builds a
+        # Camera per CALL, and each allocates and frees an MjvScene -- at 20 Hz
+        # with a shared frame plus a per-player view that is ~40 alloc/free
+        # cycles a second against the live GL context, and the server segfaulted
+        # every ~90 s under exactly that load. Cameras are rebuilt here rather
+        # than cached forever because `physics` is replaced on every reset.
+        for c in getattr(self, "_cams", {}).values():
+            try:
+                c._scene.free()
+            except Exception:                  # noqa: BLE001 - teardown only
+                pass
+        self._cams = {}
         self.ballcam_id = next(i for i in range(ph.model.ncam)
                                if (ph.model.camera(i).name or "").endswith("ballcam"))
         self.chase_cam_ids = [
@@ -831,29 +843,28 @@ class MatchSim:
         # and wrong in every frame.
         mujoco.mj_camlight(self.physics.model.ptr, self.physics.data.ptr)
 
+    def _camera(self, cam_id):
+        from dm_control.mujoco import engine
+        cam = self._cams.get(cam_id)
+        if cam is None:
+            cam = engine.Camera(physics=self.physics, height=self.render_h,
+                                width=self.render_w, camera_id=cam_id)
+            self._cams[cam_id] = cam
+        return cam
+
     def render(self, view=None):
+        """`view=None` -> the shared spectator frame; `view=i` -> player i's own
+        chase camera. Every view is the same size, so there is ONE framebuffer
+        and one cached Camera per camera id.
+        """
         self._aim_moving_cameras()
-        """`view=None` -> the shared spectator frame; `view=i` -> player i's
-        chase camera, at the smaller per-player size."""
         if view is not None:
-            # SAME size as the shared frame, deliberately. Rendering per-player
-            # views smaller re-sizes the offscreen framebuffer on every tick
-            # (dm_control builds a Camera per call), and that mixed-size churn
-            # SEGFAULTED the server the first time two humans held seats -- the
-            # only moment a second size is ever requested. On EGL a full-size
-            # render is 2.2 ms, so the smaller size was buying nothing anyway;
-            # it was a leftover from the CPU path where it was meant to buy a
-            # 4x saving that measurement later showed does not exist.
-            return self.physics.render(camera_id=self.chase_cam_ids[view],
-                                       width=self.render_w, height=self.render_h)
+            return self._camera(self.chase_cam_ids[view]).render()
         if self.camera == "playercam":
-            return self.physics.render(
-                camera_id=self.chase_cam_ids[self.player_view],
-                width=self.render_w, height=self.render_h)
+            return self._camera(self.chase_cam_ids[self.player_view]).render()
         cam = {"broadcast": self.bcast_cam_id,
                "ballcam": self.ballcam_id}.get(self.camera, self.cam_id)
-        return self.physics.render(camera_id=cam,
-                                   width=self.render_w, height=self.render_h)
+        return self._camera(cam).render()
 
     # -- client-side rendering feed ----------------------------------------
     # The server streams STATE and the browser draws it, instead of the server

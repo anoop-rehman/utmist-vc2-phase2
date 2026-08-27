@@ -207,3 +207,10 @@ logs/
 # git predate this and are left alone rather than churning a delete commit.)
 wandb/run-2026080*/
 wandb/latest-run
+
+# Per-epoch sweep checkpoints. The 2g/2h sweeps write policies_ep*.pt every 20
+# iterations across 27 runs -- 232 MB, against 3 MB for the log.json files that
+# hold the actual results. The logs are committed; these are reproducible from
+# them plus the recorded args, and the earlier hand-picked policies.pt files
+# stay tracked because gates load them.
+runs/competevo_port/*/policies_ep*.pt

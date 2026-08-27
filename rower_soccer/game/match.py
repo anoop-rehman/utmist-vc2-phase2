@@ -836,8 +836,16 @@ class MatchSim:
         """`view=None` -> the shared spectator frame; `view=i` -> player i's
         chase camera, at the smaller per-player size."""
         if view is not None:
+            # SAME size as the shared frame, deliberately. Rendering per-player
+            # views smaller re-sizes the offscreen framebuffer on every tick
+            # (dm_control builds a Camera per call), and that mixed-size churn
+            # SEGFAULTED the server the first time two humans held seats -- the
+            # only moment a second size is ever requested. On EGL a full-size
+            # render is 2.2 ms, so the smaller size was buying nothing anyway;
+            # it was a leftover from the CPU path where it was meant to buy a
+            # 4x saving that measurement later showed does not exist.
             return self.physics.render(camera_id=self.chase_cam_ids[view],
-                                       width=self.chase_w, height=self.chase_h)
+                                       width=self.render_w, height=self.render_h)
         if self.camera == "playercam":
             return self.physics.render(
                 camera_id=self.chase_cam_ids[self.player_view],

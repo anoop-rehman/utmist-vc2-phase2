@@ -285,7 +285,10 @@ async function poll() {
     whoEl.classList.toggle("seated", !!S.slot);
     const me = (st.players || []).find((p) => p.slot === S.slot);
     if (me && me.skill !== S.skill) { S.skill = me.skill; }
-    $("cambtn").textContent = "cam: " + (st.camera === "broadcast" ? "tv" : "top");
+    $("cambtn").textContent = "cam: " + ({playercam: "pov", ballcam: "ball",
+                                          topdown: "top", broadcast: "tv"}[st.camera]
+                                         || st.camera);
+    if (st.fill) $("fillbtn").textContent = "cpu: " + st.fill;
     paintSkills(); paintSeats(st); paintOverlay(); checkFrozen(st);
     (st.events || []).forEach((e) => {
       const key = e.tick + e.type + (e.slot || "") + (e.team || "");
@@ -327,6 +330,8 @@ document.addEventListener("keydown", (e) => {
 $("joinbtn").onclick = join;
 $("unflipbtn").onclick = unflip;
 $("cambtn").onclick = () => post("/control", { action: "camera" });
+// No value -> the server flips it. Affects every seat with no human in it.
+$("fillbtn").onclick = () => post("/control", { action: "fill" });
 $("startbtn").onclick = () => post("/control", { action: "start" });
 $("stopbtn").onclick = () => post("/control", { action: "stop" });
 $("name").value = S.name;

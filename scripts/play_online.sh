@@ -90,4 +90,18 @@ cat <<EOF
   Server log: logs/game_online.log   Tunnel log: logs/tunnel.log
 EOF
 
-wait $GAME
+# Supervise the game process. A segfault used to take the whole session down
+# silently: the server died, the tunnel lost its upstream and exited, and
+# players got a Cloudflare 1033 with nothing in any log to explain it. The
+# tunnel and its URL survive a restart, so recovering in place beats handing out
+# a new link.
+while true; do
+    wait $GAME || true
+    kill -0 $TUN 2>/dev/null || break
+    echo "[online] game process exited; restarting in 3 s (URL unchanged)" >&2
+    sleep 3
+    "$VENV/bin/python" -m rower_soccer.game.server --port "$PORT" "${@:3}" \
+        >> logs/game_online.log 2>&1 &
+    GAME=$!
+    trap 'kill $GAME $TUN 2>/dev/null || true' EXIT INT TERM
+done

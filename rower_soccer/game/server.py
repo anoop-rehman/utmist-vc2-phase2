@@ -69,6 +69,7 @@ class GameServer:
         self._control: list = []                  # queued match-control actions
 
         self._frame_lock = threading.Condition()
+        self.fill = args.fill        # mutable: /control {"action":"fill"}
         self._jpeg = None
         self._views = {}
         self._frame_no = 0
@@ -102,6 +103,7 @@ class GameServer:
         out["tick_error"] = self.tick_error
         out["demos"] = self.demos[-5:]
         out["available_skills"] = list(self._skills)
+        out["fill"] = self.fill
         out["match_seconds"] = self.args.match_seconds
         if token:
             c = self.lobby.get(token)
@@ -245,6 +247,19 @@ class GameServer:
                 p = sim.end_match("stopped")
                 if p:
                     self.demos.append(p)
+            elif c["action"] == "fill":
+                want = c.get("value")
+                if want not in ("scripted", "idle"):
+                    want = "idle" if self.fill == "scripted" else "scripted"
+                self.fill = want
+                # Apply immediately rather than waiting for the next match:
+                # _autofill only rewrites a seat when its controller DIFFERS
+                # from the mode, so flipping the mode is enough.
+                self._autofill(sim)
+                sim._pending_events.append(dict(
+                    tick=int(sim.tick), t=float(sim.match_time),
+                    type="fill_change", fill=self.fill))
+                print(f"[game] cpu seats -> {self.fill}", flush=True)
             elif c["action"] == "camera":
                 # Explicit value, or toggle. Render-only: no physics, no demo row.
                 # No value -> cycle. ballcam is in the rotation because it is
@@ -304,8 +319,14 @@ class GameServer:
 
     def _autofill(self, sim):
         """Seats with no live client are driven by the built-in baseline, so a match
-        is playable with 1 human and still records 4 usable trajectories."""
-        fill = self.args.fill
+        is playable with 1 human and still records 4 usable trajectories.
+
+        `self.fill` rather than `args.fill`: the mode is switchable mid-session
+        (`/control` action `fill`), because "does my skill actually do anything"
+        is much easier to answer against still opponents than against three
+        baselines chasing the ball.
+        """
+        fill = self.fill
         for p, slot in enumerate(SLOTS):
             c = self.lobby.occupant(slot)
             cmd = sim.commands[p]
@@ -645,9 +666,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(*_handle_input(gs, c, d))
 
         if u.path == "/control":
-            if d.get("action") not in ("start", "stop", "camera"):
-                return self._json(dict(ok=False,
-                                       error="action must be start|stop|camera"), 400)
+            if d.get("action") not in ("start", "stop", "camera", "fill"):
+                return self._json(dict(
+                    ok=False,
+                    error="action must be start|stop|camera|fill"), 400)
             # Carry WHO asked: `playercam` follows one seat, and a viewer
             # toggling to it must get their own seat, not seat 0's.
             gs.push_control(d["action"], value=d.get("value"),

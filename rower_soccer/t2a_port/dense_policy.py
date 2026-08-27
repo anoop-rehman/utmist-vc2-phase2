@@ -336,11 +336,11 @@ class DenseTransform2ActPolicy(nn.Module):
             if mean_action:
                 a = mean
             else:
+                # `generator` must live on the same device as `mean`;
+                # torch refuses to mix, and silently falling back to the
+                # default generator would make a seeded run unreproducible.
                 eps = torch.randn(mean.shape, generator=generator,
-                                  device=("cpu" if generator is not None
-                                          and generator.device.type == "cpu"
-                                          else mean.device),
-                                  dtype=mean.dtype).to(mean.device)
+                                  device=mean.device, dtype=mean.dtype)
                 a = mean + std * eps
             lp = _normal_log_prob(a, mean, std).sum(-1).sum(-1)
             action[..., sl] = a

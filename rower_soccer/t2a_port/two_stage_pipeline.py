@@ -177,7 +177,7 @@ class TopologyGroup:
     def __init__(self, key, worlds, models, spec_cfg, *, backend="warp",
                  device=None, done_condition=None, reward_specs=None,
                  clip_qvel=True, frame_skip=4, init_noise=0.005, seed=0,
-                 nconmax_per_world=48, njmax_per_world=96, write=True,
+                 nconmax=32, njmax=128, write=True,
                  field_perm=None, drop_fields=(), **backend_kw):
         assert len(worlds) == len(models) and worlds
         self.key = key
@@ -237,11 +237,50 @@ class TopologyGroup:
             else ("cpu" if backend == "cpu" else None),
             batched_fields=tuple(self.written), init_noise=init_noise,
             seed=seed,
-            nconmax=max(64, nconmax_per_world * self.n),
-            njmax=max(512, njmax_per_world * self.n), **backend_kw)
+            # mujoco_warp's `nconmax`/`njmax` are PER WORLD (put_data's own
+            # docstring), not totals. Multiplying by the world count -- which
+            # this file did first -- asks for a 4.8 GB constraint Jacobian at
+            # 1,024 worlds and, below that, silently makes the solver's arrays
+            # 1,000x larger than the problem, which is where the throughput
+            # curve's fall-off past 256 worlds came from.
+            #
+            # The floor is the geometric bound, not a guess: every geom pair
+            # plus every geom against the floor. `put_data` raises on an
+            # initial-state overflow, but a RUNTIME overflow drops contacts,
+            # and a dropped contact is an env that is numerically fine and
+            # physically wrong. `check_contact_capacity()` asserts the margin
+            # after a rollout.
+            nconmax=max(nconmax, self._contact_bound(models[0])),
+            njmax=max(njmax, 3 * self._contact_bound(models[0])
+                      + models[0].nv + 8), **backend_kw)
         if write:
             self.write_fields(perm=field_perm)
         self.env.reset()
+
+    @staticmethod
+    def _contact_bound(model):
+        """Every geom pair, plus every geom against the world. Their generator
+        gives one capsule per body and all of them collide (contype and
+        conaffinity are 1 in the XML's `default`), so this is tight, not
+        conservative -- a 9-geom design really does reach 36 contacts at reset,
+        which is what the first launch of the trainer discovered."""
+        g = int(model.ngeom)
+        return g * (g + 1) // 2
+
+    def check_contact_capacity(self):
+        """Highest contact count any world reached, against what was allocated.
+
+        Returns `(used, capacity)`. mujoco_warp raises on an overflow it can
+        see at `put_data` time; one that happens mid-rollout is silent, and a
+        silently dropped contact is exactly the "numerically fine, physically
+        wrong" failure this port is trying not to ship.
+        """
+        wd = getattr(self.env.backend, "wd", None)
+        if wd is None or not hasattr(wd, "nacon"):
+            return None, None
+        used = int(wd.nacon.numpy().max())
+        cap = int(wd.contact.geom.shape[0])
+        return used, cap
 
     def write_fields(self, perm=None):
         """Push each member's own compiled values into the batched model.

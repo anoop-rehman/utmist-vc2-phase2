@@ -229,6 +229,49 @@ def main():
           f"{len(groups)} same-topology groups, {checked} graphs, largest G="
           f"{biggest}, max abs diff {worst_batch:.2e}")
 
+    # ---- mixed topologies, one dense batch ------------------------------
+    # The trainer buckets PPO minibatches by (stage, node count), not by
+    # topology, and relies on `adj`/`ind` being per-ROW. That is a different
+    # claim from the same-topology batch check above -- there ONE adjacency was
+    # broadcast over the batch, here every row carries its own -- and the
+    # update's speed depends on it, so it gets its own check.
+    #
+    # A trained checkpoint emits one or two topologies, so waiting for two
+    # DIFFERENT real graphs of the same size to turn up would leave this check
+    # silently unexercised. Node permutations of a real graph are genuinely
+    # different graphs of the same size, so they are used to build the mixed
+    # batch deliberately.
+    worst_mixed, n_mixed, n_bucket = 0.0, 0, 0
+    rng = np.random.RandomState(0)
+    by_stage_n = {}
+    for stage, state in states:
+        x, adj, ind = to_dense(state)
+        if x.shape[1] < 3:
+            continue
+        p_ = rng.permutation(x.shape[1])
+        pt = torch.as_tensor(p_, dtype=torch.long)
+        perm = (x[:, pt], adj[:, pt][:, :, pt], ind[:, pt])
+        by_stage_n.setdefault((stage, x.shape[1]), []).extend(
+            [(x, adj, ind), perm])
+    for (stage, _), grp in by_stage_n.items():
+        graphs = {tuple(g[2][0].tolist()) + tuple(g[1].reshape(-1).tolist())
+                  for g in grp}
+        if len(graphs) < 2:
+            continue
+        n_bucket += 1
+        xs = torch.cat([g[0] for g in grp])
+        adj = torch.cat([g[1] for g in grp])
+        ind = torch.cat([g[2] for g in grp])
+        with torch.no_grad():
+            batched = head_out(stage, xs, adj, ind)
+            singles = torch.cat([head_out(stage, *g) for g in grp])
+        worst_mixed = max(worst_mixed, (batched - singles).abs().max().item())
+        n_mixed += len(grp)
+    check("DIFFERENT topologies of the same size batch together",
+          n_mixed > 0 and worst_mixed < 1e-12,
+          f"{n_bucket} (stage, n) buckets carrying >1 distinct graph, "
+          f"{n_mixed} graphs, max abs diff {worst_mixed:.2e}")
+
     # ---- the training path: per-graph log-probs and the critic -----------
     # Added for 3d steps 5/6. `mean_action` alone is enough to SAMPLE with, and
     # nothing above would notice if the log-prob or the value were wrong -- but

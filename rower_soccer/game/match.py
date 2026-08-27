@@ -67,8 +67,13 @@ PATH_SEGMENTS = 16      # samples along the ground aim line; enough that the
 # two clearly different blues gave one red and one ORANGE, because the
 # red-to-orange transition is compressed right where the red team sits. Two hex
 # codes chosen by eye beat a formula that has to be corrected per team.
+# Chosen against the actual renderer (scripts/color_picker.py), not from a
+# swatch: the four lights, the material's specular, and the saturated green turf
+# all shift what a hex code looks like on a creature. #faaca5 is a pale pink in
+# a picker and reads as YELLOW on an ant, which is how these ended up being
+# eyeballed in-engine rather than derived.
 PLAYER_HEX = ("#598eff", "#59d0ff",     # home
-              "#faaca5", "#c91000")     # away
+              "#e65b2d", "#b03636")     # away
 
 
 def marker_rgba(i, alpha=0.9):

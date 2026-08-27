@@ -26,10 +26,14 @@ training run, and this script is what tells you whether it is worth launching.
     PYTHONPATH=. .venv/bin/python -m rower_soccer.competevo_port.competence_eval \\
         --runs runs/competevo_port/t2h_*_s42 --opponent idle
 
-`--action {mean,sample}` also settles a discrepancy the clips turned up:
-spider-vs-spider is 83.4% wipeout in the training log and 100% timeout under
-deterministic mean actions. Training eval samples; the renderer does not. Run
-both and the difference is measured rather than assumed.
+`--action {mean,sample}` exists because the training eval samples and the
+renderers do not. It is NOT what explained the spider-vs-spider discrepancy
+(83.4% wipeout in the training log against 100% timeout in the clip): sampling
+reproduces the clip, and the real cause was averaging a REGIME CHANGE. That run
+is 100% wipeout on 36-72 step episodes through iter 184 and 100% timeout on
+500-step episodes by iter 194, so a mean over the last 8 evals reported a state
+the policy was never in. Aggregate before comparing rates -- but check first
+that the window you are aggregating holds one regime.
 """
 
 import argparse
@@ -40,6 +44,8 @@ import os
 
 import numpy as np
 import torch
+
+from rower_soccer.competevo_port.scene import CONTROL_DT
 
 END = {0: "running", 1: "goal", 2: "wipeout", 3: "fall", 4: "timeout"}
 
@@ -98,10 +104,9 @@ def evaluate(run, worlds, seed, opponent, action, steps):
                 # NEGATIVE "progress" -- and it lands most often on the teams
                 # that score most, which biases speed downward exactly where
                 # it should be highest. `gate_drill_priors.roll` drops these
-                # the same way. A control step cannot legitimately move an
-                # agent 0.5 m at 0.025 s (that would be 20 m/s), so the
-                # threshold separates physics from teleports with room to
-                # spare rather than by tuning.
+                # the same way. 0.5 m inside one 0.015 s control step would
+                # be 33 m/s, so the threshold separates physics from teleports
+                # with room to spare rather than by tuning.
                 ok = (d.abs() < 0.5).all(-1, keepdim=True)
                 prog += d * ok
                 pcount += ok.to(env.dtype)
@@ -124,10 +129,13 @@ def evaluate(run, worlds, seed, opponent, action, steps):
         "goal": endings["goal"] / tot,
         "wipeout": endings["wipeout"] / tot,
         "timeout": endings["timeout"] / tot,
-        # /0.025 s per control step -> m/s, matching the drills' speed units.
-        # Divided by each world's own accepted-step count, not the global one.
-        "speed_A": float((prog[:, side[0]] / pcount.clamp(min=1)).mean()) / 0.025,
-        "speed_B": float((prog[:, side[1]] / pcount.clamp(min=1)).mean()) / 0.025,
+        # -> m/s using THIS env's control step, and divided by each world's
+        # own accepted-step count rather than a global one. Not the drills'
+        # 0.025: the competevo scene is frame_skip 5 x timestep 0.003 =
+        # 0.015 s, which is what `terms()` divides by to build forward_r.
+        # Hardcoding the drill value understated every speed here by 1.67x.
+        "speed_A": float((prog[:, side[0]] / pcount.clamp(min=1)).mean()) / CONTROL_DT,
+        "speed_B": float((prog[:, side[1]] / pcount.clamp(min=1)).mean()) / CONTROL_DT,
         "upright_A": float(upright[:, side[0]].mean()) / m,
         "upright_B": float(upright[:, side[1]].mean()) / m,
     }

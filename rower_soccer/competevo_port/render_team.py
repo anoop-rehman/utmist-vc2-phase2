@@ -45,9 +45,14 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--untrained", action="store_true")
     args = p.parse_args()
-    # EGL is broken on this pod (eglQueryString on NoneType); osmesa renders
-    # the same pixels on the CPU, slower. Physics is unaffected either way.
-    os.environ.setdefault("MUJOCO_GL", "osmesa")
+    # EGL works here and is ~20x faster (2.2 ms/frame against osmesa's 46 ms).
+    # This defaulted to osmesa over a comment claiming EGL was broken on this
+    # pod; that was wrong. The EGLError came from `GLContext.__del__` at
+    # interpreter teardown, AFTER the render had already succeeded, and
+    # `eglQueryDevicesEXT` reporting 0 devices is not the tell it was read as.
+    # Physics is unaffected either way -- set MUJOCO_GL=osmesa on a box that
+    # really has no EGL.
+    os.environ.setdefault("MUJOCO_GL", "egl")
 
     import imageio.v2 as imageio
     import mujoco

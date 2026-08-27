@@ -163,3 +163,78 @@ Recorded because each would have been believed, and two of them were:
    one. The ant's back slot covers the **full 8.04 m** and does arrive, so the
    back agent is not physically incapable and §11's reading stands untouched by
    anything measured here.
+
+---
+
+# Update, same day — the training runs answered "could they learn"
+
+Three runs, 600 iterations each at 256 worlds, homogeneous per-slot, trained
+with `--idle-opponent` so nothing interferes. Scored afterwards with
+`competence_eval` in **both** conditions, because the answer differs sharply
+between them.
+
+| | unopposed goal | opposed goal | unopposed speed (front/back) | opposed speed |
+|---|---|---|---|---|
+| ant | **98.3%** | 1.0% | +1.114 / +3.255 | +0.199 |
+| bug | **94.4%** | 1.0% | +1.671 / +2.271 | +0.209 |
+| spider | **0.0%** | 0.0% | +0.463 / +0.300 | +0.102 |
+
+## 1. The bug's morphology was never the limitation
+
+From **0.0% to 94.4%**, with speed rising from 0.244/0.586 to 1.671/2.271 m/s —
+comfortably past both the 0.667 front and 1.067 back requirements. The 2h
+sweep's zero was a fact about the training conditions, not about the body. Any
+plan that discards the bug as unusable is discarding a morphology that reaches
+the goal in 94% of episodes once it is given a task it can get reward on.
+
+## 2. The spider's probably is
+
+Three times the training and no interference, and it still never arrives: best
+episode 4.68 m of the 5.0 needed. What it *did* learn is instructive — upright
+went from 81.3% to **100%**, and speed roughly tripled from a near-standstill.
+It solved stability and not locomotion. The clip
+(`runs/d2_sweep_clips/idle_trained_spider.mp4`) shows exactly that: splayed,
+level, and barely translating across 37 seconds.
+
+This is the strongest evidence so far that the spider needs a change to the
+body or its `SCALE_MAX`/gear settings rather than more compute. It is still not
+proof — one seed, one setting.
+
+## 3. Unopposed training does not transfer, for any morphology
+
+Every one of these policies collapses when an opponent appears: **98.3% → 1.0%**
+for the ant, 94.4% → 1.0% for the bug, with speed dropping ~11x in all three
+cases including the spider. The uniformity across morphologies is what makes
+this a statement about the training condition rather than about any one body.
+
+So `--idle-opponent` is a **diagnostic and not a curriculum**. It answers "can
+this body do the locomotion", which is what it was built for, and it does not
+produce a policy worth warm-starting self-play from. The flag's help text
+already said results from it are not comparable to a self-play run; this is the
+number behind that warning.
+
+`render_sweep` drives both sides and therefore reports the *opposed* figures
+(ant 2.1%, bug 0.0%, spider 0.0%) for the same checkpoints. That is not a
+contradiction of the 94-98% above, it is the other column of this table — but
+it is exactly the sort of pair that gets quoted out of context, so both are
+recorded together here.
+
+## What this changes
+
+* **Do not drop the bug.** Its body clears the requirement with room to spare.
+* **The spider needs a body fix, not more iterations**, on the evidence
+  available.
+* **Reachability is no longer the open question for the bug**; transfer from
+  unopposed to opposed play is. That is a different and more interesting
+  problem, and it is what the 2h sweep was actually up against.
+
+### Not tested, added here
+
+* One seed per morphology, 600 iterations, 256 worlds. The 2h sweep used 512.
+* Whether a *mixed* opposed/unopposed curriculum transfers where pure
+  unopposed training does not.
+* Whether the spider improves with a raised `SCALE_MAX` or different gearing.
+* The ant's front slot reads "never arrives" (max 4.60 m) in the unopposed
+  eval. This is very likely truncation rather than failure — `win_rule` is
+  `team_first`, so the back agent crossing at 8 m ends the episode and cuts the
+  front agent's displacement short. Stated as the likely reading, unverified.

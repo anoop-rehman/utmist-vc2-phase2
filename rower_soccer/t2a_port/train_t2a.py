@@ -308,6 +308,17 @@ class Trainer:
         # first generation, so the constant only decides the first one.
         self.len_est = 40.0
 
+        # Give memory back to the driver. mujoco_warp allocates a fresh
+        # `Data` per topology group, and with a caching mempool the process's
+        # resident set grows to the high-water mark over every group shape it
+        # has ever seen -- measured climbing past 5 GB on a card shared with
+        # three other jobs. A release threshold makes the pool return unused
+        # blocks instead of hoarding them.
+        if self.device.type == "cuda" and args.mempool_mb >= 0:
+            import warp as wp
+            wp.set_mempool_release_threshold("cuda:0",
+                                             args.mempool_mb * 1024 * 1024)
+
         self.out = os.path.join(args.outdir, args.run)
         os.makedirs(os.path.join(self.out, "models"), exist_ok=True)
         self.logf = open(os.path.join(self.out, "log_train.txt"), "a")
@@ -612,6 +623,9 @@ class Trainer:
                 self.save(epoch, "best.p")
             if (epoch + 1) % a.save_interval == 0:
                 self.save(epoch)
+            del batch
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
         self.log("training done!")
 
 
@@ -634,6 +648,9 @@ def main():
     p.add_argument("--fp32", action="store_true", default=True)
     p.add_argument("--fp64", dest="fp32", action="store_false")
     p.add_argument("--save-interval", type=int, default=50)
+    p.add_argument("--mempool-mb", type=int, default=512,
+                   help="warp mempool release threshold; -1 leaves warp's "
+                        "default, which hoards to the high-water mark")
     p.add_argument("--stop-file", default="",
                    help="touch this path to end the run cleanly at the next "
                         "epoch boundary; NEVER kill a CUDA process under MPS")

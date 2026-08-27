@@ -680,13 +680,19 @@ group at a time; the GPU rolls them sequentially anyway, so nothing is lost.
 `build_groups` stays for the gate, which genuinely wants several groups alive
 at once.
 
-**Reported honestly: after the fix the process still reads ~4.1 GB in
-`nvidia-smi`.** Live usage is far lower -- warp runs with a CUDA mempool and
-torch has its own caching allocator, so both report a high-water mark rather
-than a working set -- but 4.1 GB is what the card is holding for this process
-and that is the number that matters to whoever else is on it. If it needs to
-come down, `--max-worlds 512` is the knob, at the cost of more generations per
-iteration.
+**And after that fix it still climbed**, 0.4 -> 4.1 -> 5.3 GB over two epochs,
+because `mujoco_warp` allocates a fresh `Data` per topology group and warp's
+CUDA mempool caches every block it has ever handed out -- so the resident set
+grows to the high-water mark over all group shapes ever seen, not to the
+working set. `--mempool-mb` (default 512, the run uses 256) sets
+`wp.set_mempool_release_threshold`, and the trainer drops the batch and calls
+`torch.cuda.empty_cache()` at each epoch boundary. Watch `nvidia-smi` on this
+run: if it climbs again, `--max-worlds 512` is the next knob, at the cost of
+more generations per iteration.
+
+The rule this earns: **on a shared card, a growing resident set is a bug even
+when nothing is leaking.** A caching allocator plus a per-group `Data` is
+enough to take a 0.4 GB working set to 5.3 GB of held memory.
 
 
 
@@ -856,12 +862,28 @@ the thing being compared.
 
 ### What is running, and how to stop it
 
+```sh
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. MUJOCO_GL=egl setsid nohup .venv/bin/python \
+    -m rower_soccer.t2a_port.train_t2a --cfg hopper_gpu_s2 --run port_s1 \
+    --outdir runs/t2a_port --seed 1 --eval-worlds 16 --max-worlds 1024 \
+    --mempool-mb 256 --epochs 1000 --save-interval 100 \
+    --stop-file /tmp/stop_t2a_port_s1 \
+    > runs/t2a_port/port_s1.log 2>&1 &
 ```
-run:      runs/t2a_port/port_s1        seed 1, hopper_gpu_s2 config, 1,000 epochs
+
+```
 log:      runs/t2a_port/port_s1.log    and runs/t2a_port/port_s1/log_train.txt
-ckpts:    runs/t2a_port/port_s1/models/epoch_*.p  (every 100) + best.p
+ckpts:    runs/t2a_port/port_s1/models/epoch_*.p  (every 100) + best.p, gitignored
 stop:     touch /tmp/stop_t2a_port_s1  -- saves stopped.p and exits at the next
-                                          epoch boundary. DO NOT kill it.
+                                          epoch boundary. DO NOT kill it, and do
+                                          NOT wrap it in `timeout`.
+pace:     ~119 s/epoch measured over the first two (untrained) epochs, so under
+          33 h if it never got faster -- and it should get faster as the
+          skeleton stage converges to one or two topologies. n = 1 seed; 3e
+          wants at least three, and hopper_gpu_t32 says one of them may land in
+          the survival trap rather than the running basin.
 ```
 
 Each log line is their format plus a JSON line carrying `batch_steps`,

@@ -205,8 +205,14 @@ logs/
 # Local wandb run state. Same class as runs_v2/: pure training artifact, and
 # every byte of it also lives on wandb.ai. (The run-2026071*/ dirs already in
 # git predate this and are left alone rather than churning a delete commit.)
-wandb/run-2026080*/
+# NOTE the glob: `run-2026080*/` was dated and only matched August 1st-9th, so
+# every run from the 10th on was left untracked-but-visible. `run-2026*` covers
+# the year.
+wandb/run-2026*/
 wandb/latest-run
+
+# Scratch traces from the t2a contact/displacement probes.
+trace_ep*.npy
 
 # Per-epoch sweep checkpoints. The 2g/2h sweeps write policies_ep*.pt every 20
 # iterations across 27 runs -- 232 MB, against 3 MB for the log.json files that

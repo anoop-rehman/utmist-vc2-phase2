@@ -70,6 +70,7 @@ class GameServer:
 
         self._frame_lock = threading.Condition()
         self._jpeg = None
+        self._views = {}
         self._frame_no = 0
         self._poses = None
         self._pose_no = 0
@@ -107,10 +108,15 @@ class GameServer:
             out["me"] = None if c is None else dict(name=c.name, slot=c.slot)
         return out
 
-    def wait_frame(self, last_no, timeout=2.0):
+    def wait_frame(self, last_no, timeout=2.0, view=None):
+        """`view=i` returns player i's own camera, falling back to the shared
+        frame on the first tick after a seat is claimed (its view does not exist
+        until the next publish)."""
         with self._frame_lock:
             if self._frame_no == last_no:
                 self._frame_lock.wait(timeout)
+            if view is not None and view in self._views:
+                return self._views[view], self._frame_no
             return self._jpeg, self._frame_no
 
     # -- sim thread --------------------------------------------------------
@@ -330,12 +336,33 @@ class GameServer:
                 self._frame_lock.wait(timeout)
             return self._poses, self._pose_no
 
-    def _publish_frame(self, sim):
-        frame = sim.render()
+    def _encode(self, frame):
         b = io.BytesIO()
-        self._Image.fromarray(frame).save(b, format="JPEG", quality=self.args.quality)
+        self._Image.fromarray(frame).save(b, format="JPEG",
+                                          quality=self.args.quality)
+        return b.getvalue()
+
+    def _publish_frame(self, sim):
+        """One shared spectator frame plus one PER-PLAYER view per occupied
+        human seat.
+
+        Affordable only on EGL: a render is 2.2 ms on the GPU against 46 ms on
+        the OSMesa software rasteriser, so four per-player views cost 7.9 ms
+        here and ~190 ms there. That measurement is the whole reason this is
+        server-side rather than in the browser.
+
+        Only OCCUPIED HUMAN seats are rendered -- a scripted seat has nobody
+        looking through its eyes, so the cost tracks the number of players
+        rather than the number of slots.
+        """
+        shared = self._encode(sim.render())
+        views = {}
+        for i, slot in enumerate(SLOTS[:sim.n_players]):
+            if self.lobby.occupant(slot) is not None:
+                views[i] = self._encode(sim.render(view=i))
         with self._frame_lock:
-            self._jpeg = b.getvalue()
+            self._jpeg = shared
+            self._views = views
             self._frame_no += 1
             self._frame_lock.notify_all()
 
@@ -462,7 +489,8 @@ class _Handler(BaseHTTPRequestHandler):
         if u.path == "/frame":
             if self._gated(token):
                 return
-            jpeg, _ = gs.wait_frame(-1, timeout=0.0)
+            jpeg, _ = gs.wait_frame(-1, timeout=0.0,
+                                    view=self._my_view(gs, token))
             if jpeg is None:
                 return self._send(503, b"no frame yet", "text/plain")
             return self._send(200, jpeg, "image/jpeg")
@@ -477,7 +505,7 @@ class _Handler(BaseHTTPRequestHandler):
         if u.path == "/stream":
             if self._gated(token):
                 return
-            return self._stream()
+            return self._stream(self._my_view(gs, token))
         return self._send(404, b"not found", "text/plain")
 
     def _pose_stream(self):
@@ -512,7 +540,20 @@ class _Handler(BaseHTTPRequestHandler):
             with gs._streams_lock:
                 gs._streams -= 1
 
-    def _stream(self):
+    def _my_view(self, gs, token):
+        """Which camera this request should see: its OWN seat, or None for a
+        spectator.
+
+        Resolved from the TOKEN, never from a parameter: the token is the only
+        thing that names a slot, so a client structurally cannot ask to look
+        through someone else's eyes. Same rule the input path already follows.
+        """
+        c = gs.lobby.get(token) if token else None
+        if c is None or c.slot is None:
+            return None
+        return SLOTS.index(c.slot)
+
+    def _stream(self, view=None):
         """MJPEG. One frame per published frame -- no polling, no duplicate JPEGs:
         `wait_frame` blocks on the sim thread's condition variable."""
         gs = self.gs
@@ -521,12 +562,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(dict(ok=False, error="too many viewers"), 503)
             gs._streams += 1
         try:
-            self._stream_loop()
+            self._stream_loop(view)
         finally:
             with gs._streams_lock:
                 gs._streams -= 1
 
-    def _stream_loop(self):
+    def _stream_loop(self, view=None):
         self.send_response(200)
         self.send_header("Content-Type",
                          "multipart/x-mixed-replace; boundary=frame")
@@ -553,7 +594,7 @@ class _Handler(BaseHTTPRequestHandler):
         last = -1
         try:
             while not self.gs.stop_flag.is_set():
-                jpeg, last = self.gs.wait_frame(last, timeout=2.0)
+                jpeg, last = self.gs.wait_frame(last, timeout=2.0, view=view)
                 if jpeg is None:
                     continue
                 self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n"

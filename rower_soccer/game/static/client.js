@@ -397,9 +397,19 @@ async function start3d() {
   return true;
 }
 
+// Server-side rendering is the DEFAULT again. It became affordable when EGL
+// turned out to work here (2.2 ms a frame on the GPU against 46 ms on the CPU
+// rasteriser), and it keeps one authority for physics AND for what everyone
+// sees -- each player now gets their own POV camera rendered server-side.
+// `?client3d=1` opts into the browser renderer, which is still useful when the
+// server has no GPU.
 (async () => {
   await join();
-  if (!(await start3d())) { view.hidden = false; $("webgl").hidden = true; }
+  const want3d = new URLSearchParams(location.search).get("client3d") === "1";
+  if (!want3d || !(await start3d())) {
+    view.hidden = false;
+    $("webgl").hidden = true;
+  }
   setInterval(poll, 200);
   poll();
 })();

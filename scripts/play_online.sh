@@ -40,11 +40,14 @@ fi
 # The code goes in the environment, not in argv: `ps aux` is readable by everyone
 # with a shell on this box, and this box is shared.
 export ROWER_JOIN_CODE="$CODE"
-# EGL is broken on this pod (`EGLError` from `eglQueryString` on a NoneType) and
-# osmesa renders the same pixels on the CPU. Honour an explicit MUJOCO_GL so a
-# machine with working EGL still gets the fast path; default to what works here
-# rather than to what fails.
-export MUJOCO_GL="${MUJOCO_GL:-osmesa}"
+# EGL (GPU) by default. An earlier version of this script defaulted to osmesa
+# because an EGL probe "failed" -- it did not: the EGLError came from
+# GLContext.__del__ at teardown, AFTER a successful render, and
+# eglQueryDevicesEXT reporting 0 devices is irrelevant because MuJoCo's EGL path
+# does not use device enumeration. Measured on this pod: 2.2 ms/frame on EGL
+# against 46 ms on osmesa, which is what makes four per-player views affordable.
+# MUJOCO_GL=osmesa still forces the CPU path where EGL genuinely is missing.
+export MUJOCO_GL="${MUJOCO_GL:-egl}"
 echo "[online] MUJOCO_GL=$MUJOCO_GL"
 export PYTHONPATH="$REPO"
 

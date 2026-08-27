@@ -71,6 +71,8 @@ class GameServer:
         self._frame_lock = threading.Condition()
         self._jpeg = None
         self._frame_no = 0
+        self._poses = None
+        self._pose_no = 0
         self._snap = {"phase": "starting"}
         self._events: list = []
         self.demos: list = []
@@ -312,6 +314,22 @@ class GameServer:
                 cmd.controller, cmd.name = fill, ""
                 cmd.skill = "scripted" if fill == "scripted" else "idle"
 
+    def _publish_poses(self, sim):
+        """Cheap: two numpy copies, no rasterisation. Published every tick even
+        while the MJPEG path is alive, so a browser can render client-side and
+        a legacy viewer can keep watching pixels, from the same sim."""
+        b = sim.pose_frame()
+        with self._frame_lock:
+            self._poses = b
+            self._pose_no += 1
+            self._frame_lock.notify_all()
+
+    def wait_poses(self, last_no, timeout=2.0):
+        with self._frame_lock:
+            if self._pose_no == last_no:
+                self._frame_lock.wait(timeout)
+            return self._poses, self._pose_no
+
     def _publish_frame(self, sim):
         frame = sim.render()
         b = io.BytesIO()
@@ -322,6 +340,7 @@ class GameServer:
             self._frame_lock.notify_all()
 
     def _publish_state(self, sim):
+        self._publish_poses(sim)
         snap = sim.snapshot()
         evs = sim.drain_events()
         with self._frame_lock:
@@ -371,10 +390,15 @@ class _Handler(BaseHTTPRequestHandler):
             return {}
 
     def _static(self, name):
-        # basename() is the whole path-traversal defence: this only ever serves the
-        # three files next to this module.
-        path = os.path.join(STATIC_DIR, os.path.basename(name))
-        if not os.path.isfile(path):
+        # Path-traversal defence is CONTAINMENT, not basename(). basename() was
+        # the old rule and it silently broke subdirectories: /static/vendor/
+        # three.module.js became three.module.js, 404'd, and took the whole ES
+        # module graph down with it -- a blank canvas and a client.js that never
+        # ran. realpath containment allows vendor/ while still refusing `..`,
+        # absolute paths and symlinks that point outside.
+        path = os.path.realpath(os.path.join(STATIC_DIR, name.lstrip("/")))
+        root = os.path.realpath(STATIC_DIR)
+        if os.path.commonpath([path, root]) != root or not os.path.isfile(path):
             return self._send(404, b"not found", "text/plain")
         ctype = {".html": "text/html", ".js": "text/javascript",
                  ".css": "text/css"}.get(os.path.splitext(path)[1], "text/plain")
@@ -442,11 +466,51 @@ class _Handler(BaseHTTPRequestHandler):
             if jpeg is None:
                 return self._send(503, b"no frame yet", "text/plain")
             return self._send(200, jpeg, "image/jpeg")
+        if u.path == "/scene":
+            if self._gated(token):
+                return
+            return self._json(gs.sim.scene_description())
+        if u.path == "/poses":
+            if self._gated(token):
+                return
+            return self._pose_stream()
         if u.path == "/stream":
             if self._gated(token):
                 return
             return self._stream()
         return self._send(404, b"not found", "text/plain")
+
+    def _pose_stream(self):
+        """Length-prefixed float32 frames over one chunked response.
+
+        The same shape as the MJPEG stream and for the same reason: this server
+        is stdlib-only, so a websocket would mean hand-rolling frame masking for
+        no benefit here -- the traffic is one-way and the browser reads it with
+        a ReadableStream either way.
+        """
+        gs = self.gs
+        with gs._streams_lock:
+            if gs._streams >= gs.args.max_streams:
+                return self._send(503, b"too many streams", "text/plain")
+            gs._streams += 1
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.connection.settimeout(self.gs.args.stream_timeout)
+            last = -1
+            while True:
+                buf, last = gs.wait_poses(last, timeout=2.0)
+                if buf is None:
+                    continue
+                self.wfile.write(len(buf).to_bytes(4, "little") + buf)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            with gs._streams_lock:
+                gs._streams -= 1
 
     def _stream(self):
         """MJPEG. One frame per published frame -- no polling, no duplicate JPEGs:
@@ -591,8 +655,15 @@ def _handle_input(gs, client, d):
         ax, ay = tgt[0] - start[0], tgt[1] - start[1]
         n = float(np.hypot(ax, ay))
         fields["aim"] = (ax / n, ay / n) if n > 1e-6 else (0.0, 0.0)
-    elif "x" in d and "y" in d:                  # world coords, for scripted clients
+    elif "x" in d and "y" in d:
+        # World coords: scripted clients, and every client-side-rendered
+        # browser -- it owns its camera, so it resolves the click itself and
+        # there is no projection for the two sides to disagree about.
         fields["target"] = (float(d["x"]), float(d["y"]))
+        if "aim_x" in d and "aim_y" in d:
+            ax, ay = float(d["aim_x"]), float(d["aim_y"])
+            n = float(np.hypot(ax, ay))
+            fields["aim"] = (ax / n, ay / n) if n > 1e-6 else (0.0, 0.0)
     if d.get("action") == "unflip":
         fields["unflip"] = True
     if not fields:

@@ -18,7 +18,11 @@
   <div id="stage">
     <!-- src is set by client.js after /join: a gated server wants the token, and
          the stream has to be re-openable when the internet eats it. -->
-    <img id="view" alt="pitch">
+    <!-- `webgl` is the client-side renderer; `view` is the legacy MJPEG
+         fallback, kept because it works where WebGL does not. Exactly one is
+         visible, chosen at startup by client.js. -->
+    <canvas id="webgl"></canvas>
+    <img id="view" alt="pitch" hidden>
     <canvas id="overlay"></canvas>
     <div id="banner"></div>
   </div>
@@ -41,6 +45,6 @@
     <div id="log"></div>
   </div>
 </div>
-<script src="/static/client.js"></script>
+<script type="module" src="/static/client.js"></script>
 </body>
 </html>

@@ -56,3 +56,11 @@ input{flex:1 1 140px;min-width:120px;padding:9px;border-radius:6px;
 #log{max-height:110px;overflow:auto;font-size:12px;color:var(--dim);
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 #log div{padding:1px 0}
+
+/* The renderer and the MJPEG fallback occupy the same box; the overlay sits on
+   top of whichever is showing. */
+#webgl { width: 100%; height: 100%; display: block; }
+/* `display` in a rule BEATS the HTML hidden attribute, so `el.hidden = true`
+   silently did nothing and both renderers drew stacked on top of each other.
+   Every element the client toggles needs this. */
+#webgl[hidden], #view[hidden] { display: none !important; }

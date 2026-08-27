@@ -1,3 +1,4 @@
+import { SceneView, streamPoses } from "/static/render3d.js";
 /* Browser client. Sends the high level only: (skill, target, aim).
  *
  * The token lives in localStorage, so a phone that sleeps or drops wifi rejoins
@@ -144,9 +145,16 @@ async function setSkill(s) {
 }
 
 function uv(ev) {
-  const r = view.getBoundingClientRect();
+  const box = R3 ? R3.canvas : view;
+  const r = box.getBoundingClientRect();
   const p = ev.touches ? ev.touches[0] : ev;
   return { u: (p.clientX - r.left) / r.width, v: (p.clientY - r.top) / r.height };
+}
+
+/** Client-side pick: uv -> world xy through OUR camera. Null when 2-D. */
+function pickWorld(p) {
+  if (!R3 || !R3.desc) return null;
+  return R3.pickGround(p.u * 2 - 1, 1 - p.v * 2);
 }
 
 function dragStart(ev) { ev.preventDefault(); S.drag = { a: uv(ev), b: uv(ev) }; }
@@ -159,7 +167,22 @@ async function dragEnd(ev) {
   // A drag sets the target at the RELEASE point and the aim along the drag; a
   // plain tap is the same thing with zero aim. Aim is what kick/shoot will steer
   // by once WS1 trains them; follow ignores it.
-  const body = { u: b.u, v: b.v, aim_u: b.u - a.u, aim_v: b.v - a.v };
+  // With client-side rendering the browser OWNS the camera, so it resolves the
+  // click itself and sends world xy. The server's uv->world path exists only
+  // for the MJPEG client, where the server owned the camera -- and keeping two
+  // projections in sync is exactly what went wrong with the server-side chase
+  // camera. One owner, one projection.
+  const wb = pickWorld(b), wa = pickWorld(a);
+  let body;
+  if (wb) {
+    body = { x: wb.x, y: wb.y };
+    if (wa) {
+      const dx = wb.x - wa.x, dy = wb.y - wa.y, n = Math.hypot(dx, dy);
+      if (n > 1e-6) { body.aim_x = dx / n; body.aim_y = dy / n; }
+    }
+  } else {
+    body = { u: b.u, v: b.v, aim_u: b.u - a.u, aim_v: b.v - a.v };
+  }
   const r = await post("/input", body);
   if (!r.ok) log("! " + r.error);
 }
@@ -319,4 +342,64 @@ $("startbtn").onclick = () => post("/control", { action: "start" });
 $("stopbtn").onclick = () => post("/control", { action: "stop" });
 $("name").value = S.name;
 
-(async () => { await join(); setInterval(poll, 200); poll(); })();
+// --- client-side rendering --------------------------------------------------
+let R3 = null;
+
+async function start3d() {
+  const canvas = $("webgl");
+  // Everything up to the first successful draw is inside the fallback: a
+  // missing WebGL context, a blocked module import, a gated /scene and a
+  // driver that dies inside build() all have to end with the player watching
+  // the MJPEG stream rather than a blank box.
+  let desc;
+  try {
+    R3 = new SceneView(canvas);
+    const res = await fetch("/scene?token=" + encodeURIComponent(S.token || ""));
+    if (!res.ok) throw new Error("scene " + res.status);
+    desc = await res.json();
+    if (!desc || !desc.geoms) throw new Error("no geoms");
+    R3.build(desc);
+    R3.resize();
+    R3.draw();
+  } catch (e) {
+    log("! 3-D unavailable (" + e.message + "), using the video stream");
+    R3 = null;
+    return false;
+  }
+  view.hidden = true;
+  canvas.hidden = false;
+
+  let latest = null;
+  const pump = () => streamPoses(
+      "/poses?token=" + encodeURIComponent(S.token || ""),
+      (f) => { latest = f; },
+  ).catch(() => {}).finally(() => setTimeout(pump, 500));   // reconnect
+  pump();
+
+  const loop = () => {
+    if (latest) {
+      R3.apply(latest);
+      // Follow my own seat when I have one; spectators get the wide view.
+      R3.follow = S.slot ? desc.slots.indexOf(S.slot) : null;
+      const i = R3.follow;
+      let p = null;
+      if (i !== null && i >= 0 && S.state) {
+        const me = (S.state.players || [])[i];
+        if (me && me.world) p = { x: me.world[0], y: me.world[1] };
+      }
+      R3.aim(p);
+    }
+    R3.resize();
+    R3.draw();
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+  return true;
+}
+
+(async () => {
+  await join();
+  if (!(await start3d())) { view.hidden = false; $("webgl").hidden = true; }
+  setInterval(poll, 200);
+  poll();
+})();

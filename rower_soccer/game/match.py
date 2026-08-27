@@ -764,6 +764,58 @@ class MatchSim:
         return self.physics.render(camera_id=cam,
                                    width=self.render_w, height=self.render_h)
 
+    # -- client-side rendering feed ----------------------------------------
+    # The server streams STATE and the browser draws it, instead of the server
+    # rasterising pixels and streaming those. That removes the ceiling the
+    # MJPEG path has: a render costs 20-27 ms almost regardless of resolution
+    # (the cost is scene construction, not pixels), so per-player views were
+    # unaffordable server-side and are free client-side -- each browser draws
+    # its own camera on its own GPU. Payload is 90 geoms x 7 floats = 2.5 kB a
+    # tick, ~100 kB/s at 40 Hz.
+
+    def scene_description(self):
+        """Everything static the browser needs to BUILD the scene, sent once.
+
+        Geometry only -- no poses. MuJoCo geom types map onto three.js
+        primitives directly (0 plane, 2 sphere, 3 capsule, 5 cylinder, 6 box),
+        which is why this ships primitives rather than a mesh export: the whole
+        scene is 90 shapes.
+        """
+        m = self.physics.model
+        geoms = []
+        for g in range(m.ngeom):
+            name = mujoco.mj_id2name(m.ptr, mujoco.mjtObj.mjOBJ_GEOM, g) or ""
+            geoms.append(dict(
+                i=g, name=name, type=int(m.geom_type[g]),
+                size=[round(float(x), 5) for x in m.geom_size[g]],
+                rgba=[round(float(x), 4) for x in m.geom_rgba[g]],
+                body=int(m.geom_bodyid[g]),
+                # A geom on the world body with a fixed pose never moves, so the
+                # client can skip it in the per-tick update. The target discs
+                # are world geoms that DO move, so they are not exempt -- the
+                # flag is advisory and the stream still carries every geom.
+                static=bool(m.geom_bodyid[g] == 0 and not name.startswith("target_")),
+            ))
+        px, py = self.pitch_half
+        return dict(geoms=geoms, pitch_half=[px, py],
+                    n_players=self.n_players, slots=list(SLOTS[:self.n_players]),
+                    player_colors=[marker_rgba(i, 1.0) for i in range(self.n_players)],
+                    chase=dict(back=CHASE_BACK, up=CHASE_UP, fovy=CHASE_FOVY),
+                    ball_radius=float(self.task.ball.geom.size[0]))
+
+    def pose_frame(self):
+        """`[tick, t, geom_xpos(3N), geom_xmat(9N)]` as float32 bytes.
+
+        xmat rather than a quaternion: MuJoCo already has the matrix, three.js
+        takes one directly, and converting here would be a chance to get a
+        handedness convention wrong for no saving worth having.
+        """
+        d = self.physics.data
+        head = np.array([self.tick, self.match_time], dtype=np.float32)
+        return (head.tobytes()
+                + np.asarray(d.geom_xpos, dtype=np.float32).tobytes()
+                + np.asarray(d.geom_xmat, dtype=np.float32).tobytes())
+
     def snapshot(self):
         """Small JSON-able state for the clients (positions in normalized uv, so the
         browser can draw an overlay on top of the stream without knowing the affine)."""
@@ -788,6 +840,12 @@ class MatchSim:
                     for k in range(PATH_SEGMENTS + 1)]
             r, g, b, _ = marker_rgba(p)
             players.append(dict(slot=SLOTS[p], u=u, v=v, tu=tu, tv=tv,
+                                # World xy as well as the projected uv: a
+                                # client-side renderer places its own camera and
+                                # needs the position, not a projection of it.
+                                world=[round(float(xyz[0]), 3),
+                                       round(float(xyz[1]), 3),
+                                       round(float(xyz[2]), 3)],
                                 path=[[round(pu, 4), round(pv, 4)] for pu, pv in path],
                                 color=f"#{int(255*r):02x}{int(255*g):02x}{int(255*b):02x}",
                                 skill=c.skill, controller=c.controller, name=c.name))

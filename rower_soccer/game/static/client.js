@@ -237,15 +237,11 @@ function paintOverlay(st) {
     // projected through the active camera. Drawing a single straight segment
     // to (tu, tv) instead was only right for the topdown affine -- under the
     // chase cameras it lifted off the pitch and cut through the scene.
+    // Only the ring stays as an overlay. The aim line is now real geometry on
+    // the pitch (match._place_dashes), so drawing it here as well would put a
+    // flat screen-space copy on top of the perspective-correct one.
     ctx.strokeStyle = me.color || "#4cc38a"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(x, y, 16, 0, 6.284); ctx.stroke();
-    ctx.setLineDash([6, 6]);
-    ctx.beginPath();
-    const pts = me.path || [[me.u, me.v], [me.tu, me.tv]];
-    pts.forEach(([pu, pv], i) => (i ? ctx.lineTo(pu * w, pv * h)
-                                   : ctx.moveTo(pu * w, pv * h)));
-    ctx.stroke();
-    ctx.setLineDash([]);
   }
   if (S.drag) {
     const a = S.drag.a, b = S.drag.b;

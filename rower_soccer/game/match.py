@@ -50,6 +50,14 @@ MARKER_HALF_H = 0.012   # flush with the turf -- it must never occlude the ball
 BALLCAM_BACK = 9.0      # metres behind the ball, along -y
 BALLCAM_UP = 5.5        # metres above it -> ~31 deg downtilt
 BALLCAM_FOVY = 50.0     # close enough that the 0.35 m ball is clearly visible
+# Dashes are a FIXED world size with a FIXED gap, and a longer line simply uses
+# more of them. Stretching a fixed COUNT across the span instead makes a long
+# line read as solid and a short one as a few stubs -- the dash pattern has to
+# be a property of the pitch, not of the distance.
+DASH_N = 26             # the most a line can use; surplus are parked
+DASH_LEN = 0.16         # half-length of one dash (0.32 m long)
+DASH_PITCH = 0.62       # centre-to-centre spacing -> a 0.30 m gap
+DASH_W = 0.05           # half-width
 PATH_SEGMENTS = 16      # samples along the ground aim line; enough that the
                         # projected polyline hugs the turf under perspective
 
@@ -288,11 +296,24 @@ class MatchSim:
         # turf: it can never occlude anything, and "my target is there" reads
         # instantly because it is drawn on the same plane you are aiming at.
         self._marker_specs = []
+        self._dash_specs = []
         for i, slot in enumerate(SLOTS[:len(self.task.players)]):
             self._marker_specs.append(wb.add(
                 "geom", name=f"target_{slot}", type="cylinder",
                 size=[MARKER_RADIUS, MARKER_HALF_H],
                 rgba=marker_rgba(i), contype=0, conaffinity=0, mass=1e-6))
+            # The aim line, as REAL GEOMETRY lying on the pitch rather than a
+            # 2-D canvas overlay. An overlay is drawn in screen space: constant
+            # pixel width at any distance, painted over the creatures instead of
+            # behind them, and not actually on the ground plane it claims to
+            # describe. A row of flat boxes is perspective-correct, occludes
+            # properly, and matches the disc it points at.
+            row = [wb.add("geom", name=f"dash_{slot}_{k}", type="box",
+                          size=[DASH_LEN, DASH_W, MARKER_HALF_H],
+                          rgba=marker_rgba(i, 0.75),
+                          contype=0, conaffinity=0, mass=1e-6)
+                   for k in range(DASH_N)]
+            self._dash_specs.append(row)
 
     def _rebind(self):
         """dm_control recompiles the model on reset, replacing `physics`.  Every
@@ -305,6 +326,7 @@ class MatchSim:
         self.bcast_cam_id = next(i for i in range(ph.model.ncam)
                                  if (ph.model.camera(i).name or "").endswith("broadcast"))
         self._markers = [ph.bind(g) for g in self._marker_specs]
+        self._dashes = [[ph.bind(g) for g in row] for row in self._dash_specs]
         self.ballcam_id = next(i for i in range(ph.model.ncam)
                                if (ph.model.camera(i).name or "").endswith("ballcam"))
         self.chase_cam_ids = [
@@ -569,6 +591,7 @@ class MatchSim:
             # `scripted` that is the ball, which is the point of showing it).
             tgt = out.target if out is not None else cmd.target
             self._markers[p].pos = np.array([tgt[0], tgt[1], MARKER_HALF_H])
+            self._place_dashes(p, tgt)
 
         self.timestep = self.env.step(actions)
         touched = self._detect_touch()
@@ -725,6 +748,41 @@ class MatchSim:
         if m.store_qvel:
             row["qvel"] = pre["qvel"]
         w.record_tick(**row)
+
+    def _place_dashes(self, p, tgt):
+        """Lay player p's aim line on the pitch, creature -> target.
+
+        Dashes are spaced along the line and rotated to face down it. Surplus
+        dashes (a short line does not need all of them) are PARKED BELOW THE
+        FLOOR rather than resized: a zero-size geom is a degenerate box and
+        MuJoCo's renderer is entitled to do anything with it, whereas a box at
+        z = -1 is simply not visible.
+        """
+        src = np.asarray(self._roots[p].xpos)[:2]
+        d = np.asarray(tgt, dtype=float) - src
+        dist = float(np.linalg.norm(d))
+        row = self._dashes[p]
+        if dist < 1e-3:
+            for g in row:
+                g.pos = np.array([0.0, 0.0, -1.0])
+            return
+        u = d / dist
+        c, s_ = float(u[0]), float(u[1])
+        # Rotation about z only: the line lies flat, so the box's local x runs
+        # along the line and its local y stays across it.
+        quat = np.array([math.cos(math.atan2(s_, c) / 2.0), 0.0, 0.0,
+                         math.sin(math.atan2(s_, c) / 2.0)])
+        # Start clear of the creature so the line does not stab through it, and
+        # stop short of the disc so the two read as separate marks.
+        t0, t1 = min(0.55, 0.3 * dist), max(dist - MARKER_RADIUS, 0.0)
+        for k, g in enumerate(row):
+            t = t0 + DASH_PITCH * (k + 0.5)
+            if t > t1:
+                g.pos = np.array([0.0, 0.0, -1.0])
+                continue
+            g.pos = np.array([src[0] + u[0] * t, src[1] + u[1] * t,
+                              MARKER_HALF_H])
+            g.quat = quat
 
     # -- rendering ---------------------------------------------------------
     def _aim_moving_cameras(self):

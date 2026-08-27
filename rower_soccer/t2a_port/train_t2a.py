@@ -71,62 +71,79 @@ import time
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import yaml
 
 from rower_soccer.t2a_port.dense_policy import (DenseTransform2ActPolicy,
                                                 DenseTransform2ActValue)
 from rower_soccer.t2a_port.design_stage import DesignSpec, DesignWorld
-from rower_soccer.t2a_port.two_stage_pipeline import build_groups, group_designs
+from rower_soccer.t2a_port.two_stage_pipeline import (group_designs,
+                                                       iter_groups)
 
 
 class Bucket:
-    """Transitions that share a stage and a NODE COUNT.
+    """One STAGE's transitions, padded to a common node count.
 
-    Not a stage and a topology. Both `_GraphConv` (`matmul(adj, x)`) and
-    `IndexLinear` already take a per-ROW adjacency and body-index, so graphs of
-    the same size batch together whatever their shape -- and that matters a
-    great deal for the update, not for the rollout:
+    Not one stage per topology, and not one stage per node count. Both earlier
+    versions were tried and measured:
 
-      * bucketing by topology gives ~85 buckets in an untrained batch (17
-        topologies x 3 stages, and the skeleton stage's topology set grows with
-        `t`). A random 2,048-row minibatch then touches nearly all of them, so
-        one PPO gradient step becomes ~85 tiny forward/backward passes instead
-        of a few, and the update -- 65-70% of their wall-clock -- becomes
-        launch-bound;
-      * bucketing by node count gives at most `3 x (max_nodes - 1)` = 21, and
-        at convergence, where every design has 7 bodies, exactly 3.
+      * **by topology**: ~85 buckets in an untrained batch (17 topologies x 3
+        stages, and the skeleton stage's topology set grows with `t`);
+      * **by (stage, node count)**: 29 buckets measured on a real epoch-0 batch;
+      * **by stage, padded**: 3.
 
-    Padding every graph to `max_nodes` would give exactly 3 always, but it
-    would put zero rows into `RunningNorm`'s statistics -- the hazard
-    `dense_policy.py`'s docstring calls out -- and needs a masked reduction in
-    the log-prob. Bucketing by size gets most of the benefit with no new
-    correctness surface at all.
+    That matters only for the UPDATE, and it matters a lot there. A random
+    2,048-row minibatch touches nearly every bucket, so a PPO gradient step
+    costs one forward+backward per bucket: measured 382 ms per step at 29
+    buckets against 27 ms for a single dense block of the same 2,048 rows.
+    T_update was 130 s per epoch because of it -- against their 88 s.
+
+    Padding is the hazard `dense_policy.py`'s docstring named: a zero row is
+    not a neutral sample. It is kept out of `RunningNorm`'s statistics and out
+    of the per-graph log-prob sum by `node_mask`, and it cannot reach a real
+    node through the graph because its adjacency row and column are zero.
+    `gate_dense_policy.py` checks that a padded block gives the same answers as
+    the unpadded graphs, with a control that fails when the mask is ignored.
     """
 
-    def __init__(self, stage, n_nodes):
-        self.stage, self.n_nodes = stage, n_nodes
-        self._obs, self._act, self._adj, self._ind = [], [], [], []
+    def __init__(self, stage):
+        self.stage = stage
+        self._blocks = []
         self.n = 0
 
     def add(self, obs, act, adj, ind):
         first = self.n
-        self._obs.append(obs)
-        self._act.append(act)
-        self._adj.append(adj)
-        self._ind.append(ind)
+        self._blocks.append((obs, act, adj, ind))
         self.n += obs.shape[0]
         return first
 
     def finish(self, keep_rows):
-        self.obs = torch.cat(self._obs)[keep_rows]
-        self.act = torch.cat(self._act)[keep_rows]
-        self.adj = torch.cat(self._adj)[keep_rows]
-        self.ind = torch.cat(self._ind)[keep_rows]
-        self._obs = self._act = self._adj = self._ind = None
+        nmax = max(b[0].shape[1] for b in self._blocks)
+        obs, act, adj, ind, mask = [], [], [], [], []
+        for o, a, dj, nd in self._blocks:
+            k, n = o.shape[0], o.shape[1]
+            pad = nmax - n
+            if pad:
+                o = F.pad(o, (0, 0, 0, pad))
+                a = F.pad(a, (0, 0, 0, pad))
+                dj = F.pad(dj, (0, pad, 0, pad))
+                nd = F.pad(nd, (0, pad))
+            m = torch.zeros(k, nmax, device=o.device, dtype=torch.bool)
+            m[:, :n] = True
+            obs.append(o); act.append(a); adj.append(dj); ind.append(nd)
+            mask.append(m)
+        self.obs = torch.cat(obs)[keep_rows]
+        self.act = torch.cat(act)[keep_rows]
+        self.adj = torch.cat(adj)[keep_rows]
+        self.ind = torch.cat(ind)[keep_rows]
+        self.mask = torch.cat(mask)[keep_rows]
+        self._blocks = None
         self.n = int(self.obs.shape[0])
+        self.n_nodes = nmax
 
     def take(self, rows):
-        return self.obs[rows], self.adj[rows], self.ind[rows], self.act[rows]
+        return (self.obs[rows], self.adj[rows], self.ind[rows],
+                self.act[rows], self.mask[rows])
 
 
 class Batch:
@@ -148,10 +165,10 @@ class Batch:
             worlds, times, keep):
         """`adj [K, n, n]` and `ind [K, n]` are per ROW; a caller that has one
         graph for the whole block must expand it, which is free (a view)."""
-        key = (stage, int(obs.shape[1]))
+        key = stage
         if key not in self._key:
             self._key[key] = len(self.buckets)
-            self.buckets.append(Bucket(stage, int(obs.shape[1])))
+            self.buckets.append(Bucket(stage))
         bid = self._key[key]
         first = self.buckets[bid].add(obs, act, adj, ind)
         k = obs.shape[0]
@@ -197,16 +214,17 @@ class Batch:
     def eval_value(self, value_net, idx):
         out = torch.zeros(idx.shape[0], device=self.device, dtype=self.dtype)
         for b, sel, rows in self._regroup(idx):
-            obs, adj, _, _ = b.take(rows)
-            out = out.index_copy(0, sel, value_net(b.stage, obs, adj)[:, 0])
+            obs, adj, _, _, m = b.take(rows)
+            out = out.index_copy(0, sel,
+                                 value_net(b.stage, obs, adj, m)[:, 0])
         return out
 
     def eval_logp(self, policy, idx):
         out = torch.zeros(idx.shape[0], device=self.device, dtype=self.dtype)
         for b, sel, rows in self._regroup(idx):
-            obs, adj, ind, act = b.take(rows)
-            out = out.index_copy(0, sel,
-                                 policy.log_prob(b.stage, obs, adj, ind, act))
+            obs, adj, ind, act, m = b.take(rows)
+            out = out.index_copy(
+                0, sel, policy.log_prob(b.stage, obs, adj, ind, act, m))
         return out
 
 
@@ -342,9 +360,17 @@ class Trainer:
 
     def rollout(self, worlds, batch, mean_action, check_every=16,
                 world_offset=0):
+        """One generation on the GPU: roll every world until it is `done`.
+
+        Groups are built LAZILY, one at a time. Building them all first put 112
+        live mujoco_warp `Data` objects on the card (5.1 GB) for no benefit --
+        the GPU rolls them sequentially anyway.
+        """
+        import time as _t
         seed = int(torch.randint(0, 2 ** 30, (1,), generator=self.gen,
                                  device=self.device).item())
-        groups, index_map, tim = build_groups(
+        t_build0 = _t.time()
+        it = iter_groups(
             worlds, self.spec, backend=self.args.backend,
             done_condition=self.cfg.get("done_condition"),
             reward_specs=self.cfg.get("reward_specs", {}),
@@ -353,16 +379,21 @@ class Trainer:
         offset = self.spec.skel_transform_nsteps + 1
         rets, lens, useful, rolled, bsteps = [], [], 0, 0, 0
         con_peak = 0.0
-        for gi, g in enumerate(groups):
+        n_groups = 0
+        t_build = 0.0
+        while True:
+            t0 = _t.time()
+            try:
+                gi, g, idx = next(it)
+            except StopIteration:
+                break
+            t_build += _t.time() - t0
+            n_groups += 1
             K = g.n
-            # `rows[r]` is the WORLD index sitting in row `r` of this
-            # group, so per-transition bookkeeping stays attached to the
-            # world that produced it rather than to a group row.
-            rows = [-1] * K
-            for i, (gg, rr) in enumerate(index_map):
-                if gg == gi:
-                    rows[rr] = world_offset + i
-            assert -1 not in rows
+            # `rows[r]` is the WORLD index sitting in row `r` of this group, so
+            # per-transition bookkeeping stays attached to the world that
+            # produced it rather than to a group row.
+            rows = [world_offset + i for i in idx]
             adj, ind = g.adj(), g.ind()
             alive = torch.ones(K, dtype=torch.bool, device=self.device)
             ret = torch.zeros(K, device=self.device, dtype=self.dtype)
@@ -403,14 +434,16 @@ class Trainer:
                     f"{g.key}: contacts were dropped, which makes the physics "
                     f"wrong without making it fail")
                 con_peak = max(con_peak, used / cap)
+            del g, adj, ind, obs, act
         return {"returns": rets, "lens": lens, "steps": useful,
-                "rolled": rolled, "groups": len(groups),
+                "rolled": rolled, "groups": n_groups,
                 # The cost of a generation is NOT the agent-steps collected but
                 # the number of BATCHED steps: each group is rolled until its
                 # LONGEST-surviving world is done, so one lucky world in a
                 # two-world group costs as many launches as a thousand-world
                 # group. This is the number to watch when the port looks slow.
-                "batched_steps": bsteps, "con_peak": con_peak, **tim}
+                "batched_steps": bsteps, "con_peak": con_peak,
+                "compile_s": 0.0, "build_s": t_build}
 
     def sample(self, mean_action, record, budget=None, n_worlds=None):
         """One PPO iteration's worth of sampling, in GENERATIONS.

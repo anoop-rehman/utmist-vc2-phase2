@@ -11,11 +11,15 @@ or an explicit statement that something was not tested.*
 | 3a — clone, install, smoke | **done**, `docs/repro/TRANSFORM2ACT_M1_REPRO_NOTES.md` |
 | 3b — port map | **done**, `docs/repro/TRANSFORM2ACT_PORT_MAP.md` |
 | 3c — GNN playground | **done**, `rower_soccer/t2a_port/gnn_playground.py` |
-| 3d — GPU port | **step 1 of 6 done** (dense policy, gated). Steps 2-6 open. |
-| 3e — paper-number validation | not started |
+| 3d — GPU port | **done** (2026-08-27). All six steps built and gated. |
+| 3e — paper-number validation | **running**, `runs/t2a_port/port_s1` |
 | 3f — design+control on our drills | not started |
-| M1 at paper scale (hopper) | **done, all 1000 epochs** |
-| M1 at paper scale (ant) | **running**, epoch 88, ETA ~2d17h |
+| M1 at paper scale (hopper) | **done, MET** — see the M1 notes, "M1 IS MET" |
+| M1 at paper scale (ant) | abandoned; the pod it ran on is gone |
+
+*The rest of this file is chronological. The sections dated 2026-08-27 at the
+bottom supersede the 2026-08-14 text above wherever they disagree — in
+particular decision 4's "~3.8x" and the "step 1 of 6" state.*
 
 ## The two training runs
 
@@ -353,3 +357,549 @@ bootstrap `V(s_T)` at every cut that their GAE never performs.
 5. **STRICKEN from the criterion: "reproduce the fewer-threads-is-better
    effect."** There is no such mechanism to reproduce, and the observation it
    came from is confounded with seed.
+
+---
+
+## Update 2026-08-27 — 3d step 5 built and gated; 3e stood up; two measurements
+## that change the plan
+
+*Written by the agent that ran 3d steps 5-6. Every number below names the
+command that produced it. The "Not tested" section at the end is not decoration.*
+
+### The gates that were supposed to already pass, re-run
+
+All three, from scratch, before anything was built on them.
+
+| gate | command | result |
+|---|---|---|
+| `gate_dense_policy.py` | their venv, `hopper_gpu` epoch 1000 | **was 8/8, now 18/18** |
+| `gate_batched_exec.py --check --backend warp` | repo venv | **11/11** |
+| `gate_batched_exec.py --check --backend cpu` | repo venv | **11/11** |
+
+The dense-policy gate grew ten checks, because 3e needs four things step 1
+never touched -- sampling, per-graph log-probs, the critic, and the batching
+the PPO update depends on:
+
+```
+[PASS] skel_trans: per-graph log-prob matches their cumsum reduction   8.88e-16
+[PASS] attr_trans: per-graph log-prob matches their cumsum reduction   7.11e-15
+[PASS] execution:  per-graph log-prob matches their cumsum reduction   1.15e-14
+[PASS] dense critic matches theirs            66 observations, 4.55e-13
+[PASS] negative control: the critic reads node 0, not a pool           60/60
+[PASS] DIFFERENT topologies of the same size batch together            2.22e-15
+[PASS] padded graphs give the same per-graph log-prob                  3.33e-15
+[PASS]   control: dropping the node mask changes the log-prob          66/66
+[PASS] RunningNorm's statistics ignore padded rows
+[PASS]   control: an unmasked update DOES corrupt them   mean moves 1.32e-01
+```
+
+The log-prob check samples an action rather than taking the mean, because a
+log-prob evaluated only at the mode cannot see an error in the standard
+deviation or in the quadratic term.
+
+### 3d step 5: the two-stage pipeline
+
+Three new files; `gate_two_stage.py` is **15/15 on both backends**.
+
+| file | what |
+|---|---|
+| `t2a_port/design_stage.py` | their skeleton + attribute stages, CPU, **no MuJoCo at all** |
+| `t2a_port/two_stage_pipeline.py` | topology grouping, per-world model fields, group envs |
+| `t2a_port/gate_two_stage.py` | the gate, `--emit` in their venv then `--check` in ours |
+
+#### The design stages need no MuJoCo, and that had to be measured
+
+Their `apply_skel_action` calls `reload_sim_model` after every skeleton edit and
+`get_sim_obs` then reads `self.data.qpos`, so the obvious reading is that a
+design step needs a compiled model. Measured instead, in their venv over 20
+sampled episodes of `hopper_gpu_s2` epoch 1000: the design-stage `sim_obs` is
+the **same constant at every design step of every episode** --
+
+    root row  [0, 1.25, 0, 0, 0]        every other row  [0, 0, 0, 0, 0]
+
+-- because `reload_sim_model` leaves `data.qpos` at `qpos0` and the only
+non-zero entry of `qpos0` is the root's `rootz` slide joint, which carries
+`ref="1.25"` in `assets/mujoco_envs/hopper.xml` and no design parameter
+touches. The 1.25 is **read from the exported XML on every episode**, and a
+`ref` on any generated joint is an assertion, not an assumption
+(`_assert_no_child_ref`, and the gate injects one to prove the assertion
+fires).
+
+Consequence: the design stages are pure Python over their own `Robot`, which
+imports cleanly into the repo venv (numpy + lxml only). Cost **2.0 ms per
+world** -- 0.53 construct, 1.17 for five skeleton steps, 0.34 for the attribute
+step.
+
+#### The design half is bit-exact against their env
+
+`gate_two_stage.py`, replaying **their recorded actions** through our CPU design
+stage over 100 of their episodes (60 untrained + 40 at epoch 1000), 600 design
+steps:
+
+```
+[PASS] design: observation matches theirs at every design step   max |d| 0.00e+00
+[PASS] design: the exported XML is byte-identical to theirs      100/100 episodes
+[PASS] design: body order, edges and body_index match theirs     0 mismatches
+[PASS] design: projected design parameters match theirs          max |d| 0.00e+00
+```
+
+with three negative controls that each bite (forcing "add a child" changes the
+body 20/20; zeroing the attribute action changes the XML 20/20; an injected
+joint `ref` is caught).
+
+#### xml_to_fields' premise was wrong arithmetic, and the pipeline COMPILES
+
+`xml_to_fields.py` computes per-world model fields in closed form on the
+premise that "compiling 50,000 of them per epoch is the thing that would make
+step 3 impossible". That premise does not survive contact:
+
+* **50,000 is agent-steps, not designs.** A ~57,000-step batch at ~1,000 steps
+  per episode holds **~57 designs**, one compile each.
+* **A compile is 4.5 ms** and the global->local conversion 0.5 ms, measured over
+  40 real designs. 57 worlds is 0.26 s of CPU per PPO iteration.
+* **The closed-form surface is far bigger than it looks.** Asking MuJoCo which
+  arrays actually differ between two designs of the *same topology* returns
+  **21**: `actuator_acc0, actuator_gear, body_inertia, body_invweight0,
+  body_ipos, body_iquat, body_mass, body_pos, body_subtreemass, bvh_aabb,
+  cam_poscom0, dof_M0, dof_invweight0, dof_length, geom_aabb, geom_pos,
+  geom_quat, geom_rbound, geom_sameframe, geom_size, light_poscom0`.
+
+So `TopologyGroup` compiles every world and reads the fields off the compile.
+`xml_to_fields.py` keeps its job as a gate on those closed forms and as the
+fallback if a task ever really does need thousands of designs per batch.
+
+**`differing_fields()` turns coverage into an assertion.** Every field that
+differs must either be written per world or be on `WARP_INERT` with a reason
+that is re-derived from the installed `mujoco_warp` -- and it earned its keep
+immediately: `cam_poscom0` and `light_poscom0` were on the skip list as
+"rendering only" and the check refused them, because warp does carry those
+arrays. The rule is now "if warp can batch it, write it", with no judgement
+calls; only `bvh_aabb`, `dof_M0`, `geom_sameframe`, `body_sameframe` (absent
+from warp's Model) and `dof_length` (read only under `mjENBL_SLEEP`, asserted
+off) are skipped.
+
+#### The trajectory gate
+
+The one that matters. World *i* inside a group of 8, against world *i* compiled
+and rolled entirely on its own, from a shared per-world initial state with a
+shared action tape, 300 steps:
+
+| backend | result |
+|---|---|
+| fp64 CPU | **max abs qpos diff 0.000e+00** over 8 worlds x 300 steps |
+| fp32 warp | **9.31e-10 at step 1** (tol 3e-6); envelope 1.9e-5 @10, 1.7e-1 @50, 2.0e+0 @300 |
+
+The warp envelope is chaos, not a defect -- PORT_MAP section 14 already measured
+identical worlds separating by ~1e1 over 400 fp32 steps -- so the fp32 gate
+asserts one step and prints the rest. Four negative controls, each of which
+must break the match, and each does at a step-1 difference five to six orders of
+magnitude above the passing case:
+
+| control | step-1 diff | worst |
+|---|---|---|
+| no per-world fields written | 2.97e-03 | 5.30 |
+| per-world fields rolled by one | 4.32e-03 | 5.18 |
+| `actuator_gear` left unwritten | 5.33e-04 | 2.39 |
+| `body_mass`/`body_inertia`/`body_subtreemass` unwritten | 6.00e-04 | 5.08 |
+
+Plus a control on the group key itself: forcing two different topologies into
+one group is refused by `differing_fields()` on the shape mismatch.
+
+#### Grouping: the key, and what it costs
+
+The key is the **ordered** tuple of body names. Names encode the path from the
+root, so the *set* of names determines the tree and the XML document order;
+the *order* of `robot.bodies` is creation order, so two worlds can reach the
+same tree by different skeleton actions and index their nodes differently.
+Keying on the ordered tuple means a group shares one adjacency and one
+`body_index` vector exactly, with no reordering step to get wrong. Measured
+fragmentation against the unordered key:
+
+| reference | designs | ordered key | name-set key |
+|---|---|---|---|
+| untrained | 60 | **17** groups (sizes 23, 7, 6, 4, 3, 3, 2, 2, 2, 1x8) | 16 |
+| epoch 1000 | 40 | **2** groups (25, 15) | 1 |
+
+One extra group untrained, one extra at convergence. Canonicalising node order
+would collapse them and would be provably safe (the policy is permutation
+equivariant), but it is new untested code and the cost is one group.
+
+### 3e: the trainer, and two measurements that change how it should be planned
+
+`t2a_port/train_t2a.py` is the port's PPO loop: their policy and critic (dense,
+gated against theirs), their GAE, their clipped objective, their optimizers and
+learning rates, with the design stages on the CPU and the execution stage on
+topology-grouped batched physics.
+
+#### Their wall-clock is NOT 74% rollout. It is 65-70% UPDATE.
+
+`PORT_MAP.md` section 6 records "T_sample ~100 s (49%), T_update ~52 s (26%),
+T_eval ~51 s (25%)" from a snapshot of the live `hopper_gpu` run, and concludes
+"Amdahl's ceiling for a physics-only port is therefore ~3.8x". Recomputed over
+**all 1,000 epochs** of each completed run, from
+`results/<cfg>/log/log_train.txt`:
+
+| run | block | T_sample | T_update | T_eval | total | update share |
+|---|---|---|---|---|---|---|
+| `hopper_gpu_s2` | 0-99 | 34.6 | 88.0 | 13.2 | 135.9 | 65% |
+| | 500-599 | 28.5 | 92.3 | 11.0 | 131.8 | 70% |
+| | 900-999 | 16.8 | 54.6 | 6.4 | 77.8 | 70% |
+| `hopper_gpu` | 500-599 | 32.3 | 89.7 | 14.2 | 136.1 | 66% |
+| `hopper_gpu_t32` | 100-199 | 20.0 | 50.4 | 9.1 | 79.5 | 63% |
+
+**The update is where their time goes, and the 3.8x figure describes a port
+that this one is not.** The port runs the update in fp32 on dense `[G, N, F]`
+tensors; measured on a 2,048-graph minibatch of the real shapes:
+
+| | per PPO gradient step | x280 (their 10 epochs x 28 minibatches) |
+|---|---|---|
+| this port, fp32 | **27.0 ms** | **7.6 s** |
+| this port, fp64 | 108.1 ms | 30.3 s |
+| theirs (float64, ragged, GPU) | -- | **55-92 s** |
+
+so the update phase alone is **7-12x**. (Their own update is on the GPU; the
+gain is dense-vs-ragged plus fp32, not CPU-vs-GPU.)
+
+#### `nconmax`/`njmax` are PER WORLD, and getting that wrong cost 2.6x
+
+`mujoco_warp.put_data`'s docstring says both are allocated *per world*.
+`two_stage_pipeline.py` first passed `nconmax * n_worlds`, which asks for a
+4.8 GB constraint Jacobian at 1,024 worlds (it OOMs) and, below that, silently
+gives the solver arrays a thousand times larger than the problem. Corrected to
+32/128 per world (measured peak `nacon` is ~5 per world), the batched execution
+env, **policy in the loop**, on the shared card:
+
+| worlds | before the fix | after | env only, after |
+|---|---|---|---|
+| 64 | 3,774 /s | **5,435 /s** | 7,049 /s |
+| 256 | 7,332 /s | **18,863 /s** | 25,308 /s |
+| 512 | 5,838 /s | **36,419 /s** | 48,462 /s |
+| 1,024 | OOM | **67,512 /s** | 89,650 /s |
+| 2,048 | -- | **123,210 /s** | 156,409 /s |
+
+Their sampler, like for like, is ~3,000 steps/s. Note the shape: a batched step
+costs 11.8 ms at 64 worlds and 16.6 ms at 2,048, i.e. it is **almost entirely
+fixed launch overhead**. That single fact drives everything below.
+
+#### The sampler shape had to be adjusted, and here is the measurement
+
+Settled decision 5 says "reset all worlds together, roll `T = k * max_ep_len`
+with per-world auto-reset, so the batch is exactly `N*k` complete episodes".
+Two things make that not implementable as written:
+
+1. **Auto-reset restarts the same BODY.** The design stages run before the
+   rollout, so an auto-reset world begins a new execution episode on the
+   morphology it already had, while their `env.reset()` calls `reset_robot()`
+   and draws a new design every episode (`hopper.py:310, 318`).
+2. **Episodes are not `max_ep_len` long.** 928 +/- 51 at convergence, but tens
+   of steps early; a cut at fixed `T` truncates whatever episode each world is
+   in, which is what decision 5 exists to avoid.
+
+The trainer therefore samples in **generations**: design N worlds, roll until
+every one is `done`, stop, repeat until the agent-step budget is met. That
+gives what decision 5 was for -- only complete episodes, zero rollout-boundary
+truncations, **no bootstrap anywhere** -- in every regime, and each episode
+gets its own design as theirs does. It also overshoots and never truncates,
+exactly as `sample_worker` does.
+
+**And N cannot be a constant.** Decision 4 fixes the batch at ~57,000-64,000
+agent-STEPS. Early in training a hopper survives ~30 steps, so their batch
+holds **~1,700 episodes**, not 64. A fixed 64 worlds would have produced 1,848
+steps per iteration instead of 57,344 -- a thirtieth of their gradient signal
+-- which is what the first smoke run did. The trainer now sets
+`N = clip(ceil(budget / mean_episode_length), 32, max_worlds)` from the
+measured length, so it carries ~1,000-1,900 worlds early and ~62 at
+convergence.
+
+#### The cost model, and the two things it made me fix
+
+Because a batched step costs ~12 ms whatever the world count, a generation
+costs **(number of topology groups) x (longest-surviving episode in each
+group)** BATCHED steps -- not agent-steps. Logged every epoch as
+`batched_steps`. On a real epoch-0 batch that is 112 groups and 4,560 batched
+steps for 57,598 useful agent-steps: an average of **12.6 agent-steps per GPU
+launch**, on a card that does 2,048 for the same launch. One long-lived world
+in a two-world group costs as many launches as a thousand-world group.
+
+The same "many small launches" problem was, at first, much worse in the update.
+Measured, on the same batch, before and after:
+
+| | buckets | T_update (340 gradient steps) |
+|---|---|---|
+| minibatch bucketed by (stage, node count) | 29 | **130.2 s** |
+| minibatch bucketed by stage, graphs PADDED | **3** | **30.7 s** |
+
+Padding is the hazard `dense_policy.py`'s docstring named -- a zero row is not
+a neutral sample -- so it is gated rather than assumed:
+`gate_dense_policy.py` now checks that a padded block gives the same per-graph
+log-prob as the unpadded graphs (3.33e-15 over 66 real observations), that
+dropping the node mask changes it (66/66), that `RunningNorm`'s statistics
+after a masked update on a padded block equal an update on the real rows alone,
+and that an unmasked update **does** corrupt them (mean moves 1.32e-01). The
+gate is now **18/18**.
+
+#### What an epoch actually costs, measured
+
+`runs/t2a_port/port_s1.log`, epoch 0, seed 1, `hopper_gpu_s2` config, against
+their own epochs 0-99 block means from `results/hopper_gpu_s2/log/log_train.txt`:
+
+| | T_sample | T_update | T_eval | epoch |
+|---|---|---|---|---|
+| theirs, 16 threads, epochs 0-99 | 34.6 | 88.0 | 13.2 | **135.9 s** |
+| **this port, epoch 0** | **88.0** | **29.4** | **0.6** | **118.0 s** |
+
+That batch is 57,522 agent-steps in 2,008 complete episodes -- their operating
+point (settled decision 4) reproduced, not approximated.
+
+**About 1.15x at epoch 0, and the phases have swapped.** The update is **3.0x
+faster**, eval is **21x faster** (their eval is 16 sampler processes; ours is
+one group of 16 worlds, 48 batched steps -- the mean-action design collapses to
+a single topology, as `topology_census.py` said it would). Sampling is **2.5x
+slower**, for the reason above: 104 topologies from an untrained policy, each
+rolled in its own under-filled batch, 4,384 batched steps for 57,522
+agent-steps.
+
+**This should improve a lot as the run trains, and that sentence is a
+projection, not a measurement.** By epoch 100 the skeleton stage has converged
+to 1-2 topologies, so a generation becomes ~2 groups x ~1,000 batched steps --
+2,000 launches for ~62,000 agent-steps instead of 4,384 for 57,522 -- while
+their own epoch cost stays roughly flat. **Nobody should quote an end-to-end
+speedup for this port until an epoch in the converged regime has been timed.**
+Four epochs have been timed, all untrained, all within a few percent of each
+other (118-124 s).
+
+#### And a memory bug the launch found
+
+The first launch of `port_s1` reached **5.1 GB of GPU**, over the 6 GB budget
+for this work once the other jobs on the card were counted. Cause:
+`build_groups` constructed every group before any of them was rolled, so all
+**112** `mujoco_warp` `Data` objects were resident at once -- memory scaling
+with the topology count rather than with anything useful. The run was stopped
+with its stop file (not killed), and `iter_groups` now builds and drops one
+group at a time; the GPU rolls them sequentially anyway, so nothing is lost.
+`build_groups` stays for the gate, which genuinely wants several groups alive
+at once.
+
+**Reported honestly: after the fix the process still reads ~4.1 GB in
+`nvidia-smi`.** Live usage is far lower -- warp runs with a CUDA mempool and
+torch has its own caching allocator, so both report a high-water mark rather
+than a working set -- but 4.1 GB is what the card is holding for this process
+and that is the number that matters to whoever else is on it. If it needs to
+come down, `--max-worlds 512` is the knob, at the cost of more generations per
+iteration.
+
+
+
+### Watching the creatures: one of the three seeds is stuck in a survival trap
+
+Rendered with `t2a_port/render_checkpoint.py` (CPU, offscreen, read-only) and
+measured with `t2a_port/displacement_probe.py`, 12 mean-action episodes each:
+
+| | `hopper_gpu_s2` epoch 1000 | `hopper_gpu_t32` epoch 650 |
+|---|---|---|
+| bodies / actuators | 7 / 6 | **9 / 8** |
+| `exec_R_eps` | 11,750 | 1,958 |
+| episode length | 950.4 | **1,000.0 (never falls)** |
+| **net displacement** | **86.40 m** | **7.66 m** |
+| path length | 86.40 m | 11.56 m |
+| net / path | **1.000** | 0.663 |
+| net speed | **11.36 m/s** | 0.96 m/s |
+
+**`hopper_gpu_s2` is a genuine runner.** net/path = 1.000 -- it never steps
+backwards. On video it is a long two-capsule boom held at ~40 degrees with its
+far end in the air, and a cluster of short limbs scissoring underneath at high
+frequency: a lean-forward-and-skitter gait, not a hop. Not a physics exploit,
+but not a hopper either.
+
+**`hopper_gpu_t32` is stuck in the alive-bonus local optimum, and this is why
+it plateaued at ~1,500 from epoch 100 to 670.** It evolved a nine-body tangle
+that lies across the ground, survives all 1,000 steps of every episode, and
+travels 7.7 m. Its return decomposes almost exactly as `1,000 x alive_bonus +
+7.66 m / 0.008 s = 1,000 + 958 = 1,958`. **It has found a body that cannot
+fall and stopped searching.** No metric in the training log says "sprawled and
+not locomoting" -- `exec_R_eps` just sits flat -- and it took a render plus a
+displacement probe to name it.
+
+This matters for 3e's design. `TRANSFORM2ACT_M1_REPRO_NOTES.md` records seed
+spread as 42% (7,482 vs 10,594 on the two finished seeds). Including t32 the
+spread is not 42% but **6x**, and it is not a spread at all -- it is two
+qualitatively different basins, run-and-score or sprawl-and-survive. A
+distribution comparison against Figure 3 needs enough seeds to see both, and
+`net displacement` should be logged beside `exec_R_eps` so the mode is visible
+without rendering.
+
+#### And the thing the video could not show: the limbs go through the floor
+
+The tracking camera keeps the creature centred, which makes ground contact
+almost impossible to judge by eye, so it was measured instead. Per step, the
+lowest point of any non-floor capsule (centre minus half-length times |z-axis|
+minus radius), one mean-action episode each, in THEIR venv on THEIR
+checkpoints:
+
+| run | steps | deepest point below the floor | mean depth | >2 cm | >10 cm |
+|---|---|---|---|---|---|
+| `hopper_gpu_s2` e1000 | 874 | **0.314 m** | 0.009 m | 12% of steps | 2% |
+| `hopper_gpu_t32` e650 | 999 | **0.414 m** | 0.012 m | 26% | 1% |
+| `hopper_gpu` e1000 | 999 | **0.236 m** | 0.010 m | 16% | 2% |
+
+Against capsule radii of 0.03-0.08 m and segment lengths of 0.44-1.04 m, a peak
+of 0.24-0.41 m is **half a limb underground**. `hopper_gpu_s2` is airborne
+(no ground contact at all) on **85%** of its steps and averages 0.16 ground
+contacts per step while travelling at 11 m/s.
+
+Some penetration is by design -- their XML sets `solref=".02 1"` and
+`solimp=".8 .8 .01"`, a deliberately soft contact with a 1 cm impedance width,
+and the mean depth of ~1 cm is exactly that. The **peaks** are not: they are a
+very light capsule (radius 0.03, density 1000) driven by a gear-400 actuator
+through a contact that cannot push back hard enough.
+
+**This is a property of the reference environment, in all three runs, including
+the one that meets M1.** The port reproduces it rather than introducing it, and
+nothing in the port can or should fix it. It is recorded here because D3's plan
+says to watch for a body that exploits sim physics, and this is one -- it just
+does not show up in the video, only in a contact probe. Before 3f puts this
+design space on a soccer pitch, the contact model and the actuator bounds
+should be revisited together.
+
+**The optimizer presses on its bounds.** Across 40 sampled epoch-1000 designs
+(240 actuators, 280 capsules): **32% of capsules sit at the minimum radius**
+(0.03, the `lb`) and **18% of gears at the maximum** (400, the `ub`). With no
+energy cost in the reward, the optimum is "as light and as strongly actuated as
+the bounds allow", and the bounds -- not the physics -- are what stops it.
+Worth knowing before 3f puts this design space on a soccer task.
+
+### An operational rule, learned by breaking it
+
+**Never wrap a CUDA process in `timeout`.** `timeout` forwards its own SIGTERM
+to the child, so killing the wrapper kills the CUDA process too -- which is how
+a smoke run got SIGTERMed on 2026-08-27 despite the standing "never kill a CUDA
+process under MPS" rule. The four other MPS clients (one D1 soccer run, three
+CompetEvo self-play runs) were checked immediately afterwards and were all
+still running and still on the GPU; that is luck, not evidence that the rule is
+soft.
+
+`train_t2a.py` now takes `--stop-file`: `touch` the path and it saves and exits
+at the next epoch boundary. Use that. Long runs are launched with `setsid
+nohup` and **no** `timeout`.
+
+### Not tested
+
+* **The port has not been trained to convergence and its learning curve has not
+  been compared to theirs.** Everything above is gates and throughput. Nothing
+  here says the port learns the same thing; that is exactly what 3e is for, and
+  it is the claim that matters.
+* **Nothing checks the PPO update against theirs numerically.** The policy, the
+  critic and the per-graph log-probs are each gated to 1e-13 or better against
+  their networks on their observations, and the GAE and the clipped objective
+  are transcriptions of `khrylib/rl/core/common.py` and
+  `khrylib/rl/agents/agent_ppo.py` -- but no test drives one optimiser step in
+  both codebases and compares the resulting weights. That is the cheapest
+  remaining gate and it has not been written.
+* **The design stage cannot see a design that fails to compile.** Their
+  `apply_skel_action` wraps `reload_sim_model` in a bare `except` and ends the
+  episode; this port does not compile until after the design stages, so a
+  mid-design XML that fails would be noticed one step late (or not at all if
+  the final XML compiles). 100/100 designs compiled in the gate and no failure
+  has ever been observed, but the rate has not been measured on a long run.
+* **fp32 physics has not been validated over a full training run.**
+  `gate_batched_exec.py` measures the fp32 reward error at 2.10e-04 and argues
+  it is uncorrelated over an episode; that argument has not been checked
+  against an actual fp32-vs-fp64 training comparison.
+* **The node-ordering fragmentation is unfixed.** Canonicalising node order
+  would merge 17 groups into 16 untrained and 2 into 1 at convergence, halving
+  the sampler's cost in the converged regime. It is provably safe (the policy
+  is permutation equivariant) and it is not implemented or gated.
+* **`WarpBackend.step` synchronises the device on every step.** Removing that
+  sync could hide most of the ~12 ms fixed cost per batched step, which is the
+  single biggest lever left on sampling throughput. Not attempted: whether warp
+  and torch share a stream here was not established, and guessing wrong is a
+  silent race.
+* **The floor-penetration finding has not been reproduced in the port.** It
+  was measured in THEIR venv on THEIR checkpoints. The port's contact
+  parameters are gated identical (`physics_bridge_gate.py`: `geom_solref`,
+  `geom_solimp`, `geom_friction`, `geom_margin` all 0.0e+00 apart), so it
+  should behave the same, but that has not been checked.
+* **The port has been timed for exactly two epochs, both untrained.** Nothing
+  here is a measurement of a converged epoch, and the converged regime is where
+  the port is expected to win. Do not quote an end-to-end speedup yet.
+* **Eval count.** `n_eval` is logged per settled decision 6, and the default is
+  16 to match their 16-thread run. It has not been checked that 16 mean-action
+  episodes of the port have the same spread as 16 of theirs.
+
+### The decision 3e needs from whoever owns it
+
+The port's leverage is in the update, and settled decision 4 is what caps the
+rest: ~57,000-64,000 agent-steps per iteration is only ~62 episodes at
+convergence, so the sampler runs 62 worlds on a card that costs the same at
+2,048. Three ways forward, and they are not equivalent:
+
+1. **Take what is there and run seeds.** Faithful to every settled decision.
+   Epoch 0 measured at 123.6 s against their 135.9 s, and the gap should widen
+   in the port's favour as topologies converge. This is what has been launched.
+2. **Spend on the sampler.** The two levers are (a) removing `WarpBackend`'s
+   per-step `wp.synchronize_device()`, which currently prevents any pipelining
+   across the ~112 small group rollouts, and (b) canonicalising node order to
+   merge order-variant groups (17 -> 16 untrained, 2 -> 1 converged). (a) needs
+   a stream-ordering answer before it can be trusted; (b) needs a permutation
+   gate. Together they are plausibly the difference between 1.1x and 2-3x
+   early.
+3. **Relax the batch size.** 512 or 1,024 worlds per iteration with
+   proportionally fewer iterations to the same 50 M simulation steps -- Figure
+   3's own x-axis. This is where the measured 67,000-123,000 steps/s lives and
+   it would make a seed a matter of hours. It is a deliberate departure from
+   settled decision 4 and it changes the algorithm (bigger batch, fewer
+   gradient steps), so it must not be done quietly.
+
+**Recommendation: (1) is running; (2) is the next unit of work; (3) only as a
+labelled second experiment.** The point of 3e is a comparison, and (3) changes
+the thing being compared.
+
+### What is running, and how to stop it
+
+```
+run:      runs/t2a_port/port_s1        seed 1, hopper_gpu_s2 config, 1,000 epochs
+log:      runs/t2a_port/port_s1.log    and runs/t2a_port/port_s1/log_train.txt
+ckpts:    runs/t2a_port/port_s1/models/epoch_*.p  (every 100) + best.p
+stop:     touch /tmp/stop_t2a_port_s1  -- saves stopped.p and exits at the next
+                                          epoch boundary. DO NOT kill it.
+```
+
+Each log line is their format plus a JSON line carrying `batch_steps`,
+`n_train_eps`, `n_eval`, `gens`, `groups`, `batched_steps`, `gen_fill`,
+`buckets`, `contact_buf_peak` and `steps_per_s_sample`. `n_eval` is there
+because settled decision 6 asks for it.
+
+
+
+### Files added or changed
+
+| file | what |
+|---|---|
+| `t2a_port/design_stage.py` | **new.** Their design stages, CPU, no MuJoCo |
+| `t2a_port/two_stage_pipeline.py` | **new.** Topology grouping, per-world field writes, group envs |
+| `t2a_port/gate_two_stage.py` | **new.** The step-5 gate, 15/15 on both backends |
+| `t2a_port/train_t2a.py` | **new.** The port's PPO loop |
+| `t2a_port/dense_policy.py` | sampling, per-graph log-probs, `RunningNorm.update`, `DenseTransform2ActValue` |
+| `t2a_port/gate_dense_policy.py` | +6 checks (log-prob x3, critic, critic control, mixed-topology batching): 8/8 -> 14/14 |
+
+### How to re-run everything
+
+```sh
+# gates 1 and 2 -- their venv
+cd /workspace/Transform2Act && source env-gpu.sh
+.venv-gpu/bin/python .../t2a_port/gate_dense_policy.py                  # 14/14
+
+# gate 3 -- ours, both backends
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_batched_exec --check --backend warp   # 11/11
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_batched_exec --check --backend cpu    # 11/11
+
+# gate 4 -- step 5. The reference is emitted from THEIR venv first:
+cd /workspace/Transform2Act && source env-gpu.sh
+.venv-gpu/bin/python .../t2a_port/gate_two_stage.py --emit --checkpoint 1000 --episodes 40 --tag e1000
+.venv-gpu/bin/python .../t2a_port/gate_two_stage.py --emit --checkpoint 0    --episodes 60 --tag e0
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_two_stage --check --backend cpu    # 15/15
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_two_stage --check --backend warp   # 15/15
+```

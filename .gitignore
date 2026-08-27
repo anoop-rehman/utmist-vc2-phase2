@@ -214,3 +214,8 @@ wandb/latest-run
 # them plus the recorded args, and the earlier hand-picked policies.pt files
 # stay tracked because gates load them.
 runs/competevo_port/*/policies_ep*.pt
+
+# D3 3e: the port's own training run. The .p checkpoints are ~76 MB each and
+# the log is the thing worth keeping, so the models directory is ignored and
+# the logs are not.
+runs/t2a_port/*/models/

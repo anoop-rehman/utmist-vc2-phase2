@@ -49,18 +49,24 @@ class RunningNorm(nn.Module):
         self.register_buffer("var", torch.zeros(dim))
         self.register_buffer("std", torch.zeros(dim))
 
-    def update(self, x):
+    def update(self, x, node_mask=None):
         """Their `update`, over a FLATTENED node axis.
 
         Their statistics are per-node: `x` reaches their RunningNorm as
-        `[total_nodes, F]`. Here it arrives as `[G, N, F]`, and because this
-        port groups by topology there are no padded rows -- every entry of the
-        dense block is a real node. Flattening is therefore exactly their
-        input, not an approximation, and it is why the eval-only assert this
-        method replaced could be lifted. It would NOT be safe under the
-        superset-and-mask representation the port map rejected.
+        `[total_nodes, F]`. Here it arrives as `[G, N, F]`, and flattening is
+        exactly their input as long as every row is a REAL node.
+
+        `node_mask [G, N]` is how that stays true when the caller pads graphs
+        of different sizes into one block -- which the PPO update does, because
+        one padded forward per stage beats 29 tiny ones by 10x. Padded rows are
+        dropped here rather than being normalised away later: a zero row is not
+        a neutral sample, it drags the running mean toward zero and the running
+        variance up, and nothing downstream would ever report it. This is the
+        exact hazard this file's docstring warned about.
         """
         f = x.reshape(-1, x.shape[-1])
+        if node_mask is not None:
+            f = f[node_mask.reshape(-1).bool()]
         var_x, mean_x = torch.var_mean(f, dim=0, unbiased=False)
         m = f.shape[0]
         w = self.n.to(f.dtype) / (m + self.n).to(f.dtype)
@@ -70,10 +76,10 @@ class RunningNorm(nn.Module):
         self.std[:] = torch.sqrt(self.var)
         self.n += m
 
-    def forward(self, x):
+    def forward(self, x, node_mask=None):
         if self.training:
             with torch.no_grad():
-                self.update(x)
+                self.update(x, node_mask)
         if self.n <= 0:
             return x
         if self.demean:
@@ -191,9 +197,9 @@ class _Tower(nn.Module):
                              imlp_cfg.get("max_index", 256),
                              imlp_cfg.get("htype", "tanh"))
 
-    def forward(self, x, adj, ind):
+    def forward(self, x, adj, ind, node_mask=None):
         if self.norm is not None:
-            x = self.norm(x)
+            x = self.norm(x, node_mask)
         return self.ind_mlp(self.gnn(x, adj), ind)
 
 
@@ -290,11 +296,12 @@ class DenseTransform2ActPolicy(nn.Module):
     # the sole reason their codebase runs in float64: fp64 cumsum-diff errs
     # 1.7e-10, fp32 cumsum-diff errs 1.3e-1. Here each graph owns an axis, so
     # the same quantity is `.sum(1)` -- no cancellation, and fp32 is fine.
-    def _stage_head(self, stage, obs, adj, ind):
+    def _stage_head(self, stage, obs, adj, ind, node_mask=None):
         if stage == "execution":
-            return self.control(obs, adj, ind)
+            return self.control(obs, adj, ind, node_mask)
         x = self.design_input(obs)
-        return (self.attr if stage == "attr_trans" else self.skel)(x, adj, ind)
+        return (self.attr if stage == "attr_trans" else self.skel)(
+            x, adj, ind, node_mask)
 
     def _gauss(self, stage, head):
         log_std = (self.control_action_log_std if stage == "execution"
@@ -346,17 +353,31 @@ class DenseTransform2ActPolicy(nn.Module):
             action[..., sl] = a
         return action, lp
 
-    def log_prob(self, stage, obs, adj, ind, action):
+    def log_prob(self, stage, obs, adj, ind, action, node_mask=None):
         """`action` is the full `[G, N, action_dim]` row; the stage's slice is
-        read out of it. Differentiable -- this is the PPO ratio's numerator."""
-        head = self._stage_head(stage, obs, adj, ind)
+        read out of it. Differentiable -- this is the PPO ratio's numerator.
+
+        `node_mask [G, N]` zeroes padded nodes BEFORE the per-graph sum. A
+        padded node's log-prob is not small, it is whatever the network
+        happens to emit for a zero row, so leaving it in would corrupt every
+        graph in a padded block by a different amount.
+
+        Padded nodes cannot leak through the graph itself: their adjacency row
+        and column are zero, so `matmul(adj, x)` never mixes them into a real
+        node, and `IndexLinear` is per-row.
+        """
+        head = self._stage_head(stage, obs, adj, ind, node_mask)
         if stage == "skel_trans":
             a = action[..., -1].long()
-            return torch.log_softmax(head, dim=-1).gather(
-                -1, a.unsqueeze(-1)).squeeze(-1).sum(1)
-        mean, std = self._gauss(stage, head)
-        a = action[..., self.slice_for(stage)]
-        return _normal_log_prob(a, mean, std).sum(-1).sum(-1)
+            lp = torch.log_softmax(head, dim=-1).gather(
+                -1, a.unsqueeze(-1)).squeeze(-1)
+        else:
+            mean, std = self._gauss(stage, head)
+            a = action[..., self.slice_for(stage)]
+            lp = _normal_log_prob(a, mean, std).sum(-1)
+        if node_mask is not None:
+            lp = lp * node_mask.to(lp.dtype)
+        return lp.sum(1)
 
 
 def _normal_log_prob(value, mean, std):
@@ -401,12 +422,13 @@ class DenseTransform2ActValue(nn.Module):
         self.mlp = _MLP(cur, cfg["mlp"], cfg.get("htype", "tanh"))
         self.value_head = nn.Linear(self.mlp.out_dim, 1)
 
-    def forward(self, stage, obs, adj):
-        """`obs [G, N, F]` -> `[G, 1]`."""
+    def forward(self, stage, obs, adj, node_mask=None):
+        """`obs [G, N, F]` -> `[G, 1]`. The value is read off node 0, which is
+        the root and is therefore never a padded row."""
         G, N = obs.shape[:2]
         flag = torch.zeros(G, N, 3, device=obs.device, dtype=obs.dtype)
         flag[..., self.STAGES.index(stage)] = 1.0
-        x = self.norm(torch.cat([obs, flag], dim=-1))
+        x = self.norm(torch.cat([obs, flag], dim=-1), node_mask)
         x = self.mlp(self.gnn(x, adj))
         return self.value_head(x)[:, 0]
 

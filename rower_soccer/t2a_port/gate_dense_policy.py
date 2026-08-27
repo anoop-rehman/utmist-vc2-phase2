@@ -337,6 +337,66 @@ def main():
           tried > 0 and moved == tried,
           f"{moved}/{tried} states where pooling would differ")
 
+    # ---- padding: graphs of different sizes in one block -----------------
+    # The PPO update pads every stage's graphs to a common node count so one
+    # forward serves the whole minibatch (29 buckets -> 3, and 382 ms per
+    # gradient step -> ~30). Padding is the hazard `dense_policy.py`'s
+    # docstring names, so it gets three checks: the answers must be unchanged,
+    # the mask must be load-bearing, and the running statistics must not see a
+    # zero row.
+    import torch.nn.functional as _F
+    pad_worst, pad_n = 0.0, 0
+    ctrl_moved, ctrl_tried = 0, 0
+    for stage, state in states:
+        x, adj, ind = to_dense(state)
+        n = x.shape[1]
+        if n >= 10:
+            continue
+        pad = 10 - n
+        xp = _F.pad(x, (0, 0, 0, pad))
+        ap = _F.pad(adj, (0, pad, 0, pad))
+        ip = _F.pad(ind, (0, pad))
+        m = torch.zeros(1, 10, dtype=torch.bool)
+        m[:, :n] = True
+        gen2 = torch.Generator().manual_seed(1)
+        with torch.no_grad():
+            act, _ = ours.act(stage, x, adj, ind, generator=gen2)
+            ref = ours.log_prob(stage, x, adj, ind, act)
+            actp = _F.pad(act, (0, 0, 0, pad))
+            got = ours.log_prob(stage, xp, ap, ip, actp, m)
+            bad = ours.log_prob(stage, xp, ap, ip, actp, None)
+        pad_worst = max(pad_worst, abs(float(ref[0]) - float(got[0])))
+        pad_n += 1
+        ctrl_tried += 1
+        ctrl_moved += abs(float(bad[0]) - float(ref[0])) > 1e-6
+    check("padded graphs give the same per-graph log-prob", 
+          pad_n > 0 and pad_worst < 1e-12,
+          f"{pad_n} graphs padded to 10 nodes, max abs diff {pad_worst:.2e}")
+    check("  control: dropping the node mask changes the log-prob",
+          ctrl_tried > 0 and ctrl_moved == ctrl_tried,
+          f"{ctrl_moved}/{ctrl_tried} graphs")
+
+    # RunningNorm must not take a padded row as a sample. Compare the running
+    # statistics after a masked update on a padded block against an update on
+    # the unpadded rows, and against the unmasked (wrong) version.
+    from rower_soccer.t2a_port.dense_policy import RunningNorm
+    xs = torch.randn(7, 5, 4, dtype=torch.float64)
+    mk = torch.zeros(7, 5, dtype=torch.bool)
+    mk[:, :3] = True
+    a_, b_, c_ = RunningNorm(4), RunningNorm(4), RunningNorm(4)
+    a_.train(); b_.train(); c_.train()
+    a_(xs, mk)                       # padded + masked
+    b_(xs[:, :3])                    # the real rows, unpadded
+    c_(xs)                           # padded, mask ignored
+    d_ok = float((a_.mean - b_.mean).abs().max()) < 1e-12 and \
+        float((a_.std - b_.std).abs().max()) < 1e-12
+    d_bad = float((c_.mean - b_.mean).abs().max())
+    check("RunningNorm's statistics ignore padded rows", d_ok,
+          f"masked-vs-unpadded mean/std diff < 1e-12; n {int(a_.n)} vs "
+          f"{int(b_.n)}")
+    check("  control: an unmasked update DOES corrupt them", d_bad > 1e-6,
+          f"mean moves by {d_bad:.2e}")
+
     n_fail = sum(1 for _, ok in _results if not ok)
     print(f"\n{len(_results) - n_fail}/{len(_results)} passed")
     return 1 if n_fail else 0

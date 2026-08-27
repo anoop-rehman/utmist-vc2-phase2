@@ -376,9 +376,31 @@ def run_design_stages(spec, init_xml, n_worlds, policy, *, device, dtype,
     return worlds, records
 
 
+def iter_groups(worlds, spec_cfg, **kw):
+    """Yield `(group_index, group, world_rows)` ONE GROUP AT A TIME.
+
+    `build_groups` below constructs every group before any of them is rolled,
+    and that is a memory bug at scale: an untrained batch of 1,024 worlds
+    contains ~112 topologies, so 112 live `mujoco_warp` `Data` objects sit on
+    the card at once. Measured at **5.1 GB** on a 20 GB card shared with three
+    other training jobs -- over budget, and it scales with the topology count
+    rather than with anything useful.
+
+    Building lazily caps the resident set at one group. The groups are rolled
+    sequentially anyway (the GPU serialises them), so nothing is lost.
+    """
+    models = [compile_design(w.cur_xml_str) for w in worlds]
+    groups = group_designs(worlds)
+    for gi, (key, idx) in enumerate(groups.items()):
+        g = TopologyGroup(key, [worlds[i] for i in idx],
+                          [models[i] for i in idx], spec_cfg, **kw)
+        yield gi, g, list(idx)
+        del g
+
+
 def build_groups(worlds, spec_cfg, **kw):
-    """Compile and group. Returns `(groups, index_map, timings)` where
-    `index_map[i]` is `(group, row)` for world `i`."""
+    """Compile and group, ALL AT ONCE. Used by the gate, which wants several
+    groups alive to compare. Training uses `iter_groups`."""
     t0 = time.time()
     models = [compile_design(w.cur_xml_str) for w in worlds]
     t_compile = time.time() - t0

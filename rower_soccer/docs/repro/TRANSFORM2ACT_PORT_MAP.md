@@ -517,3 +517,49 @@ One topology, shared across every world. Per-world *attributes* are plumbed
 (`batched_fields` reaches `CompeteWarpDevBackend`'s per-world model arrays, and
 `xml_to_fields.py` computes the values without compiling), but nothing yet
 groups worlds by topology or writes those fields -- that is step 5.
+
+---
+
+## 15. Corrections from 3d step 5 / 3e (2026-08-27)
+
+Three things above are wrong. They are left in place because the reasoning
+around them is still useful, but do not act on them.
+
+### Section 6's phase split is wrong, and so is the 3.8x it implies
+
+Section 6 records "T_sample ~100 s (49%), T_update ~52 s (26%), T_eval ~51 s
+(25%)" from a snapshot of the live `hopper_gpu` run and concludes that a
+physics-only port is Amdahl-capped at ~3.8x. Recomputed over **complete**
+1,000-epoch logs (`results/<cfg>/log/log_train.txt`), the update is
+**65-70%** of their wall-clock, not 26%:
+
+| run | block | T_sample | T_update | T_eval | update share |
+|---|---|---|---|---|---|
+| `hopper_gpu_s2` | 0-99 | 34.6 | 88.0 | 13.2 | 65% |
+| `hopper_gpu_s2` | 500-599 | 28.5 | 92.3 | 11.0 | 70% |
+| `hopper_gpu_s2` | 900-999 | 16.8 | 54.6 | 6.4 | 70% |
+| `hopper_gpu` | 500-599 | 32.3 | 89.7 | 14.2 | 66% |
+| `hopper_gpu_t32` | 100-199 | 20.0 | 50.4 | 9.1 | 63% |
+
+So the port's leverage is in the UPDATE, and the dense fp32 form delivers there
+(27.0 ms per 2,048-graph PPO gradient step against their 55-92 s for 280 of
+them). Sampling at the batch size settled decision 4 fixes -- ~62 episodes at
+convergence -- is roughly a wash, because a batched step costs ~12 ms whether it
+carries 64 worlds or 2,048.
+
+### Section 9 step 1 (`xml_to_fields`)'s premise does not hold
+
+"Compiling 50,000 of them per epoch is the thing that would sink the whole
+approach" mistakes agent-steps for designs. A ~57,000-step batch at ~1,000
+steps per episode contains **~57 designs**, and a compile is 4.5 ms. The
+pipeline compiles. `xml_to_fields.py` remains as a gate on its own closed forms
+and as a fallback. See `D3_HANDOFF.md`, 2026-08-27.
+
+### Section 7A's masking hazard has a twin in the field list
+
+Grouping avoided the "deactivated body still carrying mass" failure. It did not
+avoid the neighbouring one: **21 model arrays differ between two designs of the
+same topology**, including `body_iquat`, `dof_M0`, `dof_length`,
+`geom_sameframe` and `bvh_aabb`. Any hand-maintained list of "fields to write"
+would have missed several. `two_stage_pipeline.differing_fields()` derives the
+list from MuJoCo per group and refuses anything it cannot account for.

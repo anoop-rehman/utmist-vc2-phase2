@@ -36,11 +36,19 @@ import numpy as np
 import torch
 
 
-def team_eval(env, acs, team_lanes, max_steps=None):
+def team_eval(env, acs, team_lanes, max_steps=None, idle_opponent=False):
     """Mean-action rollout with each team on its own current weights.
 
     `evaluate_pair` assumes one policy per AGENT; here two policies drive four
     ants, so the lane mapping has to be explicit.
+
+    `idle_opponent` must MATCH the trainer's. It did not, originally: the flag
+    reached `CoEvoPPO` and not this function, so a run trained against statues
+    was scored in full self-play. The logged goal rate then answered a question
+    nobody had asked -- how a statue-trained policy fares against a live
+    opponent -- while the run's whole purpose was reachability with nobody in
+    the way. An eval that silently measures a different condition from the one
+    trained is worse than no eval.
     """
     steps = max_steps or env.max_episode_steps
     env.reset_win_stats()
@@ -53,6 +61,8 @@ def team_eval(env, acs, team_lanes, max_steps=None):
             act = torch.zeros(env.n, env.n_agents, env.act_dim,
                               device=env.device, dtype=o.dtype)
             for e, lanes in enumerate(team_lanes):
+                if e == 1 and idle_opponent:
+                    continue          # side 1 stays at zero torque
                 act[:, lanes] = acs[e].mean_action(o[:, lanes])
             obs, _, done, info = env.step(act.to(env.dtype))
             if bool(done.any()):
@@ -293,7 +303,8 @@ def main():
                **{k: float(v) for k, v in stats.items()}}
         if args.eval_every and (it + 1) % args.eval_every == 0:
             [ac.eval() for ac in acs]
-            row["eval"] = team_eval(eval_wrapped, acs, lanes)
+            row["eval"] = team_eval(eval_wrapped, acs, lanes,
+                                    idle_opponent=args.idle_opponent)
         rows.append(row)
         if _wb is not None:
             _wb.log(_flat(row), step=int(row["steps"]))

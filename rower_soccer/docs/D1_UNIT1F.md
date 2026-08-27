@@ -269,9 +269,17 @@ rendering:
 | 256 | 1,024 | 65,536 | 33,572 | 1.81 GB |
 | 512 | 2,048 | 131,072 | 51,219 | 2.20 GB |
 
-512 worlds was chosen: it is the throughput knee and costs **~1.4 GB of our
-own**, far under the ~12 GB budget. Torch's own peak allocation is 0.51 GB; the
-rest is mujoco_warp's Data and the CUDA graph.
+512 worlds was chosen: it is the throughput knee and costs **1.14 GB of our
+own** (measured live, `nvidia-smi --query-compute-apps`), far under the ~12 GB
+budget. Torch's own peak allocation is 0.51 GB; the rest is mujoco_warp's Data
+and the CUDA graph.
+
+**Memory is not the binding constraint -- SM time is.** At 512 worlds the run
+sits at ~95% GPU utilisation, so it is taking most of the device's compute
+from whatever D3 and the user's rendering want. If that becomes a problem the
+knob is `--worlds`: 256 halves the SM demand and costs ~35% of the throughput
+(33.6k vs 51.2k steps/s). That is a call for whoever owns the box, not one
+this unit should make silently.
 
 `--ent-ceil -0.3` (std ≤ 0.74) pins exploration at the level `shoot` converged
 to rather than letting the entropy bonus inflate it: `DRILL_V4_NOTES`' follow_v5

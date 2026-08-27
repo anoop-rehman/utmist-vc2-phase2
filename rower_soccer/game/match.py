@@ -62,19 +62,30 @@ PATH_SEGMENTS = 16      # samples along the ground aim line; enough that the
                         # projected polyline hugs the turf under perspective
 
 
-def marker_rgba(i, alpha=0.9):
-    """Per-PLAYER target colour: team hue, rotated a little per teammate.
+# Per-player colours, hardcoded. These were derived from HSV before, which was
+# a mistake: hue is not a uniform axis, and the same +/-12 degree step that gave
+# two clearly different blues gave one red and one ORANGE, because the
+# red-to-orange transition is compressed right where the red team sits. Two hex
+# codes chosen by eye beat a formula that has to be corrected per team.
+PLAYER_HEX = ("#598eff", "#59d0ff",     # home
+              "#faaca5", "#c91000")     # away
 
-    Both members of a team used to share one colour, so you could not tell your
-    own target from your teammate's. Rotating the team hue by +/-12 degrees keeps
-    both unmistakably blue (or red) while making the pair distinguishable at a
-    glance. 12 and not 5: at these saturations 5 degrees is invisible on a
-    compressed MJPEG stream.
+
+def marker_rgba(i, alpha=0.9):
+    """Player i's colour as rgba floats.
+
+    Used for its target disc, its aim-line dashes, AND the creature itself, so
+    your ant and your marks all match and your teammate's are visibly different.
+
+    Note for anyone changing creature colour: each walker carries its own
+    material (`creature_N/self`) as well as per-geom rgba, and where a geom has
+    a material MuJoCo renders the MATERIAL. Painting only `geom.rgba` leaves
+    every creature washed toward the material's tan -- measured: two players
+    whose colours differ by 60 rgb points both rendered as the same orange.
+    `_build_scene` sets both.
     """
-    import colorsys
-    base_h, sat, val = (0.58, 0.65, 1.0) if i < 2 else (0.02, 0.70, 1.0)
-    h = (base_h + (0.033 if i % 2 == 0 else -0.033)) % 1.0     # ~ +/-12 deg
-    r, g, b = colorsys.hsv_to_rgb(h, sat, val)
+    h = PLAYER_HEX[i % len(PLAYER_HEX)].lstrip("#")
+    r, g, b = (int(h[k:k + 2], 16) / 255.0 for k in (0, 2, 4))
     return [r, g, b, alpha]
 
 
@@ -287,7 +298,18 @@ class MatchSim:
         # shade of the same team colour.
         for i, pl in enumerate(self.task.players):
             rgba = marker_rgba(i, alpha=1.0)
-            for g in pl.walker.mjcf_model.find_all("geom"):
+            mjcf = pl.walker.mjcf_model
+            # The MATERIAL, not just the geoms. Each walker carries its own
+            # `self` material (rgba 0.8 0.6 0.4, a tan), and where a geom has a
+            # material MuJoCo renders the material -- so painting only
+            # `geom.rgba` left every creature washed toward tan. Measured
+            # before this fix: the two away players, whose colours are red
+            # (255,79,71) and crimson (199,56,70), both rendered as orange
+            # (255,153,75) and (254,127,70) -- indistinguishable, and the wrong
+            # hue. Both are set now, so there is no rule to get wrong.
+            for mat in mjcf.find_all("material"):
+                mat.rgba = rgba
+            for g in mjcf.find_all("geom"):
                 g.rgba = rgba
 
         # -- target markers: a DISC on the pitch, not a floating sphere ------

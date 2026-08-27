@@ -813,6 +813,27 @@ soft.
 at the next epoch boundary. Use that. Long runs are launched with `setsid
 nohup` and **no** `timeout`.
 
+### One bug found while the run was in flight, fixed for the NEXT seed
+
+`self.len_est` -- the measured episode length that sizes the next generation's
+world count -- was being written by **both** passes of `sample()`. The eval
+pass runs mean actions and its episodes are a different length (21.2 against a
+training 31.8, read off epoch 14 of `port_s1`), so the world count for each
+training generation was being derived from the eval distribution.
+
+It is benign in the direction it currently errs: a too-small `len_est` asks for
+*more* worlds than needed, which costs an extra generation rather than
+under-filling the batch, and `batch_steps` stayed on target throughout (57,523
+at epoch 14, against the 57,344 decision 4 asks for). It would not stay benign
+at convergence, where mean-action episodes run *longer* than sampled ones and
+the error flips sign.
+
+Fixed in `train_t2a.py` (`if lens and record:`). **`port_s1` is running the
+unfixed heuristic** -- it was not restarted, because the batches it is
+producing are correct and a restart costs more than the bug does. The next seed
+launched gets the fix, and that is a difference between seeds that has to be
+recorded rather than forgotten.
+
 ### Not tested
 
 * **The port has not been trained to convergence and its learning curve has not

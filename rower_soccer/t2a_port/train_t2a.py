@@ -500,7 +500,13 @@ class Trainer:
             t_compile += info["compile_s"]
             t_build += info["build_s"]
             gens += 1
-            if lens:
+            # ONLY the training pass may move the estimate. The eval pass runs
+            # mean actions, whose episodes are a different length entirely
+            # (21.2 against a training 31.8, measured at epoch 14 of
+            # `port_s1`), and letting it write here means the world count for
+            # the next TRAINING generation is sized from the wrong
+            # distribution. `record` is what distinguishes the two passes.
+            if lens and record:
                 self.len_est = float(np.mean(lens[-max(len(info["lens"]), 1):]))
             if n_worlds is not None or steps >= budget:
                 break

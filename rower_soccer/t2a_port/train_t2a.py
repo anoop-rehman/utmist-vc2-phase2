@@ -81,6 +81,25 @@ from rower_soccer.t2a_port.two_stage_pipeline import (group_designs,
                                                        iter_groups)
 
 
+# `hopper.py:if_use_transform_action` numbers the stages in this order, and
+# their `get_perm_batch_design` sorts a minibatch permutation by it.
+STAGE_RANK = {"skel_trans": 0, "attr_trans": 1, "execution": 2}
+
+
+def stage_sorted_perm(perm, row_stage):
+    """Their `get_perm_batch_design`: shuffle, then re-sort BY STAGE.
+
+    `transform2act_agent.py:282` builds `np.array(inds[0] + inds[1] + inds[2])`
+    by scanning the already-shuffled batch and bucketing each row by
+    `state[2] = use_transform_action`, so the result is a stable sort of the
+    shuffled order by stage. A 2,048-row minibatch is then a consecutive slice
+    of that array and is stage-PURE except at the two stage boundaries.
+
+    Gated in `gate_batch_design.py`.
+    """
+    return perm[torch.argsort(row_stage[perm], stable=True)]
+
+
 class Bucket:
     """One STAGE's transitions, padded to a common node count.
 
@@ -296,6 +315,19 @@ class Trainer:
         self.n_opt = self.cfg.get("num_optim_epoch", 10)
         self.max_nsteps = self.cfg.get("done_condition", {}).get("max_nsteps",
                                                                  1000)
+        # `agent_specs.batch_design` (TRUE in every hopper cfg they ship).
+        # Their `update_policy` shuffles the batch and then RE-SORTS it by
+        # stage (`transform2act_agent.py:282, get_perm_batch_design`), so a
+        # 2,048-row minibatch is a consecutive slice of a stage-sorted array
+        # and is therefore stage-PURE except at the two boundaries. This port
+        # sliced a plain `randperm`, giving stage-MIXED minibatches -- which
+        # is not a wash: it changes how many Adam steps each stage's tower
+        # takes per epoch and how many rows each of those steps sees. See
+        # D3_HANDOFF.md, "2026-08-27 (second): batch_design".
+        _bd = getattr(self.args, "batch_design", None)
+        self.batch_design = (_bd if _bd is not None else
+                             bool(self.cfg.get("agent_specs", {})
+                                  .get("batch_design", False)))
         # Sampling must not touch the RunningNorm statistics: theirs samples
         # under `to_test(*self.sample_modules)` and updates them only inside
         # the PPO forward passes (`agent.py:111`, `transform2act_agent.py:224`).
@@ -405,17 +437,27 @@ class Trainer:
             # per-transition bookkeeping stays attached to the world that
             # produced it rather than to a group row.
             rows = [world_offset + i for i in idx]
-            adj, ind = g.adj(), g.ind()
+            # The execution env's dtype is the PHYSICS backend's, not the
+            # trainer's: mujoco_warp is float32-only (its Data/Model arrays are
+            # declared `float` = wp.float32, and `io.py:426` says so in as many
+            # words), while `CompeteCpuBackend` is float64. So under `--fp64`
+            # the policy is float64 and `obs`/`adj` arrive float32, and
+            # `nn.Linear` refuses the mix -- which is why `--fp64` had never
+            # run. Casting here makes the trainer's dtype the dtype of
+            # everything downstream of the sim; `.to()` on a matching dtype is
+            # a no-op, so the fp32 path is byte-identical to before.
+            adj, ind = g.adj().to(self.dtype), g.ind()
             alive = torch.ones(K, dtype=torch.bool, device=self.device)
             ret = torch.zeros(K, device=self.device, dtype=self.dtype)
             ln = torch.zeros(K, device=self.device, dtype=self.dtype)
-            obs = g.env.reset()
+            obs = g.env.reset().to(self.dtype)
             for t in range(self.max_nsteps):
                 with torch.no_grad():
                     act, lp = self.policy.act(
                         "execution", obs, adj, ind, mean_action=mean_action,
                         generator=self.gen)
                 nobs, r, done, _ = g.env.step(act, auto_reset=False)
+                nobs, r = nobs.to(self.dtype), r.to(self.dtype)
                 live = alive.to(self.dtype)
                 if batch is not None:
                     batch.add("execution", adj, ind, obs, act, lp,
@@ -434,7 +476,7 @@ class Trainer:
                     if int(dead.numel()):
                         g.env._write_initial(dead, add_noise=False)
                         g.env.backend.forward()
-                        obs = g.env.obs()
+                        obs = g.env.obs().to(self.dtype)
             rets += ret.tolist()
             lens += ln.tolist()
             useful += int(ln.sum().item())
@@ -530,8 +572,15 @@ class Trainer:
         self.value.train()
         n_mb = batch.size // self.mini
         stats = {"v_loss": 0.0, "p_loss": 0.0, "n": 0}
+        row_stage = None
+        if self.batch_design:
+            rank = torch.as_tensor([STAGE_RANK[b.stage] for b in batch.buckets],
+                                   device=self.device)
+            row_stage = rank[batch.b_id]
         for _ in range(self.n_opt):
             perm = torch.randperm(batch.size, device=self.device)
+            if row_stage is not None:
+                perm = stage_sorted_perm(perm, row_stage)
             for i in range(n_mb):
                 idx = perm[i * self.mini:(i + 1) * self.mini]
                 v = batch.eval_value(self.value, idx)
@@ -651,6 +700,13 @@ def main():
     p.add_argument("--epochs", type=int, default=1000)
     p.add_argument("--device", default="cuda")
     p.add_argument("--backend", default="warp", choices=["warp", "cpu"])
+    p.add_argument("--batch-design", dest="batch_design",
+                   action="store_true", default=None,
+                   help="stage-sort each minibatch permutation, as their "
+                        "`agent_specs.batch_design` does; default follows the "
+                        "cfg, which sets it true for every hopper run")
+    p.add_argument("--no-batch-design", dest="batch_design",
+                   action="store_false")
     p.add_argument("--fp32", action="store_true", default=True)
     p.add_argument("--fp64", dest="fp32", action="store_false")
     p.add_argument("--save-interval", type=int, default=50)

@@ -394,7 +394,27 @@ class MatchSim:
             raise ValueError(f"unknown camera {name!r}")
         self.camera = name
 
+    # -- moving-camera origins, CACHED --------------------------------------
+    # These are read by `uv_to_world`, which runs on an HTTP handler thread when
+    # a player clicks. Reading a physics field there is not merely racy: dm_control
+    # lazily calls `physics.forward()` on attribute access, so the input thread
+    # ran mj_forward on the same MjData the sim thread was stepping, and the
+    # server segfaulted. The sim thread publishes these once per tick instead and
+    # the input path only ever reads the snapshot.
+    def _refresh_origins(self):
+        self._origin_cache = {
+            "ball": self._compute_ballcam_origin(),
+            "chase": [self._compute_chase_origin(i)
+                      for i in range(len(self._chase))],
+        }
+
     def _chase_origin(self, view):
+        c = getattr(self, "_origin_cache", None)
+        if c is not None:
+            return c["chase"][view]
+        return self._compute_chase_origin(view)
+
+    def _compute_chase_origin(self, view):
         """Where player `view`'s tracking camera actually is, right now.
 
         `mode="track"` puts the camera at the tracked body's position plus the
@@ -434,6 +454,12 @@ class MatchSim:
         return self._uv_to_world_fixed(u, v)
 
     def _ballcam_origin(self):
+        c = getattr(self, "_origin_cache", None)
+        if c is not None:
+            return c["ball"]
+        return self._compute_ballcam_origin()
+
+    def _compute_ballcam_origin(self):
         bpos, _ = self.task.ball.get_pose(self.physics)
         o = self._ballcam["off"]
         return np.array([float(bpos[0]) + o[0], float(bpos[1]) + o[1], o[2]])
@@ -848,6 +874,7 @@ class MatchSim:
         halves look fine alone. Writing `cam_pos` from the SAME origin function
         the raycast uses makes them one thing by construction.
         """
+        self._refresh_origins()
         cp = self.physics.model.cam_pos
         cp[self.ballcam_id] = self._ballcam_origin()
         for i, cid in enumerate(self.chase_cam_ids):

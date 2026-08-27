@@ -48,6 +48,10 @@ export ROWER_JOIN_CODE="$CODE"
 # against 46 ms on osmesa, which is what makes four per-player views affordable.
 # MUJOCO_GL=osmesa still forces the CPU path where EGL genuinely is missing.
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
+# Print a C-level traceback if the process dies on a signal. This server has
+# segfaulted twice with nothing in any log to say where, and guessing at causes
+# has already cost two wrong fixes.
+export PYTHONFAULTHANDLER=1
 echo "[online] MUJOCO_GL=$MUJOCO_GL"
 export PYTHONPATH="$REPO"
 

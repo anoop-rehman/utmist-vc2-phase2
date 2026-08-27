@@ -360,11 +360,26 @@ bootstrap `V(s_T)` at every cut that their GAE never performs.
 
 ---
 
-## Update 2026-08-27 — 3d step 5 built and gated; 3e stood up; two measurements
-## that change the plan
+## Update 2026-08-27 — 3d step 5 gated, 3e launched, and four corrections
 
 *Written by the agent that ran 3d steps 5-6. Every number below names the
-command that produced it. The "Not tested" section at the end is not decoration.*
+command that produced it; where something is a projection it says so. The
+"Not tested" section at the end is not decoration.*
+
+The four corrections, so they are not buried:
+
+1. **`PORT_MAP` section 6's phase split is wrong.** Their PPO update is
+   **65-70%** of wall-clock, not 26%, so the "~3.8x Amdahl ceiling for a
+   physics-only port" describes a different port. Measured over three complete
+   1,000-epoch logs.
+2. **`xml_to_fields`'s premise is wrong arithmetic.** A batch holds ~57
+   designs, not 50,000, and a compile is 4.5 ms. The pipeline compiles.
+3. **Settled decision 5's sampler shape is not implementable as written**, and
+   settled decision 4 implies a world count that cannot be a constant. Both
+   adjusted, with the measurement, in `train_t2a.py`'s docstring.
+4. **`hopper_gpu_t32` did not "plateau".** It fell into the alive-bonus
+   local optimum -- a body that cannot fall -- which makes the seed spread on
+   this task bimodal, not 42%.
 
 ### The gates that were supposed to already pass, re-run
 
@@ -651,7 +666,10 @@ their own epochs 0-99 block means from `results/hopper_gpu_s2/log/log_train.txt`
 That batch is 57,522 agent-steps in 2,008 complete episodes -- their operating
 point (settled decision 4) reproduced, not approximated.
 
-**About 1.15x at epoch 0, and the phases have swapped.** The update is **3.0x
+Three epochs of that configuration ran before the memory fix below forced a
+relaunch: **118.0, 119.3, 115.3 s**.
+
+**About 1.15x, and the phases have swapped.** The update is **3.0x
 faster**, eval is **21x faster** (their eval is 16 sampler processes; ours is
 one group of 16 worlds, 48 batched steps -- the mean-action design collapses to
 a single topology, as `topology_census.py` said it would). Sampling is **2.5x
@@ -665,8 +683,8 @@ to 1-2 topologies, so a generation becomes ~2 groups x ~1,000 batched steps --
 2,000 launches for ~62,000 agent-steps instead of 4,384 for 57,522 -- while
 their own epoch cost stays roughly flat. **Nobody should quote an end-to-end
 speedup for this port until an epoch in the converged regime has been timed.**
-Four epochs have been timed, all untrained, all within a few percent of each
-other (118-124 s).
+Seven epochs have been timed across three configurations, all untrained, all
+within a few percent of each other (115-124 s).
 
 #### And a memory bug the launch found
 
@@ -807,6 +825,12 @@ nohup` and **no** `timeout`.
   mid-design XML that fails would be noticed one step late (or not at all if
   the final XML compiles). 100/100 designs compiled in the gate and no failure
   has ever been observed, but the rate has not been measured on a long run.
+* **The fp32 log-prob has not been measured against fp64 on a real batch.**
+  `gate_dense_policy.py` runs the dense policy in float64, so the 1e-14
+  agreement it reports is an fp64 result. The dense reduction is `.sum(1)` over
+  at most ten nodes rather than their cumsum-and-difference over 50,000, so the
+  cancellation PORT_MAP section 5 measured cannot arise -- but "cannot arise"
+  is an argument, not a number, and the trainer runs in fp32.
 * **fp32 physics has not been validated over a full training run.**
   `gate_batched_exec.py` measures the fp32 reward error at 2.10e-04 and argues
   it is uncorrelated over an episode; that argument has not been checked

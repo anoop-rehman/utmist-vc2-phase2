@@ -58,8 +58,6 @@ DASH_N = 26             # the most a line can use; surplus are parked
 DASH_LEN = 0.16         # half-length of one dash (0.32 m long)
 DASH_PITCH = 0.62       # centre-to-centre spacing -> a 0.30 m gap
 DASH_W = 0.05           # half-width
-PATH_SEGMENTS = 16      # samples along the ground aim line; enough that the
-                        # projected polyline hugs the turf under perspective
 
 
 # Per-player colours, hardcoded. These were derived from HSV before, which was
@@ -913,16 +911,6 @@ class MatchSim:
             u, v = self.world_to_uv(xyz[0], xyz[1], xyz[2])
             c = self.commands[p]
             tu, tv = self.world_to_uv(c.target[0], c.target[1])
-            # The aim line, sampled ALONG THE GROUND and projected point by
-            # point. A straight 2-D line between the creature's uv and the
-            # target's uv is only correct for the topdown affine; under any
-            # perspective camera it cuts through 3-D space and floats above the
-            # pitch. Projecting a ground polyline instead makes it lie on the
-            # turf, like the disc it points at.
-            path = [self.world_to_uv(
-                        xyz[0] + (c.target[0] - xyz[0]) * k / PATH_SEGMENTS,
-                        xyz[1] + (c.target[1] - xyz[1]) * k / PATH_SEGMENTS, 0.0)
-                    for k in range(PATH_SEGMENTS + 1)]
             r, g, b, _ = marker_rgba(p)
             players.append(dict(slot=SLOTS[p], u=u, v=v, tu=tu, tv=tv,
                                 # World xy as well as the projected uv: a
@@ -931,7 +919,6 @@ class MatchSim:
                                 world=[round(float(xyz[0]), 3),
                                        round(float(xyz[1]), 3),
                                        round(float(xyz[2]), 3)],
-                                path=[[round(pu, 4), round(pv, 4)] for pu, pv in path],
                                 color=f"#{int(255*r):02x}{int(255*g):02x}{int(255*b):02x}",
                                 skill=c.skill, controller=c.controller, name=c.name))
         bpos, _ = self.task.ball.get_pose(self.physics)

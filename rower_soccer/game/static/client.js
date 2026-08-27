@@ -223,26 +223,19 @@ function paintSeats(st) {
   });
 }
 
-function paintOverlay(st) {
+function paintOverlay() {
   const w = view.clientWidth, h = view.clientHeight;
   if (!w || !h) return;
   if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
   ctx.clearRect(0, 0, w, h);
-  // Ring my own creature and draw a line to its target, so a 4-player screen is
-  // readable at a glance -- everything else is already in the render.
-  const me = (st.players || []).find((p) => p.slot === S.slot);
-  if (me) {
-    const x = me.u * w, y = me.v * h;
-    // The aim line follows `me.path`, a ground polyline the server already
-    // projected through the active camera. Drawing a single straight segment
-    // to (tu, tv) instead was only right for the topdown affine -- under the
-    // chase cameras it lifted off the pitch and cut through the scene.
-    // Only the ring stays as an overlay. The aim line is now real geometry on
-    // the pitch (match._place_dashes), so drawing it here as well would put a
-    // flat screen-space copy on top of the perspective-correct one.
-    ctx.strokeStyle = me.color || "#4cc38a"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y, 16, 0, 6.284); ctx.stroke();
-  }
+  // Nothing about the WORLD is drawn here any more. The ring that used to mark
+  // your own creature existed when everyone shared one camera and had to find
+  // themselves in a crowd; with a per-player POV camera you are the creature in
+  // the middle of your own view, and the ring was left-over furniture. Your
+  // colour and your aim line are real geometry in the scene.
+  //
+  // The drag preview stays: it is live input feedback, not world state, and it
+  // has to appear before the server has been told anything.
   if (S.drag) {
     const a = S.drag.a, b = S.drag.b;
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
@@ -293,7 +286,7 @@ async function poll() {
     const me = (st.players || []).find((p) => p.slot === S.slot);
     if (me && me.skill !== S.skill) { S.skill = me.skill; }
     $("cambtn").textContent = "cam: " + (st.camera === "broadcast" ? "tv" : "top");
-    paintSkills(); paintSeats(st); paintOverlay(st); checkFrozen(st);
+    paintSkills(); paintSeats(st); paintOverlay(); checkFrozen(st);
     (st.events || []).forEach((e) => {
       const key = e.tick + e.type + (e.slot || "") + (e.team || "");
       if (poll._seen.has(key)) return;

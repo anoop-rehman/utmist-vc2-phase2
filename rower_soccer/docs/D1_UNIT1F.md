@@ -279,6 +279,76 @@ collapse was exactly a converged policy drowning in its own exploration noise
 once the fixed entropy bonus became the loudest term left. `--ent-anneal-steps`
 removes that pressure on the same schedule as the shaping.
 
+## 4. Smoke run and what the video actually shows
+
+### 4.1 Smoke (finished; these are not mid-flight readings)
+
+512 worlds, 6 minutes, `--shaping-anneal-steps 500000000`, everything else at
+defaults. **147 iterations, 19,267,584 env steps, exit 0.**
+
+| | |
+|---|---|
+| throughput | 54,500 env-steps/s steady (72k on the first, graph-warm iteration) |
+| diverged (obs guard) | **0** |
+| diverged (sim guard) | **0** |
+| non-finite gradients | **0** |
+| completed matches | 2,048 (four cohorts of 512) |
+| reward | +2.5e-4 to +4.9e-4 per agent-step, i.e. ~0.5 per 45 s match, all of it shaping |
+| critic | V 0.00 -> 0.08, tracking returns 0.01 -> 0.08 after the 10-iteration warmup |
+| `prior_nll` | 119 -> 68, i.e. z is being pulled onto the drill manifold |
+| responsibilities | shoot 0.85 +/- 0.03, dribble ~0.07, kick ~0.07, follow ~0.001 |
+
+Last completed cohort (512 matches, aggregated before reporting):
+
+| | |
+|---|---|
+| goals per match | **1.76** |
+| home / away goals | 0.88 / 0.89 -- balanced, which is what the mirror symmetry predicts |
+| **distribution** of per-world goal totals | 0 goals **21%**, exactly 1 **27%**, 2 or more **53%** |
+| throw-ins per match | 2.4 |
+| mean ball distance from the centre spot | 8.9 m |
+| mean uprightness | 0.58 |
+
+Reading the distribution rather than the headline matters here: a fifth of
+matches end goalless, so "1.76 goals per match" is not a uniform trickle, it is
+a bimodal mix of matches where somebody got hold of the ball and matches where
+nobody did.
+
+The 0.58 uprightness is the one number that looks wrong, and it is **not
+explained** -- see §5.10.
+
+### 4.2 The warm-started policy, looked at
+
+`runs/soccer2v2_1f/warmstart_sheet.png` and `warmstart.mp4`. Rendered from the
+**median-activity** world of 16 (ball path length: min 0.0 m, median 38.1 m,
+max 84.3 m over 20 s), deliberately -- see the note below about the first
+attempt.
+
+What I see, frame by frame: a correct mirror-symmetric kickoff with the ball on
+the centre spot; all four ants converging on the ball within ~4 s; a contested
+scrum in the centre circle; the ball struck clear and travelling several metres
+upfield; and, in the close-up, an ant **standing on its legs** (not splayed
+flat) with the ball at leg height about two body-lengths ahead. The ball/ant
+proportion is right, the pitch is the scaled 30 x 22.5 m one, both goals are
+present with the right posts, and the teams are correctly coloured and
+correctly placed (blue defends -x).
+
+Honestly: this is **four copies of a shoot policy all chasing the same ball**.
+There is no passing, no spacing, no defending -- which is exactly what a
+warm start with no notion of a team-mate should look like, and is the thing
+self-play has to change. Over the 16 worlds it scored 10 goals in 20 s of play
+(5 home, 5 away).
+
+**Method note, because it nearly produced a wrong conclusion.** The first
+render was one world, one seed, 15 s. In that world nobody reached the ball,
+`ball_dist` was 0.00 and the ants looked inert -- I was about to record "the
+warm start does not move". Aggregating over 64 worlds instead showed the
+opposite: nearest-ant-to-ball closes from 5.8 m to 3.1 m in 10 s, the ball
+travels 6.8 m, and with the ball placed 2 m in front of a player it is struck
+7.4 m. Gait speed is 1.0 m/s in the match against 2.25 m/s for the same
+checkpoint in its own shoot drill -- slower, because the match state is off
+shoot's training distribution, but far from inert. One world is an anecdote.
+
 ## 5. What I did NOT test
 
 Stated plainly, because an untested thing that is not labelled untested becomes

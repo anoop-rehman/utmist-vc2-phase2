@@ -787,9 +787,14 @@ def run(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     run_dir = os.path.join("runs_v2", args.run_name)
-    if os.path.isdir(run_dir) and os.listdir(run_dir) and not args.resume:
-        raise SystemExit(f"{run_dir} exists and is non-empty. Pass --resume or "
-                         f"pick a different --run-name.")
+    # `train.log` is excluded: the documented launch redirects the process's
+    # stdout into the run directory, which the shell creates BEFORE python
+    # starts -- so a fresh run would otherwise refuse itself.
+    existing = [f for f in (os.listdir(run_dir) if os.path.isdir(run_dir) else [])
+                if f != "train.log"]
+    if existing and not args.resume:
+        raise SystemExit(f"{run_dir} exists and is non-empty ({existing[:4]}). "
+                         f"Pass --resume or pick a different --run-name.")
     os.makedirs(os.path.join(run_dir, "videos"), exist_ok=True)
     sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                          capture_output=True, text=True).stdout.strip()

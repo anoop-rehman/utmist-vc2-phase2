@@ -47,7 +47,7 @@ DeepMind's pipeline, one shared frozen decoder per body:
 | 1c. BC dataset builder (demos → training tensors) | demo format (fixed) | can start NOW |
 | 1d. BC trainer + eval harness | 1c | after 1c |
 | 1e. Warp 2v2 self-play env (4 creatures + ball on one pitch) | — | BUILT (see below) |
-| 1f. RL fine-tune w/ KL anchor | 1d + 1e | later |
+| 1f. RL fine-tune (self-play, z-space) | 1e | **BUILT + RUNNING**, no BC anchor yet — see `D1_UNIT1F.md` |
 | 1g. Creature swap (rower drills) | 1a validates recipe | later |
 
 1c and 1e are independent of everything running and of each other — good agent-

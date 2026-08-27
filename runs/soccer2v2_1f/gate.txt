@@ -1,0 +1,100 @@
+
+== 1. warm start ==
+Warp 1.16.0 initialized:
+   CUDA Toolkit 12.9, Driver 12.8
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA RTX 4000 Ada Generation" (20 GiB, sm_89, mempool enabled)
+   Kernel cache:
+     /root/.cache/warp/1.16.0
+Module mujoco_warp._src.smooth 2b7c7bf load on device 'cuda:0' took 5.04 ms  (cached)
+Module _nxn_broadphase__locals__kernel_a4692a31 a4692a3 load on device 'cuda:0' took 0.26 ms  (cached)
+Module _primitive_narrowphase__locals__primitive_narrowphase_e91dd55d e91dd55 load on device 'cuda:0' took 0.35 ms  (cached)
+Module mujoco_warp._src.constraint 5b5fe2d load on device 'cuda:0' took 0.29 ms  (cached)
+Module _friction_dof__locals__kernel_b54a4577 b54a457 load on device 'cuda:0' took 0.25 ms  (cached)
+Module _limit_slide_hinge__locals__kernel_37504ae5 37504ae load on device 'cuda:0' took 0.27 ms  (cached)
+Module _efc_contact_init__locals__kernel_9e9f89de 9e9f89d load on device 'cuda:0' took 0.26 ms  (cached)
+Module _efc_contact_jac_sparse__locals__kernel_c65fa0ff c65fa0f load on device 'cuda:0' took 0.26 ms  (cached)
+Module _efc_contact_update__locals__kernel_00a15590 00a1559 load on device 'cuda:0' took 0.25 ms  (cached)
+Module mujoco_warp._src.forward 7b12154 load on device 'cuda:0' took 0.57 ms  (cached)
+Module mujoco_warp._src.passive d8c18c6 load on device 'cuda:0' took 0.54 ms  (cached)
+Module mujoco_warp._src.sensor 7850b43 load on device 'cuda:0' took 0.75 ms  (cached)
+Module mujoco_warp._src.forward 8f02867 load on device 'cuda:0' took 0.46 ms  (cached)
+Module _qfrc_smooth__locals__kernel_b98573a2 b98573a load on device 'cuda:0' took 0.24 ms  (cached)
+Module mujoco_warp._src.support 5a42e80 load on device 'cuda:0' took 0.29 ms  (cached)
+Module _small_cholesky_factorize_solve_block__locals__kernel_2b75aeaa 964bbb9 load on device 'cuda:0' took 0.25 ms  (cached)
+Module _tile_cholesky_factorize_solve_block__locals__kernel_7b7e8b16 a1adcd5 load on device 'cuda:0' took 28.50 ms  (cached)
+Module _solve_init_dof__locals__kernel_ef1943e8 ef1943e load on device 'cuda:0' took 0.27 ms  (cached)
+Module mujoco_warp._src.solver 0b22b73 load on device 'cuda:0' took 0.37 ms  (cached)
+Module _solve_init_jaref_kernel__locals__kernel_6ff062d3 6ff062d load on device 'cuda:0' took 0.26 ms  (cached)
+Module mul_m_kernel__locals___mul_m_8efe01a0 8efe01a load on device 'cuda:0' took 0.26 ms  (cached)
+Module _update_constraint_efc__locals__kernel_fc20741b fc20741 load on device 'cuda:0' took 0.27 ms  (cached)
+Module _update_constraint_init_qfrc_constraint_sparse__locals__kernel_75c6b7f4 75c6b7f load on device 'cuda:0' took 0.26 ms  (cached)
+Module _update_gradient_zero_grad_dot__locals__kernel_52bae6b7 52bae6b load on device 'cuda:0' took 0.26 ms  (cached)
+Module _update_gradient_grad__locals__kernel_769b869e 769b869 load on device 'cuda:0' took 0.26 ms  (cached)
+Module _update_gradient_init_h_sparse__locals__kernel_89238011 8923801 load on device 'cuda:0' took 0.26 ms  (cached)
+Module _JTDACJ_sparse__locals__kernel_6f70e7fd 6f70e7f load on device 'cuda:0' took 0.47 ms  (cached)
+Module _JTDACJ_sparse__locals__kernel_4d3ab710 9ea3efa load on device 'cuda:0' took 0.31 ms  (cached)
+Module _update_gradient_cholesky_blocked__locals__kernel_9592857e 6c783dc load on device 'cuda:0' took 60.11 ms  (cached)
+Module _linesearch_jv_fused_kernel__locals__kernel_54a6e7fc 54a6e7f load on device 'cuda:0' took 0.30 ms  (cached)
+Module _linesearch_iterative_kernel__locals__kernel_0de39820 bcbeba6 load on device 'cuda:0' took 0.34 ms  (cached)
+Module _solve_done__locals__kernel_5444f735 5444f73 load on device 'cuda:0' took 0.29 ms  (cached)
+Module _next_time_builder__locals___next_time_a67f49d6 a67f49d load on device 'cuda:0' took 0.28 ms  (cached)
+  [PASS] 1a warm-start verbatim: 25 tensors bit-identical to runs_v2/s5_c_all/best.pt (decoder x3 + action_net + proprio_enc + expert + z_proj + log_std + value_net); 0 mismatched, 0 absent from source, 0 unexpected in source
+  [PASS] 1b task-encoder splice: task_enc.0[:, :13] and critic.0's proprio+task prefix are bit-identical to shoot; the 21 new task columns (21 in the critic) are exactly zero -- so at init the policy IS shoot evaluated on football obs
+  [PASS] 1c NEG warm-start comparator fails on demand: perturbing decoder.0.weight[0,0] by 1e-7 is detected and the restore is detected as clean -- the equality test is not vacuous
+  [PASS] 1d NEG --no-splice ablation is really different: with --no-splice exactly those two layers are re-initialised and task_enc.0 no longer matches shoot -- so the splice is doing work
+
+== 2. the z-space action path ==
+  [PASS] 2a z-space path is the ONLY path: ac.dist(obs).mean == gate_drill_priors.action_from_z(ac, obs, ac.z(obs)) BITWISE on every one of 16 rows -- the trained policy reaches the actuators through the same frozen decoder the drill priors drive
+  [PASS] 2b external z actually drives the decoder: perturbing z by 0.01 moves the action by 5.02e-03 -- the decoder is not ignoring its latent input
+  [PASS] 2c NEG decoder is blind to task obs: adding 3.0 to all 34 task columns with z held fixed changes the action by exactly 0.0e+00: the low-level controller's input contract is proprio + z, as the drills assume
+
+== 3. rows -> (world, slot) ==
+  [PASS] 3a row = w*A + k: obs.view(4, 4, -1)[w, k] is bit-identical to env._player_obs(k)[w] for every (world, slot): the flattening is world-major, as the docstring claims and the trainer assumes
+  [PASS] 3b team-mate block names the right player: all 4 slots' teammate_ego[81:84] match to_ego3(own frame, mate root) and NONE match a neighbouring slot's root -- a slot permutation in the obs is detectable
+  [PASS] 3c actions reach the named creature: model actuators 8 per slot are contiguous and prefixed p0-..p3-, and a per-slot constant action lands in the matching ctrl block -- the reshape routes slot k to creature p{k}-
+  [PASS] 3d NEG a slot permutation is detected: swapping the two players within each team changes the observation batch, so 3a/3b would fail on a permuted env rather than silently pass
+
+== 4. GAE / bootstrap at a cut ==
+  [PASS] 4a bootstrap V(s_T) at the match cut: advantages [4.535, 2.3, 7.099999] == hand-computed [4.535, 2.3, 7.1] (gamma 0.9, lambda 0.5, V(s_T)=7 read BEFORE the reset)
+  [PASS] 4b NEG the wrong conventions give different answers: ppo.py's convention (bootstrap V(next kickoff)=2) would give [2.51, -2.2, 7.1] and a terminal cut would give [1.7, -4, 7.1]; the trainer produced neither, so this test can fail
+  [PASS] 4c rollout-boundary cut also bootstraps: the t=T-1 transition uses V(self._obs)=V(9)=9, giving 7.099999 = 1 + 0.9*9 - V(2); dropping that bootstrap would give -1.0. The fixed-T sampler's own truncation is bootstrapped too (D3_HANDOFF's 'the port has partial episodes their code never has')
+  [PASS] 4d GAE does not leak across the match boundary: adv[t=1] == its own delta (2.3) with no contribution from the next match's t=2 -- the recursion is cut, not merely re-based
+
+== 5. drill-prior mixture (Eq. 5) ==
+  [PASS] 5a term is finite and per-row: -log p_mix(z) over 4 priors: shape (16,), mean 117.83, range [42.8, 174.6], all finite
+  [PASS] 5b w_prior=0 removes the term: at w_prior=0 the penalty is never computed (no 'prior_nll' in the iteration stats); at 1e-3 it is 279.95 and finite -- the ablation is an `if`, not a multiply-by-zero
+  [PASS] 5c term is correctly signed: descending it takes -log p from 117.83 to 79.04, and z + 50 scores 3824.93 -- the penalty pulls z TOWARD the drill mixture, not away
+  [PASS] 5d the mixture actually mixes: mean responsibilities {'follow': 0.0, 'dribble': 0.0, 'kick': 0.062, 'shoot': 0.938} on warm-started football states -- no single prior owns everything, so Eq. 5 has something to mix
+
+== 6. short run ==
+  [PASS] 6a decoder stays frozen: after 6 PPO iterations all 8 decoder + action_net tensors are BIT-IDENTICAL and every one of their .grad slots is None -- autograd never touched the low-level controller
+  [PASS] 6b the high-level policy gets gradient: nonzero grad norms on z_proj 1.69e-01, task_enc.0 3.13e-02, proprio_enc.0 2.18e-02, critic.0 3.44e-04, value_net 4.45e-01 -- including task_enc.0, whose 21 spliced-in zero columns are learning (the PIPELINE_V2 zero-padding trap would show 0 here)
+  [PASS] 6c short run does not diverge: 6 iters, 1,536 env steps: every parameter finite, rew/step +0.00028..+0.00075, V +0.000->+0.024, obs-diverged 0, sim-diverged 0, non-finite gradients 0
+  [PASS] 6d critic warmup holds the policy still: the warmup iterations report a value loss but add no policy-gradient or prior term to the objective, so the warm-started policy is not spent on advantages that are only the critic's bias
+
+GATE 23/23
+  PASS  1a warm-start verbatim: 25 tensors bit-identical to runs_v2/s5_c_all/best.pt (decoder x3 + action_net + proprio_enc + expert + z_proj + log_std + value_net); 0 mismatched, 0 absent from source, 0 unexpected in source
+  PASS  1b task-encoder splice: task_enc.0[:, :13] and critic.0's proprio+task prefix are bit-identical to shoot; the 21 new task columns (21 in the critic) are exactly zero -- so at init the policy IS shoot evaluated on football obs
+  PASS  1c NEG warm-start comparator fails on demand: perturbing decoder.0.weight[0,0] by 1e-7 is detected and the restore is detected as clean -- the equality test is not vacuous
+  PASS  1d NEG --no-splice ablation is really different: with --no-splice exactly those two layers are re-initialised and task_enc.0 no longer matches shoot -- so the splice is doing work
+  PASS  2a z-space path is the ONLY path: ac.dist(obs).mean == gate_drill_priors.action_from_z(ac, obs, ac.z(obs)) BITWISE on every one of 16 rows -- the trained policy reaches the actuators through the same frozen decoder the drill priors drive
+  PASS  2b external z actually drives the decoder: perturbing z by 0.01 moves the action by 5.02e-03 -- the decoder is not ignoring its latent input
+  PASS  2c NEG decoder is blind to task obs: adding 3.0 to all 34 task columns with z held fixed changes the action by exactly 0.0e+00: the low-level controller's input contract is proprio + z, as the drills assume
+  PASS  3a row = w*A + k: obs.view(4, 4, -1)[w, k] is bit-identical to env._player_obs(k)[w] for every (world, slot): the flattening is world-major, as the docstring claims and the trainer assumes
+  PASS  3b team-mate block names the right player: all 4 slots' teammate_ego[81:84] match to_ego3(own frame, mate root) and NONE match a neighbouring slot's root -- a slot permutation in the obs is detectable
+  PASS  3c actions reach the named creature: model actuators 8 per slot are contiguous and prefixed p0-..p3-, and a per-slot constant action lands in the matching ctrl block -- the reshape routes slot k to creature p{k}-
+  PASS  3d NEG a slot permutation is detected: swapping the two players within each team changes the observation batch, so 3a/3b would fail on a permuted env rather than silently pass
+  PASS  4a bootstrap V(s_T) at the match cut: advantages [4.535, 2.3, 7.099999] == hand-computed [4.535, 2.3, 7.1] (gamma 0.9, lambda 0.5, V(s_T)=7 read BEFORE the reset)
+  PASS  4b NEG the wrong conventions give different answers: ppo.py's convention (bootstrap V(next kickoff)=2) would give [2.51, -2.2, 7.1] and a terminal cut would give [1.7, -4, 7.1]; the trainer produced neither, so this test can fail
+  PASS  4c rollout-boundary cut also bootstraps: the t=T-1 transition uses V(self._obs)=V(9)=9, giving 7.099999 = 1 + 0.9*9 - V(2); dropping that bootstrap would give -1.0. The fixed-T sampler's own truncation is bootstrapped too (D3_HANDOFF's 'the port has partial episodes their code never has')
+  PASS  4d GAE does not leak across the match boundary: adv[t=1] == its own delta (2.3) with no contribution from the next match's t=2 -- the recursion is cut, not merely re-based
+  PASS  5a term is finite and per-row: -log p_mix(z) over 4 priors: shape (16,), mean 117.83, range [42.8, 174.6], all finite
+  PASS  5b w_prior=0 removes the term: at w_prior=0 the penalty is never computed (no 'prior_nll' in the iteration stats); at 1e-3 it is 279.95 and finite -- the ablation is an `if`, not a multiply-by-zero
+  PASS  5c term is correctly signed: descending it takes -log p from 117.83 to 79.04, and z + 50 scores 3824.93 -- the penalty pulls z TOWARD the drill mixture, not away
+  PASS  5d the mixture actually mixes: mean responsibilities {'follow': 0.0, 'dribble': 0.0, 'kick': 0.062, 'shoot': 0.938} on warm-started football states -- no single prior owns everything, so Eq. 5 has something to mix
+  PASS  6a decoder stays frozen: after 6 PPO iterations all 8 decoder + action_net tensors are BIT-IDENTICAL and every one of their .grad slots is None -- autograd never touched the low-level controller
+  PASS  6b the high-level policy gets gradient: nonzero grad norms on z_proj 1.69e-01, task_enc.0 3.13e-02, proprio_enc.0 2.18e-02, critic.0 3.44e-04, value_net 4.45e-01 -- including task_enc.0, whose 21 spliced-in zero columns are learning (the PIPELINE_V2 zero-padding trap would show 0 here)
+  PASS  6c short run does not diverge: 6 iters, 1,536 env steps: every parameter finite, rew/step +0.00028..+0.00075, V +0.000->+0.024, obs-diverged 0, sim-diverged 0, non-finite gradients 0
+  PASS  6d critic warmup holds the policy still: the warmup iterations report a value loss but add no policy-gradient or prior term to the objective, so the warm-started policy is not spent on advantages that are only the critic's bias

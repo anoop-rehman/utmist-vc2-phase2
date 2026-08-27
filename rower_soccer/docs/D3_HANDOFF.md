@@ -683,8 +683,9 @@ to 1-2 topologies, so a generation becomes ~2 groups x ~1,000 batched steps --
 2,000 launches for ~62,000 agent-steps instead of 4,384 for 57,522 -- while
 their own epoch cost stays roughly flat. **Nobody should quote an end-to-end
 speedup for this port until an epoch in the converged regime has been timed.**
-Seven epochs have been timed across three configurations, all untrained, all
-within a few percent of each other (115-124 s).
+Eight epochs have been timed across three configurations, all untrained, all
+within a few percent of each other (115-124 s); the launched run's epoch 0 is
+122.0 s.
 
 #### And a memory bug the launch found
 
@@ -704,9 +705,15 @@ CUDA mempool caches every block it has ever handed out -- so the resident set
 grows to the high-water mark over all group shapes ever seen, not to the
 working set. `--mempool-mb` (default 512, the run uses 256) sets
 `wp.set_mempool_release_threshold`, and the trainer drops the batch and calls
-`torch.cuda.empty_cache()` at each epoch boundary. Watch `nvidia-smi` on this
-run: if it climbs again, `--max-worlds 512` is the next knob, at the cost of
-more generations per iteration.
+`torch.cuda.empty_cache()` at each epoch boundary. Measured on the launched
+run: **~4.2 GB at the mid-epoch peak, back to ~0.8 GB between epochs**, and it
+no longer ratchets. The peak is the number that matters to whoever else is on
+the card; most of it is torch holding the epoch's stored observations,
+actions and per-row adjacencies (`gpu_mib` in the JSON log reports torch's own
+peak, 2.9 GB). If it needs to come down further, store one adjacency per
+distinct graph with a per-row index instead of a per-row `[n, n]` block --
+`adj` is the largest per-transition item and it is the same handful of matrices
+repeated. Not done.
 
 The rule this earns: **on a shared card, a growing resident set is a bug even
 when nothing is leaking.** A caching allocator plus a per-group `Data` is

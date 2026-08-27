@@ -10,6 +10,8 @@ Files:
 | `rower_soccer/warp_port/train_soccer2v2_warp.py` | the trainer |
 | `rower_soccer/warp_port/gate_soccer2v2_train.py` | its gate, 23/23 |
 | `runs/soccer2v2_1f/warmstart_sheet.png`, `.mp4` | the policy before training |
+| `rower_soccer/warp_port/eval_soccer2v2.py` | the post-hoc evaluation + video (6) |
+| `runs_v2/soccer2v2_1f_base/final_eval.mp4`, `.json` | the finished policy, evaluated |
 
 ---
 
@@ -397,9 +399,133 @@ a recorded mechanism someone else propagates.
     near 1.0, i.e. the ants spend a lot of the match tilted or down. Whether
     that is four ants knocking each other over, or the shoot gait degrading off
     its training distribution, has not been separated. Worth a look before
-    anyone calls the play "watchable".
+    anyone calls the play "watchable". **Partly answered after the run
+    finished -- see 6.3.** It is not contact; it is falls that are never
+    recovered from.
 
-## 6. Handing over
+## 6. The finished run, evaluated from `final.pt`
+
+The run completed its budget: **2,000,027,648 env steps, 15,259 iterations,
+646.8 min wall, 0 obs-diverged, 0 sim-diverged, 0 non-finite gradients**, with
+`final.pt` / `latest.pt` / `checkpoint.pt` written at exit.
+
+The in-loop `videos/step_*.mp4` are a monitor, not an evaluation: one world
+(world 0), 15 s, no aggregate behind them. `warp_port/eval_soccer2v2.py` is the
+evaluation -- it plays complete matches over many worlds, aggregates FIRST, and
+only then picks what to film, by rank inside that population. 4.2's method note
+is the reason it is built that way round.
+
+```bash
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+PYTHONPATH=. MUJOCO_GL=egl .venv/bin/python -m rower_soccer.warp_port.eval_soccer2v2 \
+    --ckpt runs_v2/soccer2v2_1f_base/final.pt \
+    --out  runs_v2/soccer2v2_1f_base/final_eval.mp4 \
+    --worlds 64 --matches 4 --also-stochastic \
+    --json-out runs_v2/soccer2v2_1f_base/final_eval.json
+```
+
+64 worlds x 4 matches = **256 complete 45 s matches** per pass, ~170 s of
+rollout, **0.36 GB of GPU** (`nvidia-smi --query-compute-apps`, measured live
+next to the D3 run), 0 diverged. The env spec is read from the run's own
+`config.json` rather than re-typed, so the eval env is the trained env.
+
+### 6.1 The numbers
+
+Two conventions, because they answer different questions. The trainer's video
+path is **deterministic** (mean action) and that is what is filmed; training's
+own `match` metrics were logged under the **sampled** policy.
+
+| | deterministic | sampled | training log, last iter |
+|---|---|---|---|
+| goals per match | **1.48** | **1.81** | 1.83 |
+| home / away | 0.80 / 0.68 | 0.84 / 0.97 | 0.90 / 0.93 |
+| 0 goals / exactly 1 / 2+ | 28% / 28% / 45% | 23% / 22% / 54% | 21% / 25% / 54% |
+| home win / draw / away win | 32% / 44% / 24% | 29% / 36% / 35% | -- |
+| throw-ins per match | 2.47 | 2.50 | 2.46 |
+| ball distance from centre spot | 8.46 m | 8.85 m | 8.91 m |
+| ball path length per match | 84.7 m | 94.1 m | -- |
+| nearest ant to ball, time-mean | 3.21 m | 3.19 m | -- |
+| mean uprightness | 0.78 | 0.77 | 0.69 |
+
+The sampled column reproduces the training log to within its own run-to-run
+spread, which is the check that the eval is measuring the same task the trainer
+was optimising. Three independent 256-match passes gave 1.57 / 1.56 / 1.48
+(deterministic) and 1.90 / 1.79 / 1.81 (sampled): **the aggregates are stable
+to about +/-0.06, but individual worlds are not reproducible run to run** --
+mujoco_warp's GPU contact solve is not bitwise deterministic and a football
+match is chaotic, so "which world was the median" changes between passes even
+at a fixed seed. That is why nothing here is reported per world.
+
+Matches never end early (`terminate_on_goal=False`, as in `match.py`), so
+"endings" is the score distribution above: **28% of matches finish goalless**
+and the mean is a mix of those and matches where someone got hold of the ball,
+exactly as the smoke predicted. 18% of matches have a ball path under 30 m,
+i.e. nearly a fifth of matches are effectively dead.
+
+### 6.2 What the video actually shows
+
+`runs_v2/soccer2v2_1f_base/final_eval.mp4` -- 45 s, 1624x1224, four panels, one
+per QUARTILE of the 256 matches ranked by ball path length (ranks 12 / 37 / 62 /
+87 %), each with a ball-tracking close-up inset so posture is visible; the
+top-down alone cannot tell a standing ant from a fallen one. The panels finish
+0-0, 1-0, 2-0 and 2-1, so six goals are scored inside the clip.
+
+Honestly, frame by frame:
+
+* the kickoff is the correct mirror formation with the ball on the centre spot;
+* within ~4 s all four converge on the ball and contest it in a scrum. There is
+  still **no passing, no spacing and no defending** -- self-play has made the
+  four copies faster and more effective at reaching and striking the ball, and
+  has not made them a team. Positionally this is the warm start with more
+  urgency;
+* the ball is genuinely driven around the pitch -- 84.7 m of ball travel per
+  45 s match, where the warm start managed 6.8 m per 10 s (~31 m per match, on
+  a different rollout, so treat that as an order-of-magnitude comparison and
+  not a matched one). The four filmed matches finish 0-0, 1-0, 2-0 and 2-1 and
+  each is filmed end to end, so six goals go in on screen; I did not sit and
+  time each one, that is read off the panels' own final scores;
+* creatures repeatedly run **into the goal frame and the net** and get stuck
+  there;
+* and in the bottom quartile the match simply **dies**: by ~14 s all four ants
+  are flat, and the panel is frozen -- same positions, ball unmoved -- from
+  there to the final whistle.
+
+### 6.3 The `upright` question (5.10), partly answered
+
+Two measurements over the same 256 matches, both new:
+
+| | deterministic | sampled |
+|---|---|---|
+| uprightness, first 5 s of the match | **0.96** | 0.95 |
+| uprightness, last 5 s | **0.70** | 0.68 |
+| falls (up->down crossings) per match, all 4 players | 3.45 | 3.76 |
+| recoveries (down->up) per match | 2.18 | 2.43 |
+| **recoveries / falls** | **0.63** | 0.65 |
+| players down at the final whistle | **32%** | 33% |
+| uprightness while within 1.5 m of another creature | 0.768 | 0.773 |
+| uprightness while further than 1.5 m from anyone | 0.783 | 0.766 |
+| share of time within 1.5 m of another creature | 26% | 25% |
+
+Read together: the ants start the match upright (0.96) and the population
+degrades monotonically to 0.70 by the end, because **about a third of falls are
+never recovered from** and a third of all players are lying down when the
+whistle goes. Proximity to another creature makes **no difference** -- 0.768
+crowded against 0.783 alone, a gap smaller than the difference between the two
+action conventions -- so the "four ants knocking each other over" hypothesis is
+not supported. What the number is measuring is a gait that falls on its own and
+cannot stand back up; the dead bottom-quartile match is that failure taken to
+its limit.
+
+Caveats, plainly: the crowding split is a **correlation**, not a controlled
+experiment (players are close precisely when they are all chasing the same
+ball), and it does not establish *why* the gait falls -- "off shoot's training
+distribution" remains the hypothesis, untested. The obvious next measurement is
+the same checkpoint's fall rate in the shoot drill it came from; nobody has run
+it. Nothing here changes 5.5: there is still no eval against any external
+opponent.
+
+
+## 7. Handing over
 
 * Adding the KL-to-BC anchor when stage 5 lands: it is one more term in
   `SelfPlayPPO.update`, structurally identical to the prior term already there

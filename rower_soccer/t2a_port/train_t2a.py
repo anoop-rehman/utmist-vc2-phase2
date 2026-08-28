@@ -631,6 +631,15 @@ class Trainer:
         one, which is luck, not evidence.)
         """
         a = self.args
+        # Positive evidence in the run's own log of which arm this is. The
+        # A/B on `agent_specs.batch_design` is otherwise invisible after the
+        # fact -- the argv does not carry it when the default follows the cfg.
+        self.log(f"run {a.run}  cfg {a.cfg}  seed {a.seed}  "
+                 f"batch_design {self.batch_design} "
+                 f"(cfg agent_specs.batch_design "
+                 f"{self.cfg.get('agent_specs', {}).get('batch_design', False)}"
+                 f", --batch-design {getattr(a, 'batch_design', None)})  "
+                 f"dtype {self.dtype}")
         for epoch in range(epochs):
             if a.stop_file and os.path.exists(a.stop_file):
                 self.log(f"stop file {a.stop_file} present -- saving and "

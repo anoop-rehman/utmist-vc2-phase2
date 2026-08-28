@@ -22,11 +22,13 @@ bottom supersede the 2026-08-14 text above wherever they disagree — in
 particular decision 4's "~3.8x" and the "step 1 of 6" state.*
 
 ***Read the LAST section first if you are picking up 3e.** "Update 2026-08-27
-(second)" settles that fp32 is not why the port under-trains, shows that the
-gap is episode LENGTH rather than reward rate, and names an unported piece of
-their PPO update (`agent_specs.batch_design`) as the leading cause. It also
-records the one experiment that would confirm or kill that, which nobody has
-run.*
+(second)" settles that fp32 is not why the port under-trains and shows that the
+gap is episode LENGTH rather than reward rate; both still hold. It then names
+`agent_specs.batch_design` as the leading cause, and **"Update 2026-08-28" ran
+that experiment and refutes it** — the fix is correct, matches their code, and
+makes training worse. Read 2026-08-28 for what the lead is now (a
+sampled-rollout discrepancy that predates the first gradient step) and for
+three cheap diagnostics that have not been spent.*
 
 ## The two training runs
 
@@ -1425,3 +1427,286 @@ do, and its untrained design distribution matches theirs.
 | `t2a_port/train_t2a.py` | `stage_sorted_perm` + `agent_specs.batch_design`; fp64 dtype cast at the sim boundary |
 | `t2a_port/gate_batch_design.py` | **new.** 9/9, three controls that must fail |
 | `t2a_port/end_probe.py` | **new.** Termination census; runs THEIR checkpoint through the port |
+
+## Update 2026-08-28 — `batch_design` was trained, and it does NOT close the gap
+
+*Written by the agent asked to run the experiment the previous section named as
+"the single next experiment". It was run. The answer is negative, and it is
+negative in a way that changes the diagnosis: the previous section's headline
+("`agent_specs.batch_design` is the leading cause of the 12x") is **not
+supported** and should be read as refuted, not merely unconfirmed.*
+
+The short version:
+
+1. `gate_batch_design.py` re-run independently: **9/9**, three controls fail on
+   demand. The permutation is right, and their `get_perm_batch_design` and the
+   cfg were re-read from their source rather than taken from this file.
+2. One seed was trained with `batch_design` **on**, matched to `port_s1`:
+   `runs/t2a_port/port_s1_bd`, 101 epochs, ended with its stop file.
+3. **It is worse than the arm with the bug**, on the decisive readout and on
+   every other one. At epoch 100 the sampled (training) episode is **33.7
+   steps with `batch_design` on** against **65.3 with it off** and **674-780 in
+   the reference**. It is 28.5 steps at epoch 0, so in 100 epochs the
+   `batch_design`-on arm bought **5 steps of survival**.
+4. The port's *training* episodes are 6 steps shorter than theirs **at epoch 0,
+   before any gradient step**, in every arm — 28.5-29.6 against 34.6-34.9 — and
+   that gap never closes in any arm. That, not the minibatch permutation, is
+   now the most specific unexplained thing on the table.
+5. A side effect worth keeping: stage-pure minibatches make `T_update`
+   **2.1x cheaper** (13.7 s against 28.1 s per epoch), because each minibatch
+   then touches one `Bucket` instead of three.
+
+### The gate, re-run and re-derived from their source
+
+```sh
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_batch_design
+# 9/9 checks passed
+```
+
+Checked against their code rather than against the previous section's summary
+of it:
+
+* `design_opt/cfg/hopper_gpu_s2.yml:2-3` — `agent_specs: {batch_design: true}`,
+  and `min_batch_size: 50000` / `mini_batch_size: 2048` so `use_mini_batch` is
+  true. Confirmed by reading the file.
+* `design_opt/agents/transform2act_agent.py:250-256` — `get_perm_batch_design`
+  buckets by `x[2]` and returns `inds[0] + inds[1] + inds[2]`.
+* `transform2act_agent.py:281-284` — it is applied AFTER the plain shuffle, so
+  it is a stable sort of the shuffled order by stage.
+* `transform2act_agent.py:287` — `optim_iter_num = int(math.floor(num_state /
+  mini_batch_size))`, i.e. the tail is dropped, which is what the port's
+  `batch.size // self.mini` also does.
+* `design_opt/envs/hopper.py:197-198` — `if_use_transform_action` indexes
+  `['skeleton_transform', 'attribute_transform', 'execution']`, so stage ranks
+  are 0/1/2 and `train_t2a.py`'s `STAGE_RANK` matches.
+
+So the mechanism described in the previous section is real: their design towers
+take 2 Adam steps per optimisation epoch at epoch 400 and the port's took 30.
+**The mechanism is real and its effect on training is the opposite of the one
+predicted.**
+
+### The run
+
+```sh
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. MUJOCO_GL=egl setsid nohup .venv/bin/python \
+    -m rower_soccer.t2a_port.train_t2a --cfg hopper_gpu_s2 --run port_s1_bd \
+    --outdir runs/t2a_port --seed 1 --eval-worlds 16 --max-worlds 1024 \
+    --mempool-mb 256 --epochs 1000 --save-interval 100 \
+    --stop-file /tmp/stop_t2a_port_s1_bd > runs/t2a_port/port_s1_bd.log 2>&1 &
+```
+
+Identical to `port_s1`'s argv except `--run`/`--stop-file`. `batch_design` is
+not on the command line because the default now follows the cfg, so
+`train_t2a.py` was given a startup line that writes the setting into the run's
+own log — otherwise which arm a run is cannot be recovered afterwards:
+
+```
+runs/t2a_port/port_s1_bd/log_train.txt:1
+run port_s1_bd  cfg hopper_gpu_s2  seed 1  batch_design True
+  (cfg agent_specs.batch_design True, --batch-design None)  dtype torch.float32
+```
+
+It reached **epoch 101** in 2.76 h, was **ended with its stop file, not
+killed**, and left `models/epoch_0100.p`, `best.p` and `stopped.p`.
+
+Two differences from `port_s1` that are not `batch_design` and must be
+recorded: `port_s1_bd` carries the `len_est` fix and the fp64 sim-boundary cast
+(a no-op in fp32); `port_s1` predates both. **`port_s1_fp64` is the control
+that covers this** — it is the same code lineage as `port_s1_bd` with
+`batch_design` OFF, and it tracks `port_s1` to within a few percent for its 52
+epochs. So the `len_est` fix is not what separates the arms.
+
+### The readout: episode LENGTH on the TRAINING distribution
+
+The previous section read episode length off the eval metric. **Do not do that
+here.** `--eval-worlds 16` is 16 mean-action episodes on 16 sampled designs, and
+on this arm it produced two spurious excursions — `eval_len` jumped 38 -> 116 at
+epoch 71 and 25 -> 116 at epoch 75 and fell straight back — while the training
+distribution (500-2,000 sampled episodes per epoch) did not move at all. The
+training columns below are `train_R_eps / train_R`, both already in both logs.
+
+| epoch | bd ON len | bd ON `R_eps` | bd off (`port_s1`) len | `R_eps` | bd off (`fp64`) len | `R_eps` | ref s1 len | `R_eps` | ref s2 len | `R_eps` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 28.5 | 28.5 | 28.5 | 28.5 | 29.6 | 29.6 | **34.9** | 28.9 | **34.6** | 28.7 |
+| 10 | 29.7 | 32.7 | 30.6 | 42.3 | 31.2 | 42.7 | 84.0 | 150.4 | 81.8 | 160.3 |
+| 25 | 29.7 | 36.5 | 33.2 | 75.4 | 33.3 | 77.0 | 125.8 | 341.0 | 165.8 | 374.7 |
+| 50 | 31.0 | 41.5 | 41.6 | 148.9 | 41.9 | 148.4 | 550.2 | 836.3 | 488.3 | 766.6 |
+| 75 | 31.2 | 46.7 | 51.5 | 194.0 | — | — | 664.0 | 1009.2 | 743.7 | 1115.6 |
+| 100 | **33.7** | **56.9** | **65.3** | **235.8** | — | — | 674.3 | 1220.5 | 780.2 | 1209.2 |
+
+Block means, like for like:
+
+| block | 0-24 | 25-49 | 50-74 | 75-100 |
+|---|---|---|---|---|
+| bd ON, train len | 29.6 | 30.1 | 30.9 | **32.6** |
+| bd off (`port_s1`), train len | 31.0 | 37.0 | 46.9 | **58.9** |
+| bd off (`fp64`), train len | 31.3 | 37.3 | 42.3 | — |
+| ref s1 / s2, train len | 78.9 / 84.2 | 362.5 / 316.3 | 567.9 / 620.3 | 622.7 / 723.6 |
+| bd ON, train `R_eps` | 33.2 | 38.6 | 43.3 | **51.1** |
+| bd off (`port_s1`), train `R_eps` | 48.0 | 111.0 | 173.5 | **216.4** |
+| ref s1 / s2, train `R_eps` | 172.2 / 183.8 | 623.8 / 573.9 | 884.0 / 950.7 | 1051.0 / 1155.0 |
+
+And the eval metric the previous section used, for continuity — same verdict,
+noisier:
+
+| block | 0-24 | 25-49 | 50-74 | 75-100 |
+|---|---|---|---|---|
+| bd ON, `eval_len` / `exec_R_eps` | 42.0 / 42.0 | 42.6 / 47.8 | 53.0 / 80.5 | 34.7 / 76.1 |
+| bd off (`port_s1`) | 32.4 / 64.8 | 47.2 / 206.0 | 53.9 / 226.0 | 73.7 / 274.1 |
+| ref s1 | 76.5 / 216.1 | 362.7 / 670.3 | 937.9 / 1283.2 | 947.9 / 1454.7 |
+| ref s2 | 85.4 / 223.8 | 220.9 / 553.8 | 999.6 / 1418.2 | 1000.1 / 1524.4 |
+
+**The reference's two seeds differ from each other by 8-15% in these blocks.
+The `batch_design`-on arm is 45% below the `batch_design`-off arm on training
+length at 75-100 and 76% below it on training return. That is far outside the
+seed spread, and it is in the wrong direction.**
+
+Reproduce either table with the scripts used here (they are 40 lines of regex
+over the two logs; nothing was hand-copied):
+
+```sh
+cd /workspace/utmist-vc2-phase2
+# train_R_eps / train_R per epoch for all five arms
+.venv/bin/python - <<'PY'
+import re
+def rd(p):
+    o={}
+    for l in open(p):
+        m=re.match(r'^(\d+)\t.*train_R ([\d.eE+-]+)\ttrain_R_eps ([\d.eE+-]+)', l)
+        if m: o[int(m.group(1))]=(float(m.group(3))/float(m.group(2)), float(m.group(3)))
+    return o
+for p in ['runs/t2a_port/port_s1_bd/log_train.txt','runs/t2a_port/port_s1/log_train.txt',
+          '/workspace/Transform2Act/results_hopper_gpu.log','/workspace/Transform2Act/results_hopper_gpu_s2.log']:
+    d=rd(p); print(p, {e:tuple(round(x,1) for x in d[e]) for e in (0,25,50,100) if e in d})
+PY
+```
+
+### Verdict
+
+**`batch_design` does not close the gap, does not partly close it, and makes
+training strictly worse over 101 epochs.** The previous section's headline
+should be treated as refuted.
+
+What the run does establish, and it is not nothing:
+
+* **Almost all of what the port was "learning" was coming from the
+  over-stepped design towers.** Take the 15x extra Adam steps away and the arm
+  goes nearly flat: training length 28.5 -> 33.7 over 100 epochs. The
+  `batch_design`-off arms' gains — including the epoch-15 move where length
+  *halves* to 21 and the reward rate jumps to 3.4 — are design-side, i.e. the
+  port was finding bodies that fall forward, not a controller that hops.
+* **So the port's EXECUTION tower is barely learning in any arm**, and that is
+  a sharper statement of the defect than "the port trains to 1/12". The
+  execution tower's Adam-step count is almost unchanged by this fix (28 of 30
+  minibatches instead of 30 of 30), which is why the fix could not have helped
+  it and why it did not.
+* **`batch_design` should nevertheless stay on**, because it is what their code
+  does and the port is supposed to be their code, and because it is 2.1x
+  cheaper per update. It is now a matched-behaviour item, not a fix.
+
+### The pre-training discrepancy is now the lead
+
+The previous section listed this as a small loose end. This run promotes it,
+because it is the only measured difference that is present in every arm,
+present **before the first gradient step**, and pointed the same way as the
+whole failure:
+
+| | untrained sampled episode length | untrained `train_R` (= 1 + mean dx/dt) |
+|---|---|---|
+| ref seed 1 | **34.9** | 0.83 (mean dx/dt −0.17 m/s) |
+| ref seed 2 | **34.6** | 0.83 |
+| `port_s1` | 28.5 | 1.00 (mean dx/dt **0.00**) |
+| `port_s1_fp64` | 29.6 | 1.00 |
+| `port_s1_bd` | 28.5 | 1.00 |
+
+Under **mean** actions the port and the reference agree to 0.3% (`exec_R_eps`
+42.2 against 42.1). Under **sampled** actions they do not. PPO learns from the
+sampled distribution, so a discrepancy that appears only there is exactly the
+shape of a defect that would leave every mean-action gate green while training
+fails.
+
+What was checked and matches, so this is not those: `control_log_std: 0` and
+`attr_log_std: -2.3` are read from the cfg into `nn.Parameter`s in
+`dense_policy.py:236-239`, and `fix_control_std`/`fix_attr_std` are false in
+both, i.e. learnable in both; `action_to_control` maps node column 0 to the
+actuator index in both (`hopper.py:95-102` against
+`batched_exec_env.py:275-282`); the reward and done conditions are the same
+function (`hopper.py:156-179` against `batched_exec_env.terms`). What has
+**never** been checked is a sampled rollout, end to end, from identical
+weights.
+
+### What is NOT tested
+
+* **`port_s1_bd` was stopped at epoch 101, not run to 1,000.** The claim is
+  "it is behind the `batch_design`-off arm and behind the reference at every
+  epoch up to 101 and the separation is widening", not "it can never catch up".
+  A late crossover after epoch 101 has not been excluded, only made
+  unattractive to look for.
+* **One seed.** `hopper_gpu_t32` showed this task's seed spread is bimodal.
+  The separation here (76% on training return) is much larger than the
+  reference's own two-seed spread (8-15%), which is why one seed is being
+  treated as sufficient for a negative — but it is one seed.
+* **The two eval excursions at epochs 71-75 are unexplained.** They are almost
+  certainly the 16-episode mean-action eval landing on a lucky design sample,
+  since the training distribution does not move across them, but nobody looked
+  at the designs. `models/epoch_0100.p` is on disk if someone wants to.
+* **The claim "the port's gains are design-side" is an inference**, from the
+  fact that removing the design-tower over-stepping removes almost all of the
+  learning. **No per-tower measurement was made.** Logging the parameter delta
+  or gradient norm per tower per epoch would turn it into a measurement and
+  costs one restart.
+* **The `batch_design` implementation is gated for the permutation only.** It
+  is not gated against their optimiser: `gate_dense_policy.py` still does not
+  drive one PPO step in both codebases and compare weights. That gate is now
+  two sections old as "the cheapest missing gate" and it is the thing that
+  would have caught this one before 2.76 GPU-hours went into it.
+* **Nothing here re-opens fp32, the environment, the sampler shape, or the
+  batch size.** Those were settled in the previous section and this run did
+  not touch them.
+
+### The next experiment, cheapest first
+
+1. **Compare a SAMPLED rollout from identical weights, both codebases.**
+   Export one randomly-initialised policy, roll ~200 episodes with sampled (not
+   mean) actions through their `hopper` env and through the port's, and compare
+   the episode-length histogram and mean `dx/dt`. Minutes, no GPU-hours, no
+   training. It targets the 28.5-against-34.9 discrepancy directly, and every
+   existing gate is blind to it because they all drive mean actions.
+   `end_probe.py` already loads their weights into the port and already has a
+   `--mean-action` switch to turn off.
+2. **Log the per-tower parameter delta and gradient norm per epoch**, then
+   re-read 20 epochs of either arm. Turns "the port's gains are design-side"
+   into a measurement and says outright whether the execution tower is learning.
+3. **The one-optimiser-step cross-codebase gate.** Same batch into their
+   `update_policy` and the port's `update`, compare per-tower weight deltas.
+   Still the only thing that would catch another `batch_design`-shaped omission.
+
+Two more seeds is **not** on this list yet. The separation being chased is a
+factor of 20, and three cheap, non-training diagnostics are unspent.
+
+### What is running
+
+* **`port_s1` (pid 992213), epoch ~985 of 1000, still training WITH the bug.**
+  It is the matched `batch_design`-off control for everything above and it is
+  the only arm that has ever gone past epoch 101. **Not stopped — that is the
+  owner's call.** Its continued value: it is ~15 epochs from finishing a
+  complete 1,000-epoch curve, which is the reference-shaped artefact to compare
+  against, and stopping it now buys back almost nothing. Its cost: ~0.8 GB
+  idle, ~3.4 GB mid-epoch on a 20 GB card.
+* `port_s1_bd` — **ended cleanly** at epoch 101 via `/tmp/stop_t2a_port_s1_bd`.
+* `train_soccer2v2_warp` (D1, pid 3595703) — untouched, ~1.3 GB.
+
+**Card**: `port_s1_bd` used ~0.9 GB between epochs and **4.5 GB at the
+mid-epoch peak** (torch `gpu_mib` 3,416). With `port_s1` and the D1 run the
+card peaked at ~9.3 GB of 20 GB. Nothing was killed; no CUDA process was
+wrapped in `timeout`.
+
+### Files added or changed
+
+| file | what |
+|---|---|
+| `t2a_port/train_t2a.py` | one startup log line recording `run`/`cfg`/`seed`/`batch_design`/`dtype`, so an arm is identifiable from its own log |
+| `runs/t2a_port/port_s1_bd/` | the 101-epoch `batch_design`-on arm, `epoch_0100.p` + `stopped.p` |

@@ -5,9 +5,11 @@ happens at startup and there is no way in afterwards. But every trainer here
 already writes its history to disk, so the history can be replayed into a run
 and then tailed, which gets to the same place.
 
-Two sources, because the three tracks log differently:
+Three sources, because the tracks log differently:
 
   * **`--json`** — our D2 trainers' `log.json` (`{"args": ..., "iters": [...]}`).
+  * **`--t2a-log`** — a Transform2Act stdout log, ours or theirs. Steps by
+    epoch and derives episode length; see `ship_t2a`.
   * **`--tb`** — a TensorBoard event directory, which is what Transform2Act and
     CompetEvo's own code write. `wandb sync --sync-tensorboard` handles those
     natively and is the better tool; this path exists for when you want the
@@ -30,6 +32,18 @@ import json
 import os
 import sys
 import time
+
+
+def _scalar(v):
+    """A `--config k=v` value -> the narrowest type it plausibly is."""
+    if v in ("True", "False"):
+        return v == "True"
+    for cast in (int, float):
+        try:
+            return cast(v)
+        except ValueError:
+            pass
+    return v
 
 
 def flat(row, prefix=""):
@@ -107,38 +121,121 @@ def ship_t2a(args):
         902  T_sample 14.53  T_update 55.76  T_eval 5.46  ETA 2:02:28
              train_R 8.71  train_R_eps 8059.62  exec_R 9.32
              exec_R_eps 9324.26  hopper_gpu
+
+    Three things this does beyond transcribing that line, all of them needed to
+    put the port and the reference on one chart:
+
+    * **Episode length is derived**, `X_R_eps / X_R` -> `t2a/train_ep_len` and
+      `t2a/exec_ep_len`. Both codebases print reward-per-episode and
+      reward-per-step and neither prints length, but length is the whole D3
+      argument: the reference reaches the 1,000-step limit while the port sits
+      near 108. Checked against the port's own `train_len`, which it does log:
+      epoch 999 of `port_s1` gives 477.30 / 4.40 = 108.5 against a logged 108.4.
+    * **The port's JSON sidecar line** (`{"epoch": ..., "train_len": ...}`,
+      which `train_t2a.py` writes after each monitor line) is parsed too, under
+      a `port/` prefix. The reference has no counterpart, so these keys are
+      simply absent on reference runs.
+    * **Rows are buffered and flushed in epoch order.** A resumed run re-logs
+      epochs it already did, so the epoch column jumps BACKWARDS once mid-file;
+      every long reference log here has exactly one such jump. wandb drops a
+      row whose step is behind the current one, so streaming these straight
+      through silently loses everything after the resume. Buffering also makes
+      last-write-wins for a re-logged epoch explicit rather than incidental.
+
+    The step is always the epoch, which is what makes port and reference
+    overlay -- `--step-key` is a `--json` option and is ignored here.
     """
     import re
     import wandb
     name = args.name or os.path.basename(args.t2a_log).replace(
         "results_", "t2a_").replace(".log", "")
-    run = wandb.init(project=args.project, name=name, id=name,
-                     tags=args.tags or ["D3"], resume="allow")
-    print(f"[ship] {run.url}")
-    # `ETA 2:02:28` is a duration, not a number; everything else is a float.
-    pair = re.compile(r"([A-Za-z_]+)\s+(-?\d+\.?\d*)(?=\s|$)")
-    # A resume re-logs epochs it has already done; the LAST value for an epoch
-    # is the live one, and wandb keeps the last write at a given step anyway.
-    seen = set()
 
-    def push(fh):
-        n = 0
+    # `train_t2a.py` prints this at startup so the arm is recoverable from the
+    # log alone. The reference has no equivalent and neither do port runs from
+    # before it was added, hence `--config`.
+    startup = re.compile(
+        r"^run\s+(?P<run>\S+)\s+cfg\s+(?P<cfg>\S+)\s+seed\s+(?P<seed>\d+)"
+        r"\s+batch_design\s+(?P<batch_design>True|False)"
+        r".*?dtype\s+(?P<dtype>\S+)")
+
+    cfg = {}
+    with open(args.t2a_log) as f:
+        for line in f:
+            m = startup.match(line)
+            if m:
+                cfg = dict(m.groupdict())
+                cfg["seed"] = int(cfg["seed"])
+                cfg["batch_design"] = cfg["batch_design"] == "True"
+                print(f"[ship] startup line: {cfg}")
+                break
+    for kv in args.config:
+        k, _, v = kv.partition("=")
+        cfg[k] = _scalar(v)
+
+    run = wandb.init(project=args.project, name=name, id=name,
+                     tags=args.tags or ["D3"], config=cfg, notes=args.notes,
+                     resume="allow")
+    print(f"[ship] {run.url}")
+    # Epoch is logged as a metric as well as being the step, so the workspace
+    # can name its x-axis instead of showing an anonymous "Step".
+    wandb.define_metric("epoch")
+    wandb.define_metric("*", step_metric="epoch")
+
+    # `ETA 2:02:28` is a duration, not a number; everything else is a float.
+    # `ETA 1 day, 6:35:40` DOES look like `key value` for its first token, so
+    # ETA is dropped by name rather than left to the regex.
+    pair = re.compile(r"([A-Za-z_]+)\s+(-?\d+\.?\d*)(?=\s|$)")
+    monitor = re.compile(r"^(\d+)\t(.*)$")
+    sidecar = re.compile(r'^\s*(\{.*"epoch".*\})\s*$')
+
+    def parse(fh, rows):
+        """Lines -> {epoch: flat row}. A later line for an epoch wins."""
         for line in fh:
-            m = re.match(r"^(\d+)\t(.*)$", line)
-            if not m:
+            m = monitor.match(line)
+            if m:
+                epoch = int(m.group(1))
+                row = {k: float(v) for k, v in pair.findall(m.group(2))
+                       if k != "ETA"}
+                if not row:
+                    continue
+                d = rows.setdefault(epoch, {})
+                d.update({f"t2a/{k}": v for k, v in row.items()})
+                # Neither codebase prints episode length; both print the two
+                # numbers whose ratio is it.
+                for tag in ("train", "exec"):
+                    r, r_eps = row.get(f"{tag}_R"), row.get(f"{tag}_R_eps")
+                    if r_eps is not None and r is not None and abs(r) > 1e-9:
+                        d[f"t2a/{tag}_ep_len"] = r_eps / r
                 continue
-            epoch = int(m.group(1))
-            row = {k: float(v) for k, v in pair.findall(m.group(2))}
-            if not row:
-                continue
-            wandb.log({f"t2a/{k}": v for k, v in row.items()}, step=epoch)
-            seen.add(epoch)
+            m = sidecar.match(line)
+            if m:
+                try:
+                    blob = json.loads(m.group(1))
+                except json.JSONDecodeError:
+                    continue
+                epoch = blob.pop("epoch", None)
+                if epoch is None:
+                    continue
+                rows.setdefault(int(epoch), {}).update(flat(blob, "port/"))
+        return rows
+
+    last = [-1]
+
+    def flush(rows):
+        n = 0
+        for epoch in sorted(rows):
+            if epoch <= last[0]:
+                continue        # already sent; wandb would drop it anyway
+            wandb.log({**rows[epoch], "epoch": epoch}, step=epoch)
+            last[0] = epoch
             n += 1
         return n
 
     fh = open(args.t2a_log)
-    n = push(fh)
-    print(f"[ship] backfilled {n} epochs from {args.t2a_log}", flush=True)
+    rows = parse(fh, {})
+    n = flush(rows)
+    print(f"[ship] backfilled {n} epochs (through {last[0]}) "
+          f"from {args.t2a_log}", flush=True)
 
     if args.follow:
         # Tail from where the backfill stopped, so a growing log costs one
@@ -147,10 +244,10 @@ def ship_t2a(args):
         idle = 0
         while idle < args.idle_giveup:
             time.sleep(args.poll)
-            got = push(fh)
+            got = flush(parse(fh, {}))
             if got:
                 idle = 0
-                print(f"[ship] +{got} epochs (through {max(seen)})", flush=True)
+                print(f"[ship] +{got} epochs (through {last[0]})", flush=True)
             else:
                 idle += args.poll
                 fh.seek(fh.tell())      # clear EOF so the next read sees growth
@@ -176,8 +273,16 @@ def main():
     p.add_argument("--name", default=None, help="wandb run name AND id")
     p.add_argument("--project", default="creature-soccer")
     p.add_argument("--tags", nargs="*", default=[])
+    p.add_argument("--config", nargs="*", default=[], metavar="K=V",
+                   help="extra wandb config entries. For --t2a-log these fill "
+                        "in the arm for a log written before train_t2a.py "
+                        "started printing its startup line, and override it "
+                        "where both are present")
+    p.add_argument("--notes", default=None, help="wandb run notes")
     p.add_argument("--step-key", default="steps",
-                   help="row field to use as the wandb step")
+                   help="row field to use as the wandb step (--json only; "
+                        "--t2a-log always steps by epoch, which is what makes "
+                        "port and reference runs overlay)")
     p.add_argument("--follow", action="store_true")
     p.add_argument("--poll", type=float, default=30.0)
     p.add_argument("--idle-giveup", type=float, default=3600.0,

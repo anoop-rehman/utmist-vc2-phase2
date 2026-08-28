@@ -37,6 +37,10 @@ class Soccer2v2Renderer:
         assert self.model.nq == env.model.nq, "render model qpos layout differs"
         self.data = mujoco.MjData(self.model)
         self.renderer = mujoco.Renderer(self.model, height=height, width=width)
+        # Kept so callers that tile several panels can read the panel size off
+        # the renderer instead of passing it a second time and letting the two
+        # disagree.
+        self.width, self.height = width, height
         self.topdown_id = int(mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_CAMERA, "topdown"))
         # A broadcast-style free camera: behind the -y touchline, elevated,

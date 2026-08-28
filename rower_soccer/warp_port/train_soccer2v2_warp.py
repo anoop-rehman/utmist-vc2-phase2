@@ -621,6 +621,22 @@ def make_eval(args, seed=7):
     return env, Soccer2v2Renderer(env)
 
 
+def make_bmw(args, seed=7):
+    """`--video-worlds` env + renderer for the best/median/worst clip.
+
+    Same build-once discipline as `make_eval`, and for the same reason: each
+    env allocates its own mujoco_warp Data and captures its own CUDA graph,
+    neither of which `empty_cache()` returns. One env held for the run is a
+    fixed cost; one per video is a leak with a nice name.
+    """
+    os.environ.setdefault("MUJOCO_GL", "egl")
+    from rower_soccer.warp_port.probe_soccer2v2 import Soccer2v2Renderer
+    env = make_env(args, num_worlds=args.video_worlds, seed=seed,
+                   use_graph=True)
+    w, h = args.video_panel
+    return env, Soccer2v2Renderer(env, width=w, height=h)
+
+
 @torch.no_grad()
 def render_clip(env, ren, ac, path, seconds=15.0, deterministic=True):
     """One world, deterministic (mean-action) play, rendered top-down.
@@ -644,6 +660,48 @@ def render_clip(env, ren, ac, path, seconds=15.0, deterministic=True):
         for f in frames:
             wr.append_data(f)
     return path, env.match_stats()
+
+
+def render_best_median_worst(env, ren, ac, path, rank_key="goals",
+                             deterministic=True, seed=0):
+    """One full match across `env.n` worlds; film the best, median and worst.
+
+    Ranked by GOALS, not by reward. Under symmetric self-play the team reward
+    is zero-sum and one shared policy plays both sides, so per-world reward is
+    ~0 by construction and would rank noise. Goals (tie-broken by how far the
+    ball actually travelled) is what separates a lively match from a dead one,
+    which is the thing a human watching the clip wants to see.
+
+    Reuses `eval_soccer2v2`: the same rollout-then-render-from-qpos path the
+    final evaluation uses, so the in-loop clip and the end-of-run evaluation
+    cannot drift apart. Recording qpos rather than frames is what makes three
+    panels affordable -- frames for a whole match across every world would be
+    tens of GB.
+    """
+    from rower_soccer.warp_port.eval_soccer2v2 import render_grid, run_matches
+
+    rows, qpos = run_matches(env, ac, 1, deterministic=deterministic,
+                             record=True, seed=seed)
+    order = sorted(range(len(rows)),
+                   key=lambda i: (rows[i][rank_key], rows[i]["ball_path"]))
+    picks = []
+    for label, k in (("worst", 0), ("median", len(order) // 2),
+                     ("best", len(order) - 1)):
+        r = rows[order[k]]
+        picks.append({"match": 0, "world": r["world"], "rank": k,
+                      "title": f"{label}  ({r['home']:.0f}-{r['away']:.0f})",
+                      "sub": f"ball {r['ball_path']:.0f} m   "
+                             f"upright {r['upright']:.2f}"})
+    render_grid(env, qpos, picks, path, panel=(ren.width, ren.height),
+                cols=3, ren=ren, pip=False)
+    n = float(len(rows))
+    return path, {
+        "goals_per_match": sum(r["goals"] for r in rows) / n,
+        "upright": sum(r["upright"] for r in rows) / n,
+        "ball_path": sum(r["ball_path"] for r in rows) / n,
+        "throw_ins": sum(r["throw_ins"] for r in rows) / n,
+        "worlds": len(rows),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -774,8 +832,37 @@ def build_parser():
     # -- plumbing -----------------------------------------------------------
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--ckpt-secs", type=float, default=900.0)
-    p.add_argument("--video-secs", type=float, default=1800.0,
+    p.add_argument("--video-secs", type=float, default=900.0,
                    help="0 disables in-loop video")
+    p.add_argument("--video-worlds", type=int, default=32,
+                   help="worlds in the video rollout -- sampled MORE widely "
+                        "than you might expect, because world count is nearly "
+                        "free here. Measured on this box under contention: "
+                        "32 worlds / 800x600 panels cost 60.6 s per event and "
+                        "8 worlds / 480x360 cost 49.3 s. Cutting worlds 4x "
+                        "barely moved it, because a match is 1,800 SEQUENTIAL "
+                        "env steps whatever the batch width, and the GPU "
+                        "absorbs the width. So the lever on cost is the "
+                        "CADENCE (--video-secs), not this; and since more "
+                        "worlds buy a better-sampled best/median/worst for "
+                        "almost nothing, take them.")
+    p.add_argument("--video-panel", type=int, nargs=2, default=(640, 480),
+                   metavar=("W", "H"))
+    p.add_argument("--video-rank", default="goals",
+                   help="per-world key to rank best/median/worst on. NOT "
+                        "reward: self-play reward is zero-sum and ~0 per world")
+    p.add_argument("--video-mode", default="bmw", choices=("bmw", "single"),
+                   help="bmw = best/median/worst over --video-worlds; single "
+                        "= the old one-world clip")
+    p.add_argument("--stop-file", default="",
+                   help="touch this path to end the run cleanly at the next "
+                        "iteration boundary. NEVER kill a CUDA process under "
+                        "MPS -- killing one client can corrupt the live "
+                        "others, which has destroyed two runs on this project. "
+                        "Without this flag the only way to stop a run early is "
+                        "the dangerous one, which is why it exists.")
+    p.add_argument("--wandb", action="store_true")
+    p.add_argument("--wandb-project", default="creature-soccer")
     p.add_argument("--clip-secs", type=float, default=15.0)
     p.add_argument("--resume", action="store_true")
     p.add_argument("--gcs-bucket", default="",
@@ -913,6 +1000,20 @@ def run(args):
            "warm_start_loaded_n": None if warm is None else len(warm["loaded"]),
            "iters": list(rows_prior)}
 
+    wb = None
+    if args.wandb:
+        try:
+            import wandb
+            # id = run name so a resume REATTACHES to the same wandb run
+            # instead of opening a second one beside it.
+            wb = wandb.init(project=args.wandb_project, name=args.run_name,
+                            id=args.run_name, resume="allow", config=config)
+            print(f"[setup] wandb: {wb.url}", flush=True)
+        except Exception as e:                          # noqa: BLE001
+            print(f"[setup] wandb DISABLED ({e!r}) -- training continues",
+                  flush=True)
+            wb = None
+
     def flush_log():
         tmp = log_path + ".tmp"
         with open(tmp, "w") as f:
@@ -920,12 +1021,17 @@ def run(args):
         os.replace(tmp, log_path)
 
     eval_pair = None
+    bmw_pair = None
     t0 = time.perf_counter()
     deadline = t0 + args.minutes * 60.0 if args.minutes > 0 else float("inf")
     last_ckpt = last_video = t0
     last_steps, last_t = start_steps, t0
     it = 0
     while trainer.total_steps < args.steps and time.perf_counter() < deadline:
+        if args.stop_file and os.path.exists(args.stop_file):
+            print(f"[setup] stop file {args.stop_file} seen -- finishing "
+                  f"cleanly at iter {it}", flush=True)
+            break
         if args.iters and it >= args.iters:
             break
         if args.shaping_anneal_steps > 0:
@@ -951,6 +1057,16 @@ def run(args):
             log["iters"].append(rec)
             flush_log()
             m = trainer.last_match or {}
+            if wb is not None:
+                flat = {f"train/{k}": v for k, v in stats.items()
+                        if isinstance(v, (int, float))}
+                flat.update({f"match/{k}": v for k, v in m.items()
+                             if isinstance(v, (int, float))})
+                flat.update({"train/fps": fps,
+                             "train/shaping_scale": env.shaping_scale,
+                             "train/matches": trainer.matches,
+                             "train/diverged": trainer.n_diverged})
+                wb.log(flat, step=trainer.total_steps)
             print(f"[monitor] it={it} step={trainer.total_steps:,} "
                   f"fps={fps:,.0f} rew={stats['rew_mean']:+.5f} "
                   f"pg={stats.get('pg', float('nan')):+.4f} "
@@ -980,10 +1096,31 @@ def run(args):
             vp = os.path.join(run_dir, "videos",
                               f"step_{trainer.total_steps:012d}.mp4")
             try:
-                if eval_pair is None:
-                    eval_pair = make_eval(args)
-                _, vst = render_clip(*eval_pair, ac, vp, seconds=args.clip_secs)
-                print(f"[monitor] video {vp} {vst}", flush=True)
+                tv = time.perf_counter()
+                if args.video_mode == "bmw":
+                    if bmw_pair is None:
+                        bmw_pair = make_bmw(args)
+                    _, vst = render_best_median_worst(
+                        *bmw_pair, ac, vp, rank_key=args.video_rank,
+                        seed=int(trainer.total_steps % 100000))
+                else:
+                    if eval_pair is None:
+                        eval_pair = make_eval(args)
+                    _, vst = render_clip(*eval_pair, ac, vp,
+                                         seconds=args.clip_secs)
+                dtv = time.perf_counter() - tv
+                # Cost is PRINTED, not estimated: the whole point of the
+                # cadence knob is that someone can see what it is spending.
+                print(f"[monitor] video {vp} {vst} "
+                      f"cost={dtv:.1f}s ({100 * dtv / args.video_secs:.1f}% "
+                      f"of the {args.video_secs:.0f}s cadence)", flush=True)
+                if wb is not None:
+                    import wandb
+                    wb.log({"video/match": wandb.Video(vp, format="mp4"),
+                            "video/cost_s": dtv,
+                            **{f"video/{k}": v for k, v in vst.items()
+                               if isinstance(v, (int, float))}},
+                           step=trainer.total_steps)
             except Exception as e:                     # noqa: BLE001
                 print(f"[monitor] video FAILED: {e!r}", flush=True)
 

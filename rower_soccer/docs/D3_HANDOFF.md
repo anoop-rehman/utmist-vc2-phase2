@@ -21,14 +21,18 @@ or an explicit statement that something was not tested.*
 bottom supersede the 2026-08-14 text above wherever they disagree — in
 particular decision 4's "~3.8x" and the "step 1 of 6" state.*
 
-***Read the LAST section first if you are picking up 3e.** "Update 2026-08-27
-(second)" settles that fp32 is not why the port under-trains and shows that the
-gap is episode LENGTH rather than reward rate; both still hold. It then names
-`agent_specs.batch_design` as the leading cause, and **"Update 2026-08-28" ran
-that experiment and refutes it** — the fix is correct, matches their code, and
-makes training worse. Read 2026-08-28 for what the lead is now (a
-sampled-rollout discrepancy that predates the first gradient step) and for
-three cheap diagnostics that have not been spent.*
+***Read the LAST section first if you are picking up 3e.* "Update 2026-08-28
+(second)" has the ROOT CAUSE and it supersedes the diagnosis in every section
+above it: the port's `IndexLinear` parameters were allocated as `torch.zeros`
+and never initialised, which makes the stack's gradient identically zero, so
+`port_s1`, `port_s1_bd` and `port_s1_fp64` all trained a policy that was a
+per-`body_index` constant. 48 of `port_s1`'s 53 trainable policy tensors are bit-identical
+between epoch 100 and epoch 1000. **Every training-curve comparison in the
+2026-08-27 and 2026-08-28 sections was measuring a frozen policy**; their
+non-training measurements (fp32, the env, the sampler, the `batch_design`
+permutation) all still stand. The "sampled-vs-mean asymmetry" that 2026-08-28
+named as the lead is also refuted there, by measurement: it was their `train_R`
+denominator including six zero-reward design steps.*
 
 ## The two training runs
 
@@ -985,6 +989,14 @@ cd /workspace/Transform2Act && source env-gpu.sh
 cd /workspace/utmist-vc2-phase2
 PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_two_stage --check --backend cpu    # 15/15
 PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_two_stage --check --backend warp   # 15/15
+
+# gate 5 -- the INITIALISATION and one optimiser step. CPU-only, seconds, and
+# it is the only one that does not begin by loading their checkpoint over the
+# port's own weights. Added 2026-08-28; see the last section.
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_policy_init       # 9/9
+
+# gate 6 -- the batch_design permutation
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_batch_design      # 9/9
 ```
 
 ---
@@ -1430,6 +1442,16 @@ do, and its untrained design distribution matches theirs.
 
 ## Update 2026-08-28 — `batch_design` was trained, and it does NOT close the gap
 
+> **SUPERSEDED by "Update 2026-08-28 (second)".** Both arms compared below
+> trained a policy whose gradient was identically zero, so the A/B measured
+> nothing about `batch_design`. Point 4's "the port's training episodes are 6
+> steps shorter than theirs at epoch 0" is exactly the six zero-reward design
+> steps their `avg_episode_len` counts and the port's does not; the same six
+> steps are the whole of the 0.83-vs-1.00 `train_R` gap this section promoted
+> to the lead. The `batch_design` PERMUTATION is still correct (9/9) and its
+> 2.1x cheaper `T_update` still holds; its training verdict does not.
+
+
 *Written by the agent asked to run the experiment the previous section named as
 "the single next experiment". It was run. The answer is negative, and it is
 negative in a way that changes the diagnosis: the previous section's headline
@@ -1710,3 +1732,365 @@ wrapped in `timeout`.
 |---|---|
 | `t2a_port/train_t2a.py` | one startup log line recording `run`/`cfg`/`seed`/`batch_design`/`dtype`, so an arm is identifiable from its own log |
 | `runs/t2a_port/port_s1_bd/` | the 101-epoch `batch_design`-on arm, `epoch_0100.p` + `stopped.p` |
+
+## Update 2026-08-28 (second) — ROOT CAUSE: the port's policy heads were never initialised
+
+*Written by the agent asked to chase the "sampled-vs-mean asymmetry" lead. The
+lead is **refuted** — it was an arithmetic artefact, and the section below shows
+the measurement that kills it. The real defect was found in the same pass and it
+is not subtle: **every `IndexLinear` in the port's policy was allocated as
+`torch.zeros` and never initialised**, so all three towers were mathematically
+frozen from epoch 0. `port_s1` trained for 1,000 epochs with a policy that was a
+per-`body_index` constant.*
+
+The short version:
+
+1. **The lead is dead.** Their `train_R` is `LoggerRL.avg_reward` = total reward
+   over **all logged steps**, and `agent.sample_worker` logs the 5 skeleton
+   steps and the 1 attribute step too (reward 0 each). Their denominator is 6
+   larger per episode than the port's. 28.93 / (34.86 − 6) = **1.0024**. Their
+   own log has said so all along: `exec_R 1.00` at epoch 0.
+2. Measured, not derived: 200 sampled episodes in **their** env give **28.77
+   exec steps/ep**, **R per exec step 0.9865**, **mean dx −0.0031 m**. 200
+   sampled episodes in **the port at identical weights** give **28.9**, **0.98**,
+   **−0.0056 m**. The length percentiles agree at every decile. There is no
+   backwards drift on either side and there never was.
+3. **`dense_policy.IndexLinear.__init__` allocates `W`/`b` as `torch.zeros` and
+   stops.** Their `design_opt/models/jsmlp.py:14-17` allocates the same zeros
+   and then calls `reset_parameters()` on the next line unless `zero_init`
+   (which no hopper cfg sets). The port dropped that call. It also silently
+   ignored `rescale_linear: true`, which every hopper cfg sets on all three
+   index MLPs.
+4. **A zero `IndexLinear` is dead, not small.** With `W = 0` the layer emits
+   `b`; its input gradient `W^T delta` is 0; and `dL/dW = delta a^T` is 0 too
+   because the preceding activation `a = tanh(0)` is 0. Only the LAST layer's
+   bias ever receives a gradient. The GNN feeding the stack receives none. The
+   policy is `ind_mlp.linear.b[body_index]` — **a constant per body type,
+   independent of the observation, forever, in all three towers.**
+5. **Confirmed on the finished run.** Diffing `port_s1/models/epoch_0100.p`
+   against `epoch_1000.p`: **48 of its 53 trainable policy tensors are bit-identical** after
+   900 epochs. The five that moved are `attr_action_log_std`,
+   `control_action_log_std`, and the three `ind_mlp.linear.b`. Every GNN weight
+   and every `IndexLinear.W` is exactly its value at init.
+
+### The lead, refuted — the arithmetic, then the measurement
+
+`khrylib/rl/core/logger_rl.py:36` logs `reward` on every step;
+`design_opt/utils/logger.py:22` logs `exec_reward` only when
+`info['stage'] == 'execution'`. `khrylib/rl/agents/agent.py:70` calls
+`logger.step` unconditionally inside the episode loop, i.e. for the 5 skeleton
+steps and the 1 attribute step as well. So
+
+    their train_R      = total_reward / (exec_steps + 6*episodes)
+    their avg_ep_len   = exec_steps/ep + 6
+    the port's train_R = total_reward / exec_steps        (execution steps only)
+
+Their epoch 0, seed 2: `train_R 0.83`, `train_R_eps 28.72` → 34.6 total steps →
+**28.6 exec steps**, **1.004 per exec step**. The port's epoch 0: 28.5 steps,
+1.00 per step. **They agree.** The "−0.17 m/s of backwards drift" was 0.8163
+being read as a per-execution-step rate when it is a per-total-step rate.
+
+Their own log carries the direct refutation on line 1 of every reference run:
+`exec_R 1.00` — mean-action eval, averaged over execution steps only, zero
+displacement — the same 1.00 the port was being faulted for.
+
+The measurement, from identical weights, sampled (not mean) actions, 200
+episodes each:
+
+```sh
+# theirs: also writes the fresh random init to an npz so the port loads it
+cd /workspace/Transform2Act && source env-gpu.sh
+.venv-gpu/bin/python /workspace/utmist-vc2-phase2/rower_soccer/t2a_port/\
+their_sampled_probe.py --episodes 200 --seed 1 --npz /tmp/t2a_init_s1.npz
+
+# ours, same weights, sampled
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. MUJOCO_GL=egl .venv/bin/python -m rower_soccer.t2a_port.end_probe \
+    --their-npz /tmp/t2a_init_s1.npz --worlds 200 --seed 1
+```
+
+| | theirs (mujoco-py 2.1, fp64) | port (mujoco_warp, fp32) |
+|---|---|---|
+| exec steps/ep | 28.77 | 28.9 |
+| median / max | 27 / 71 | 26 / 107 |
+| pct 10/25/50/75/90 | 14 / 19 / 27 / 38 / 43 | 15 / 19 / 26 / 38 / 44 |
+| exec return/ep | 28.38 | 28.2 |
+| **R per exec step** | **0.9865** | **0.98** |
+| **mean dx/episode** | **−0.0031 m** (sd 0.0885) | **−0.0056 m** (sd 0.0908) |
+| bodies/design | 3.48 | 3.69 |
+
+**The sampled distributions match.** There is no sampled-vs-mean asymmetry, and
+the port's physics, design stage, reward and done condition are faithful under
+sampling as well as under mean actions.
+
+*Consequence for the CompetEvo note.* `NIGHT_2026-08-11.md:300`'s "their ant
+slides 1.08 m backwards and ours does not" is a **separately measured** claim
+(both ants held still for 500 steps) and this section does not touch it. But the
+"two ports, one shared engine-level root cause" story that joined them is gone:
+the T2A half of it was arithmetic. I searched the MuJoCo changelog and release
+notes for a documented 2.1→3.x change that would cause spurious sliding and
+found nothing that fits ([changelog](https://mujoco.readthedocs.io/en/stable/changelog.html),
+[releases](https://github.com/google-deepmind/mujoco/releases),
+[MuJoCo 3 discussion](https://github.com/google-deepmind/mujoco/discussions/1101)) —
+3.0's headline changes are MJX, SDF collisions and flex, not contact-solver
+behaviour. **I did not re-measure the ant claim.** Whoever picks it up should
+re-derive it the way this section re-derived the hopper one before assuming it
+is physics.
+
+### The defect
+
+`rower_soccer/t2a_port/dense_policy.py`, as written before this section:
+
+```python
+class IndexLinear(nn.Module):
+    def __init__(self, in_dim, out_dim, max_index=256):
+        super().__init__()
+        self.out_dim = out_dim
+        self.W = nn.Parameter(torch.zeros(max_index, out_dim, in_dim))
+        self.b = nn.Parameter(torch.zeros(max_index, out_dim))
+        # <- their reset_parameters() call belongs here and was not ported
+```
+
+against `design_opt/models/jsmlp.py:8-30`:
+
+```python
+        self.W = nn.Parameter(torch.zeros(max_index, out_dim, input_dim))
+        self.b = nn.Parameter(torch.zeros(max_index, out_dim))
+        if not zero_init:
+            self.reset_parameters()      # kaiming_uniform_(W, a=sqrt(5)); uniform_(b)
+```
+
+and `jsmlp.py:54-56`, also not ported:
+
+```python
+        if rescale_linear:
+            self.linear.W.data.mul_(0.1)
+            self.linear.b.data.mul_(0.0)
+```
+
+`hopper_gpu_s2.yml` sets `rescale_linear: true` on `skel_index_mlp`,
+`attr_index_mlp` and `control_index_mlp`, and sets `zero_init` nowhere.
+Their critic's `value_head` is likewise rescaled (`transform2act_critic.py:36`
+-> `design_opt/utils/tools.py:19-21`), which the port also missed.
+
+**`gnn_playground.py:138-140` — the 3c prototype of the same class — HAS the
+kaiming init.** It was dropped when the class was re-written into
+`dense_policy.py` for 3d step 1.
+
+### Why every gate missed it, and it is structural, not bad luck
+
+`gate_dense_policy.py` (18/18), `gate_batched_exec.py` (11/11),
+`gate_two_stage.py`, `gate_batch_design.py` (9/9) and `end_probe.py --their-npz`
+all begin by loading **their** checkpoint with `strict=True`. That overwrites
+all 65 tensors of the policy, so every one of them measures the port's forward pass on
+weights the port did not produce. **No gate ever exercised the port's own
+initialisation, and no gate ever took a gradient step.** A port can be exactly
+right on their weights and structurally untrainable on its own, and that is what
+this one was.
+
+This is also why the fp32, environment, sampler-shape and `batch_design`
+investigations all came back clean: they were all correct. The failure was
+upstream of every one of them.
+
+### The measurement that settles the previous section's open inference
+
+"The port's gains are design-side" was recorded as an inference with no
+per-tower measurement. It now has one, and it was stronger than the inference:
+**no tower was learning.** The apparent design-side movement was the three
+`ind_mlp.linear.b` vectors and the two `log_std`s. `control_action_log_std` went
+from 0 to **2.05** (sigma 1 -> 7.8) and `attr_action_log_std` from −2.3 to
+**5.99** (sigma 0.1 -> 400): with a state-independent mean, the only thing PPO
+could do was widen the search distribution, and it did, for 1,000 epochs.
+
+```sh
+cd /workspace/utmist-vc2-phase2
+.venv/bin/python - <<'PY'
+import torch
+a = torch.load('runs/t2a_port/port_s1/models/epoch_0100.p', map_location='cpu', weights_only=False)['policy']
+b = torch.load('runs/t2a_port/port_s1/models/epoch_1000.p', map_location='cpu', weights_only=False)['policy']
+moved = [k for k in a if torch.is_tensor(a[k]) and a[k].is_floating_point()
+         and 'norm.' not in k and not torch.equal(a[k], b[k])]
+print(len(moved), 'of', sum(1 for k in a if torch.is_tensor(a[k]) and a[k].is_floating_point() and 'norm.' not in k), 'moved:', moved)
+PY
+# 5 of 53 moved: ['attr_action_log_std', 'control_action_log_std',
+#                 'skel.ind_mlp.linear.b', 'attr.ind_mlp.linear.b',
+#                 'control.ind_mlp.linear.b']
+```
+
+### The fix, and the gate that would have caught it
+
+`dense_policy.py`: `IndexLinear` gains `zero_init` and their `reset_parameters`
+verbatim (including the fact that `_calculate_fan_in_and_fan_out` on a 3-D
+`[max_index, out, in]` tensor gives `fan_in = out_dim * in_dim`, which is what
+their runs used — reproduced, not corrected); `JSMLP` gains `rescale_linear` and
+`zero_init`; `_Tower` reads both out of the cfg; the critic's `value_head` is
+rescaled 0.1x with a zeroed bias.
+
+`gate_policy_init.py` is new, CPU-only, seconds, **9/9**:
+
+```sh
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_policy_init
+# ALL CHECKS PASSED
+```
+
+1. no policy tensor is zero at init except the four their init sets to exactly
+   zero (three rescaled head biases, `control_log_std: 0`);
+2. per tower: hidden `W` inside the kaiming bound, head `W` at 0.1x, head `b`
+   exactly 0;
+3. per stage: the head output VARIES across observations;
+4. per tower: after **one Adam step** on a PPO surrogate, gradient norm > 0 and
+   **no parameter frozen**;
+5. **negative control** — monkeypatch `reset_parameters` back to a no-op and
+   assert the policy IS dead. It reports `19 tensors at zero, head std 0.0,
+   48/53 frozen after one Adam step`, and the five that move are **exactly the
+   five `port_s1` moved over 900 epochs**: the two `log_std`s and the three
+   `ind_mlp.linear.b`. The control reproduces the production run's signature
+   from first principles, on a synthetic batch, in seconds.
+
+`gate_dense_policy.py` re-run after the fix: still **18/18** (it loads their
+checkpoint, so the init change is invisible to it — which is the point).
+
+`train_t2a.py` now logs, per epoch, per tower: `g_{skel,attr,control}` (mean
+gradient norm per minibatch, taken BEFORE the global clip so a clipped norm
+cannot hide which tower produced it), `d_*` (max parameter delta over the epoch)
+and `frozen_*` (how many of that tower's tensors did not move at all). On the
+old code `frozen_control` would have read 16 of that tower's 17 parameters every epoch for 1,000 epochs.
+
+### The confirmation arm
+
+`runs/t2a_port/port_s1_init`, argv identical to `port_s1_bd` except the run
+name and `--epochs 26`, i.e. `batch_design` ON (their behaviour) and everything
+else matched:
+
+```sh
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. MUJOCO_GL=egl setsid nohup .venv/bin/python \
+    -m rower_soccer.t2a_port.train_t2a --cfg hopper_gpu_s2 --run port_s1_init \
+    --outdir runs/t2a_port --seed 1 --eval-worlds 16 --max-worlds 1024 \
+    --mempool-mb 256 --epochs 26 --save-interval 25 \
+    --stop-file /tmp/stop_t2a_port_s1_init > runs/t2a_port/port_s1_init.log 2>&1 &
+```
+
+Training-distribution episode length (execution steps) and return per episode.
+The reference columns are `train_R_eps / train_R − 6`, i.e. their logged
+average episode length with the six design steps removed — the correction this
+section established. Reproduce it with
+`rower_soccer/t2a_port/compare_arms.py 0 5 10 15 20 25`: the port's length comes
+from its JSON sidecar's `train_len`, the reference's from
+`train_R_eps / train_R − 6`.
+
+Per epoch, training-distribution **execution episode length / `train_R_eps`**:
+
+| arm | ep 0 | ep 5 | ep 10 | ep 15 | ep 20 | ep 25 |
+|---|---|---|---|---|---|---|
+| **`port_s1_init` (FIXED)** | 28.5 / 28.5 | **53.6 / 65.5** | **78.4 / 156.5** | **76.6 / 212.8** | **77.1 / 254.1** | **83.6 / 287.2** |
+| `port_s1` (bug, bd off) | 28.5 / 28.5 | 30.5 / 36.6 | 30.6 / 42.3 | 31.6 / 53.0 | 31.9 / 63.6 | 33.2 / 75.4 |
+| `port_s1_bd` (bug, bd on) | 28.5 / 28.5 | 29.2 / 31.1 | 29.6 / 32.7 | 29.7 / 34.1 | 29.7 / 35.5 | 29.8 / 36.5 |
+| ref seed 1 | 28.9 / 28.9 | 53.9 / 73.1 | 78.0 / 150.4 | 84.8 / 217.0 | 82.3 / 267.7 | 119.8 / 341.0 |
+| ref seed 2 | 28.6 / 28.7 | 57.5 / 78.7 | 75.8 / 160.3 | 83.6 / 231.1 | 91.5 / 280.8 | 159.8 / 374.7 |
+
+Block means, like for like:
+
+| arm | 0-5 | 6-12 | 13-18 | 19-25 |
+|---|---|---|---|---|
+| **`port_s1_init` (FIXED)** | **41.6 / 47.4** | **74.4 / 136.1** | **75.7 / 216.2** | **79.4 / 266.2** |
+| `port_s1` (bug, bd off) | 29.7 / 32.9 | 30.8 / 41.5 | 31.7 / 53.2 | 32.0 / 66.8 |
+| `port_s1_bd` (bug, bd on) | 29.1 / 30.0 | 29.4 / 32.3 | 30.0 / 34.7 | 29.9 / 36.0 |
+| ref seed 1 | 41.6 / 49.9 | 73.1 / 133.8 | 83.1 / 222.0 | 97.6 / 297.1 |
+| ref seed 2 | 42.5 / 51.4 | 77.3 / 150.5 | 84.6 / 234.8 | 115.8 / 314.0 |
+
+And the mean-action eval, `exec_R_eps`:
+
+| arm | ep 5 | ep 10 | ep 15 | ep 20 | ep 25 |
+|---|---|---|---|---|---|
+| **`port_s1_init` (FIXED)** | **83.4** | **198.8** | **211.1** | **311.6** | **335.8** |
+| `port_s1` (bug, bd off) | 42.3 | 43.4 | 74.7 | 93.3 | 116.7 |
+| `port_s1_bd` (bug, bd on) | 42.0 | 42.2 | 42.0 | 41.8 | 41.8 |
+| ref seed 1 | 93.5 | 211.0 | 275.6 | 335.2 | 332.7 |
+| ref seed 2 | 207.0 | 206.1 | 265.5 | 311.0 | 352.2 |
+
+**The fixed arm sits inside the reference's own two-seed spread for the first
+three blocks and 10-15% under it in 19-25, where the reference's two seeds
+themselves differ by 19% on length.** Both bugged arms sit at 29-33 steps
+throughout. On training return the fixed arm is at 85-90% of the reference
+against the bugged arms' 12-22%.
+
+The per-tower logging says the same thing directly: `frozen_skel/attr/control`
+is **0/0/0** every epoch of this run, and `g_control` climbs 0.051 -> 0.366 over
+the first nine epochs. On the old code all three would have read 16.
+
+**26 epochs is not M2.** It shows the port now moves at the reference's rate
+instead of a fifth of it. The reference's own curve is still climbing at epoch
+1,000, and nothing here predicts the final number.
+
+
+`port_s1_init` ran 26 epochs in **39 minutes** (~90 s/epoch), peaked at **3,472 MiB of torch allocation** (`gpu_mib`, ~4.6 GB device with warp's pools), ended on its own epoch
+count (`training done!`, no stop file needed), and left `models/epoch_0025.p`
+and `best.p`. Nothing was killed and no CUDA process was wrapped in `timeout`.
+The D1 self-play run (pid 3595703) was untouched throughout; the card peaked at
+about 5.9 GB of 20 GB with both live.
+
+### What is NOT tested
+
+* **26 epochs, one seed.** The confirmation arm is a fraction of a 1,000-epoch
+  reference run. What it establishes is that the port now moves at the
+  reference's early rate instead of at a fifth of it; it does **not** establish
+  the final number, and nobody should claim M2 off it. The next arm is a full
+  1,000-epoch seed.
+* **The value net was never checked for the same class of defect beyond its
+  `value_head` rescale.** Its `_MLP` and `DenseGNN` use `nn.Linear`, which
+  initialises itself, and `gate_policy_init.py` does not cover the critic at
+  all. Adding the same one-step/no-frozen-tensor check for
+  `DenseTransform2ActValue` is cheap and has not been done.
+* **`gate_policy_init.py` gates the port against ITSELF**, not against a
+  freshly-initialised policy on their side. It asserts the shape of their init
+  rule (kaiming bound, 0.1x head, zero head bias) as read out of `jsmlp.py`, not
+  a distributional comparison against 100 of their inits. That comparison would
+  be strictly better and was not built.
+* **The one-optimiser-step CROSS-CODEBASE gate is still unbuilt.** Check 4 of
+  the new gate takes one Adam step in the PORT only and asserts nothing is
+  frozen. It catches the dead-network class. It would not catch a tower that
+  moves but moves differently from theirs.
+* **`runs/t2a_port/port_s1`, `port_s1_bd` and `port_s1_fp64` are all invalid as
+  measurements of the port's learning** — every number in them was produced by
+  a frozen policy. The 2026-08-27 and 2026-08-28 conclusions built ON those runs
+  (fp32 is not the cause; the env is faithful; the sampler shape and batch size
+  are right; `batch_design` is correct and makes the update 2.1x cheaper) all
+  still stand, because each was established by a NON-training measurement. The
+  `batch_design` A/B's *training* verdict — "it makes training strictly worse" —
+  does **not** stand: it compared two frozen policies. `batch_design` should
+  stay on because it is their code, not because of that A/B.
+* **`NIGHT_2026-08-11.md:300`'s CompetEvo ant-slide claim was not re-measured**
+  here (see above).
+* **The CompetEvo port was not audited for the same missing-init defect.**
+  A grep for `nn.Parameter(torch.zeros` across `rower_soccer/` finds the pattern
+  only in `t2a_port/dense_policy.py` (now fixed) and
+  `t2a_port/gnn_playground.py` (which does call `kaiming_uniform_`), plus one
+  `log_std` in `warp_port/gate_soccer2v2_train.py` that is zero by design. That
+  is a grep, not an audit.
+
+### The next experiment
+
+1. **A full 1,000-epoch seed with the fix**, matched to `port_s1`'s argv, and
+   compare final `exec_R_eps` against the reference's 7,609 / 11,228. That is
+   now the M2 measurement and there is no cheaper diagnostic left standing in
+   front of it.
+2. Extend `gate_policy_init.py` to the critic.
+3. The cross-codebase one-optimiser-step gate, which is still the only thing
+   that would catch a tower that trains but trains differently.
+
+### Files added or changed
+
+| file | what |
+|---|---|
+| `t2a_port/dense_policy.py` | **the fix.** `IndexLinear.reset_parameters` (their kaiming init, `zero_init` honoured), `JSMLP(rescale_linear, zero_init)`, `_Tower` reads both from the cfg, critic `value_head` rescaled 0.1x / bias 0 |
+| `t2a_port/gate_policy_init.py` | **new.** 9/9, CPU-only, seconds. Init, observation-dependence, one-Adam-step-no-frozen-tensor, per tower, with a negative control that restores the bug |
+| `t2a_port/their_sampled_probe.py` | **new.** Sampled-episode census in THEIR venv: design vs execution step counts, per-exec-step reward, dx. Also exports a fresh init to npz for `end_probe --their-npz` |
+| `t2a_port/end_probe.py` | prints the exec-length percentiles, mean dx/episode and mean dx/dt, so its output reads directly against `their_sampled_probe.py`'s |
+| `t2a_port/train_t2a.py` | per-epoch, per-tower `g_*` (grad norm, pre-clip), `d_*` (max param delta), `frozen_*` (tensors that did not move) |
+| `scripts/wandb_ship.py` | `t2a/train_ep_len` subtracts the six design steps on REFERENCE logs (`--design-steps`, default 6, zeroed automatically for a port log by the presence of its JSON sidecar); the uncorrected ratio is kept as `t2a/train_ep_len_all_stages`. `exec_ep_len` is execution-only on both sides and is unchanged |
+| `t2a_port/compare_arms.py` | **new.** The five-arm training-curve table, with the reference's six design steps subtracted in one place so nobody re-derives the correction by hand |
+| `runs/t2a_port/port_s1_init/` | the 26-epoch confirmation arm |

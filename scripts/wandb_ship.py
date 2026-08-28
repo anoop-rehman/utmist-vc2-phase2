@@ -188,6 +188,13 @@ def ship_t2a(args):
     monitor = re.compile(r"^(\d+)\t(.*)$")
     sidecar = re.compile(r'^\s*(\{.*"epoch".*\})\s*$')
 
+    # How many zero-reward design steps their `avg_reward` denominator carries
+    # per episode. Set to 0 for a PORT log, whose `train_R` counts execution
+    # steps only -- decided below, from whether the file has the port's JSON
+    # sidecar, and re-decided on every re-read so `--follow` cannot latch it
+    # wrong on an empty first pass.
+    design_steps = [args.design_steps]
+
     def parse(fh, rows):
         """Lines -> {epoch: flat row}. A later line for an epoch wins."""
         for line in fh:
@@ -202,10 +209,26 @@ def ship_t2a(args):
                 d.update({f"t2a/{k}": v for k, v in row.items()})
                 # Neither codebase prints episode length; both print the two
                 # numbers whose ratio is it.
+                #
+                # `train_R` is NOT the same denominator on the two sides, and
+                # putting the raw ratio on one chart is an apples-to-oranges
+                # comparison worth 6 steps per episode. Theirs is
+                # `LoggerRL.avg_reward` = total reward over ALL logged steps,
+                # and `khrylib/rl/agents/agent.py:70` logs the 5 skeleton and 1
+                # attribute step too (reward 0 each), so `train_R_eps/train_R`
+                # is `exec_steps + skel_transform_nsteps + 1`. The port's
+                # `train_R` divides by execution steps only. `exec_R` is
+                # execution-only on BOTH sides
+                # (`design_opt/utils/logger.py:22`), so `exec_ep_len` needs no
+                # correction. See D3_HANDOFF.md, "Update 2026-08-28 (second)".
                 for tag in ("train", "exec"):
                     r, r_eps = row.get(f"{tag}_R"), row.get(f"{tag}_R_eps")
                     if r_eps is not None and r is not None and abs(r) > 1e-9:
-                        d[f"t2a/{tag}_ep_len"] = r_eps / r
+                        v = r_eps / r
+                        if tag == "train":
+                            d["t2a/train_ep_len_all_stages"] = v
+                            v -= design_steps[0]
+                        d[f"t2a/{tag}_ep_len"] = v
                 continue
             m = sidecar.match(line)
             if m:
@@ -217,6 +240,16 @@ def ship_t2a(args):
                 if epoch is None:
                     continue
                 rows.setdefault(int(epoch), {}).update(flat(blob, "port/"))
+                # Only `train_t2a.py` writes this sidecar, and only the port
+                # runs it, so seeing one identifies the log as the port's --
+                # and the port needs no correction.
+                design_steps[0] = 0
+        # A row parsed before the first sidecar line kept the reference
+        # correction; redo them now that the file's provenance is known.
+        if design_steps[0] == 0:
+            for d in rows.values():
+                if "t2a/train_ep_len_all_stages" in d:
+                    d["t2a/train_ep_len"] = d["t2a/train_ep_len_all_stages"]
         return rows
 
     last = [-1]
@@ -279,6 +312,13 @@ def main():
                         "started printing its startup line, and override it "
                         "where both are present")
     p.add_argument("--notes", default=None, help="wandb run notes")
+    p.add_argument("--design-steps", type=int, default=6,
+                   help="zero-reward design steps per episode that THEIR "
+                        "`train_R` denominator counts and the port's does not "
+                        "(skel_transform_nsteps + 1; 6 for every hopper cfg). "
+                        "Subtracted from `t2a/train_ep_len` on reference logs "
+                        "only. The uncorrected ratio is kept as "
+                        "`t2a/train_ep_len_all_stages`.")
     p.add_argument("--step-key", default="steps",
                    help="row field to use as the wandb step (--json only; "
                         "--t2a-log always steps by epoch, which is what makes "

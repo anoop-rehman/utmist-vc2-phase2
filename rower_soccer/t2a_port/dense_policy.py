@@ -150,11 +150,38 @@ class IndexLinear(nn.Module):
     faster branch.
     """
 
-    def __init__(self, in_dim, out_dim, max_index=256):
+    def __init__(self, in_dim, out_dim, max_index=256, zero_init=False):
         super().__init__()
         self.out_dim = out_dim
         self.W = nn.Parameter(torch.zeros(max_index, out_dim, in_dim))
         self.b = nn.Parameter(torch.zeros(max_index, out_dim))
+        # `torch.zeros` is the ALLOCATION, not the initialisation. Their
+        # `jsmlp.py:14-15` allocates zeros and then calls `reset_parameters()`
+        # two lines later unless `zero_init`, which no hopper cfg sets. The
+        # port dropped that call, and a zero `IndexLinear` is not merely a bad
+        # init -- it is a DEAD one: with W = 0 the layer's output is `b`, its
+        # input gradient is `W^T delta = 0`, and `dL/dW = delta a^T` is zero
+        # too because the previous layer's activation `a = tanh(0)` is zero.
+        # So every parameter of the stack except the last layer's bias gets an
+        # exactly-zero gradient forever, the GNN feeding it gets one as well,
+        # and the policy collapses to a per-`body_index` constant. Measured on
+        # `runs/t2a_port/port_s1`: 48 of its 53 trainable policy tensors are
+        # bit-identical between epoch 100 and epoch 1000. See D3_HANDOFF.md,
+        # "Update 2026-08-28 (second)".
+        if not zero_init:
+            self.reset_parameters()
+
+    def reset_parameters(self):
+        """`jsmlp.py:26-30`, verbatim. `_calculate_fan_in_and_fan_out` on a
+        3-D `[max_index, out, in]` tensor reads `size(1)` as the input map and
+        `shape[2:]` as the receptive field, so their `fan_in` is
+        `out_dim * in_dim` rather than `in_dim`. That is what their runs used;
+        it is reproduced, not corrected."""
+        from torch.nn import init
+        init.kaiming_uniform_(self.W, a=math.sqrt(5))
+        fan_in, _ = init._calculate_fan_in_and_fan_out(self.W)
+        bound = 1 / math.sqrt(fan_in)
+        init.uniform_(self.b, -bound, bound)
 
     def forward(self, x, ind):
         flat_x = x.reshape(-1, x.shape[-1])
@@ -169,15 +196,23 @@ class IndexLinear(nn.Module):
 
 class JSMLP(nn.Module):
     def __init__(self, in_dim, hdims, linear_dim, max_index=256,
-                 activation="tanh"):
+                 activation="tanh", rescale_linear=False, zero_init=False):
         super().__init__()
         self.activation = {"tanh": torch.tanh, "relu": torch.relu}[activation]
         self.affine_layers = nn.ModuleList()
         cur = in_dim
         for h in hdims:
-            self.affine_layers.append(IndexLinear(cur, h, max_index))
+            self.affine_layers.append(IndexLinear(cur, h, max_index, zero_init))
             cur = h
-        self.linear = IndexLinear(cur, linear_dim, max_index)
+        self.linear = IndexLinear(cur, linear_dim, max_index, zero_init)
+        # `jsmlp.py:54-56`. Every hopper cfg sets `rescale_linear: true` on all
+        # three index MLPs, so the head starts small and the head bias starts
+        # at zero -- the standard "small last layer" policy init. It is part of
+        # the initialisation, so it only ever shows up in a run that trains
+        # from scratch, which is why loading their checkpoint hid its absence.
+        if rescale_linear:
+            self.linear.W.data.mul_(0.1)
+            self.linear.b.data.mul_(0.0)
         self.out_dim = linear_dim
 
     def forward(self, x, ind):
@@ -195,7 +230,9 @@ class _Tower(nn.Module):
         self.gnn = DenseGNN(in_dim, gnn_cfg)
         self.ind_mlp = JSMLP(self.gnn.out_dim, imlp_cfg["hdims"], out_dim,
                              imlp_cfg.get("max_index", 256),
-                             imlp_cfg.get("htype", "tanh"))
+                             imlp_cfg.get("htype", "tanh"),
+                             imlp_cfg.get("rescale_linear", False),
+                             imlp_cfg.get("zero_init", False))
 
     def forward(self, x, adj, ind, node_mask=None):
         if self.norm is not None:
@@ -421,6 +458,10 @@ class DenseTransform2ActValue(nn.Module):
         cur = self.gnn.out_dim
         self.mlp = _MLP(cur, cfg["mlp"], cfg.get("htype", "tanh"))
         self.value_head = nn.Linear(self.mlp.out_dim, 1)
+        # `transform2act_critic.py:36` -> `tools.init_fc_weights`: the value
+        # head is rescaled at init exactly as the policy's linear head is.
+        self.value_head.weight.data.mul_(0.1)
+        self.value_head.bias.data.mul_(0.0)
 
     def forward(self, stage, obs, adj, node_mask=None):
         """`obs [G, N, F]` -> `[G, 1]`. The value is read off node 0, which is

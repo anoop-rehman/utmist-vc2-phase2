@@ -85,6 +85,10 @@ from rower_soccer.t2a_port.two_stage_pipeline import (group_designs,
 # their `get_perm_batch_design` sorts a minibatch permutation by it.
 STAGE_RANK = {"skel_trans": 0, "attr_trans": 1, "execution": 2}
 
+# The policy's three parameter groups, by attribute prefix. `_Tower` names them
+# so a `named_parameters()` prefix match is exact.
+TOWERS = ("skel", "attr", "control")
+
 
 def stage_sorted_perm(perm, row_stage):
     """Their `get_perm_batch_design`: shuffle, then re-sort BY STAGE.
@@ -572,6 +576,16 @@ class Trainer:
         self.value.train()
         n_mb = batch.size // self.mini
         stats = {"v_loss": 0.0, "p_loss": 0.0, "n": 0}
+        # Per-tower gradient norm and end-to-end parameter delta. Until
+        # 2026-08-28 the port trained for 1,000 epochs with three towers whose
+        # gradient was identically zero and nothing in any log said so; the
+        # inference "the port's gains are design-side" could not be checked
+        # because nobody was measuring per tower. Cost is one clone of the
+        # policy's parameters per epoch and a norm per minibatch.
+        p_before = {n: q.detach().clone()
+                    for n, q in self.policy.named_parameters()}
+        gsum = {t: 0.0 for t in TOWERS}
+        gcnt = {t: 0 for t in TOWERS}
         row_stage = None
         if self.batch_design:
             rank = torch.as_tensor([STAGE_RANK[b.stage] for b in batch.buckets],
@@ -597,6 +611,14 @@ class Trainer:
                                   ).mean()
                 self.opt_p.zero_grad(set_to_none=True)
                 surr.backward()
+                # BEFORE the clip: the clip is global, so a clipped norm hides
+                # which tower produced it.
+                for t in TOWERS:
+                    g = sum(float(q.grad.pow(2).sum())
+                            for n, q in self.policy.named_parameters()
+                            if q.grad is not None and n.startswith(t + "."))
+                    gsum[t] += g ** 0.5
+                    gcnt[t] += 1
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 40)
                 self.opt_p.step()
                 stats["v_loss"] += float(v_loss)
@@ -605,6 +627,18 @@ class Trainer:
         self.policy.eval()
         self.value.eval()
         stats["n_minibatch"] = n_mb
+        for t in TOWERS:
+            stats[f"g_{t}"] = round(gsum[t] / max(gcnt[t], 1), 5)
+            stats[f"d_{t}"] = round(max(
+                [float((q.detach() - p_before[n]).abs().max())
+                 for n, q in self.policy.named_parameters()
+                 if n.startswith(t + ".")] or [0.0]), 7)
+            # The number the port_s1 bug would have shown as 0: how many of
+            # this tower's tensors did not move at all this epoch.
+            stats[f"frozen_{t}"] = sum(
+                1 for n, q in self.policy.named_parameters()
+                if n.startswith(t + ".")
+                and float((q.detach() - p_before[n]).abs().max()) == 0.0)
         return stats
 
     # -------------------------------------------------------------- train --
@@ -677,6 +711,8 @@ class Trainer:
                 "compile_s": round(tr["compile_s"], 2),
                 "build_s": round(tr["build_s"], 2),
                 "minibatches": st["n_minibatch"],
+                **{k: st[k] for k in st if k[:2] in ("g_", "d_")
+                   or k.startswith("frozen_")},
                 "v_loss": round(st["v_loss"] / max(st["n"], 1), 4),
                 "p_loss": round(st["p_loss"] / max(st["n"], 1), 5),
                 "steps_per_s_sample": round(tr["rolled"] / (t1 - t0)),

@@ -54,7 +54,7 @@ def probe(tr, n_worlds, mean_action, max_steps):
                      reward_specs=tr.cfg.get("reward_specs", {}),
                      clip_qvel=tr.cfg["obs_specs"].get("clip_qvel", False),
                      seed=seed)
-    codes, lens, rets, hgt, ang = [], [], [], [], []
+    codes, lens, rets, hgt, ang, dxs = [], [], [], [], [], []
     ngroups = 0
     while True:
         try:
@@ -71,6 +71,11 @@ def probe(tr, n_worlds, mean_action, max_steps):
         h_end = torch.zeros(K, device=tr.device, dtype=tr.dtype)
         a_end = torch.zeros(K, device=tr.device, dtype=tr.dtype)
         obs = g.env.reset()
+        # Root x at the first EXECUTION step, so `dx` is the same quantity
+        # `hopper.py:150`'s `posbefore` starts from and the same one
+        # `their_sampled_probe.py` reports. Frozen per world at death.
+        x0 = g.env.backend.qpos[:, 0].clone().to(tr.dtype)
+        x_end = x0.clone()
         for t in range(max_steps):
             with torch.no_grad():
                 act, lp = tr.policy.act("execution", obs, adj, ind,
@@ -85,6 +90,7 @@ def probe(tr, n_worlds, mean_action, max_steps):
                 code = torch.where(newly, info["last_end"], code)
                 h_end = torch.where(newly, g.env.backend.qpos[:, 1].to(tr.dtype), h_end)
                 a_end = torch.where(newly, g.env.backend.qpos[:, 2].to(tr.dtype), a_end)
+                x_end = torch.where(newly, g.env.backend.qpos[:, 0].to(tr.dtype), x_end)
             if TRACE["on"] and ngroups == 1 and (t % 10 == 0 or t < 5):
                 q = g.env.backend.qpos
                 used, cap = g.env.check_contact_capacity() if hasattr(g.env, "check_contact_capacity") else (None, None)
@@ -103,10 +109,12 @@ def probe(tr, n_worlds, mean_action, max_steps):
         still = alive.nonzero(as_tuple=True)[0]
         if int(still.numel()):
             code[still] = -1  # never ended inside max_steps
+        x_end = torch.where(alive, g.env.backend.qpos[:, 0].to(tr.dtype), x_end)
         codes += code.tolist(); lens += ln.tolist(); rets += ret.tolist()
         hgt += h_end.tolist(); ang += a_end.tolist()
+        dxs += (x_end - x0).tolist()
         del g, adj, ind, obs
-    return codes, lens, rets, hgt, ang, ngroups, worlds
+    return codes, lens, rets, hgt, ang, ngroups, worlds, dxs
 
 
 def main():
@@ -143,7 +151,7 @@ def main():
     tr.policy.eval(); tr.value.eval()
 
     TRACE["on"] = a0.trace
-    codes, lens, rets, hgt, ang, ng, worlds = probe(
+    codes, lens, rets, hgt, ang, ng, worlds, dxs = probe(
         tr, a0.worlds, a0.mean_action, a0.max_steps)
     names = {-1: "still_alive", 0: "running", 1: "FELL", 2: "NONFINITE",
              3: "TIMEOUT"}
@@ -159,6 +167,16 @@ def main():
               f"len {np.mean([lens[i] for i in sel]):7.1f}  "
               f"height@end {np.mean([hgt[i] for i in sel]):6.3f}  "
               f"ang@end(deg) {np.degrees(np.mean([ang[i] for i in sel])):7.2f}")
+    # The three lines `their_sampled_probe.py` prints, so the two outputs can
+    # be read against each other without arithmetic in between.
+    q = np.percentile(lens, [10, 25, 50, 75, 90])
+    dt = 0.008
+    print(f"  exec-len pct 10/25/50/75/90  "
+          f"{q[0]:.0f} {q[1]:.0f} {q[2]:.0f} {q[3]:.0f} {q[4]:.0f}")
+    print(f"  mean dx per episode  {np.mean(dxs):+.4f} m   "
+          f"(std {np.std(dxs):.4f}, n={len(dxs)})")
+    print(f"  mean dx/dt per step  "
+          f"{np.sum(dxs) / (max(np.sum(lens), 1) * dt):+.4f} m/s")
     print("  per-world (height, ang_deg, len) at termination:")
     for i in range(min(len(hgt), 24)):
         why = []

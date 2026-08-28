@@ -21,6 +21,13 @@ or an explicit statement that something was not tested.*
 bottom supersede the 2026-08-14 text above wherever they disagree — in
 particular decision 4's "~3.8x" and the "step 1 of 6" state.*
 
+***Read the LAST section first if you are picking up 3e.** "Update 2026-08-27
+(second)" settles that fp32 is not why the port under-trains, shows that the
+gap is episode LENGTH rather than reward rate, and names an unported piece of
+their PPO update (`agent_specs.batch_design`) as the leading cause. It also
+records the one experiment that would confirm or kill that, which nobody has
+run.*
+
 ## The two training runs
 
 **`hopper_gpu` — complete, 1000/1000 epochs.** `exec_R_eps` by 100-epoch block:
@@ -977,3 +984,444 @@ cd /workspace/utmist-vc2-phase2
 PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_two_stage --check --backend cpu    # 15/15
 PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_two_stage --check --backend warp   # 15/15
 ```
+
+---
+
+## Update 2026-08-27 (second) — fp32 is NOT why the port trains to 1/12, and what is
+
+*Written by the agent asked to test the precision hypothesis. It was tested and
+it is dead. A different cause was found, gated, and fixed; the fix has NOT been
+trained. Every claim below names the command that produced it, and the "Not
+tested" section at the end is the important part.*
+
+The short version, in the order the evidence arrived:
+
+1. `--fp64` **changes the policy/update dtype only.** `mujoco_warp` is
+   **float32-only** and there is no switch.
+2. `--fp64` **had never run** — it raised on the first forward pass. Fixed.
+3. **Their converged policy scores 11,547 inside the port's fp32 pipeline**
+   against 11,228-11,964 in their own log. The port's env, physics, design
+   stage, reward and done condition are therefore not the problem, and neither
+   is fp32.
+4. The same policy in **fp64 CPU physics scores 11,547** — identical. fp32
+   physics costs nothing measurable.
+5. The 12x gap is **entirely episode LENGTH**, not reward rate. Their agents
+   reach the 1,000-step time limit by epoch 50 and stay there; ours die at 103.
+6. **`agent_specs.batch_design` was never ported.** It is set true in every
+   hopper cfg they ship, and it makes their minibatches stage-pure. Without it
+   the port takes **15x more Adam steps on the design towers per epoch**, each
+   from a seventeenth of the data.
+
+### 1. What `--fp64` actually changes: the torch half, and nothing else
+
+`train_t2a.py:267` sets `self.dtype` from `--fp32/--fp64` and uses it for the
+policy, the critic, the stored batch and the loss. It does **not** reach the
+simulator. `batched_exec_env.py:151` sets the env's dtype from the BACKEND —
+`self.dtype = self.backend.qpos.dtype` — and the backend chooses it:
+
+* `WarpBackend` aliases `mujoco_warp`'s own buffers with `wp.to_torch`, so its
+  dtype is whatever warp allocated;
+* `CompeteCpuBackend` takes `dtype=torch.float64`.
+
+**`mujoco_warp` is float32-only.** Its `Data`/`Model` arrays are declared
+`array(..., float)`, which is `wp.float32` in a warp kernel, and `_src/io.py:426`
+says so in as many words: *"C MuJoCo tolerance was chosen for float64
+architecture, but we default to float32 on GPU"* — it then raises `opt.tolerance`
+to 1e-6 to stop the solver chasing precision it does not have. Measured, not
+inferred:
+
+```sh
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2 && PYTHONPATH=. .venv/bin/python -c "
+import mujoco, mujoco_warp as mjw, warp as wp
+m = mujoco.MjModel.from_xml_string('<mujoco><worldbody><body><joint type=\"slide\"/>'
+                                   '<geom type=\"sphere\" size=\".1\"/></body></worldbody></mujoco>')
+d = mujoco.MjData(m); mujoco.mj_forward(m, d)
+wm, wd = mjw.put_model(m), mjw.put_data(m, d, nworld=4, nconmax=8, njmax=8)
+print(wd.qpos.dtype, wd.qvel.dtype, wm.body_mass.dtype, wm.opt.timestep.dtype)"
+# warp._src.types.float32 x4
+```
+
+So **`--fp64` buys fp64 in the torch half and the physics stays fp32 no matter
+what.** An fp64 training arm can only ever test the policy/update precision;
+there is no configuration of this port that runs fp64 physics on the GPU. That
+is the reframing asked for, and it holds.
+
+### 2. `--fp64` crashed on the first forward pass, and had never been run
+
+The env hands the policy `obs` and `adj` in the BACKEND's dtype. Under
+`--fp64` the policy is float64 and those arrive float32, and `nn.Linear`
+refuses the mix:
+
+```sh
+cd /workspace/utmist-vc2-phase2 && PYTHONPATH=. .venv/bin/python -c "
+import torch, yaml
+from rower_soccer.t2a_port.dense_policy import DenseTransform2ActPolicy
+cfg = yaml.safe_load(open('/workspace/Transform2Act/design_opt/cfg/hopper_gpu_s2.yml'))
+p = DenseTransform2ActPolicy(cfg['policy_specs'], 4, 5, 3, 3, control_action_dim=1).to(torch.float64)
+p.act('execution', torch.randn(2,4,12), torch.zeros(2,4,4), torch.zeros(2,4,dtype=torch.long))"
+# RuntimeError: expected scalar type Double but found Float
+```
+
+The fp32 path only works because both halves happen to be float32. `--backend
+cpu` is broken in the mirror image (float64 env, float32 policy) and always was.
+
+**Fixed** in `train_t2a.py`'s `rollout`: `obs`, `adj`, `nobs` and `r` are cast
+to the trainer's dtype at the sim boundary. `.to()` on a matching dtype is a
+no-op, so **the fp32 path is unchanged** — `port_s1` (pid 992213) is unaffected
+and was not restarted.
+
+### 3. The port's environment is not the problem: THEIR policy scores THEIR number in it
+
+This is the measurement that should have been made before any precision test,
+and it is cheap. Their `hopper_gpu_s2` epoch-1000 policy loads into the dense
+policy `strict=True` (65 tensors, 0 missing, 0 unexpected) and is rolled through
+the **port's** design stage, XML conversion, topology grouping, fp32
+`mujoco_warp` physics, reward and done condition:
+
+| | episodes | mean length | `exec_R_eps` | reward/step |
+|---|---|---|---|---|
+| **their policy, port env, fp32 warp** (seed 5) | 16 | 929.3 | **11,403.9** | 12.27 |
+| **their policy, port env, fp32 warp** (seed 23) | 32 | 938.8 | **11,547.4** | 12.30 |
+| **their policy, port env, fp64 CPU MuJoCo** (seed 5) | 8 | 938.4 | **11,547.5** | 12.31 |
+| their policy, THEIR env, from their log epoch 998/999 | 16 | ~919 | **11,963.9 / 11,228.2** | 12.31 / 12.22 |
+| `gate_batched_exec --check --backend cpu` closed loop (fp64) | 20 | 926.1 +/- 55.2 | **11,352.3 +/- 882.0** | SMD -0.051 |
+| `gate_batched_exec --check --backend warp` closed loop (fp32) | 20 | 902.1 +/- 56.2 | **10,986.1 +/- 930.6** | SMD -0.451 |
+| their policy, THEIR env, same gate's reference | 20 | 928.4 +/- 51.5 | **11,397.6 +/- 848.2** | — |
+
+```sh
+cd /workspace/Transform2Act && source env-gpu.sh   # re-export their pickle; see end_probe.py's docstring
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. MUJOCO_GL=egl .venv/bin/python -m rower_soccer.t2a_port.end_probe \
+    --their-npz their_e1000.npz --worlds 32 --seed 23 --mean-action
+PYTHONPATH=. MUJOCO_GL=egl .venv/bin/python -m rower_soccer.t2a_port.end_probe \
+    --their-npz their_e1000.npz --worlds 8  --seed 5  --mean-action --backend cpu
+```
+
+Two things follow, and both are load-bearing:
+
+* **The port's environment is faithful.** Reward/step agrees with theirs to
+  three significant figures and the return sits inside their own epoch-to-epoch
+  spread. Every earlier gate checked a component; this checks the whole
+  pipeline against a number the port cannot fake.
+* **fp32 physics costs at most a few percent.** The two probes above give
+  11,547.5 (fp64 CPU) and 11,403.9-11,547.4 (fp32 warp) -- no separation at 8-32
+  episodes. The paired 20-episode closed loop inside `gate_batched_exec` is
+  more sensitive and does see one: **10,986 fp32 against 11,352 fp64, 3.2%**,
+  moving the gate's standardised mean difference against their env from -0.05
+  to -0.45. So fp32 physics is not free -- but 3% is not 1,150%, and the
+  `PORT_MAP` section 13 trajectory divergence does not matter at the level of a
+  return. (That closed loop was ALREADY in the gate at 11/11 on both backends
+  and already said the port's env reproduces their score; what it had not been
+  used for was to rule out the precision hypothesis, which it does.)
+
+**This is what settles the precision question, not the training arm.** If fp32
+were degrading the task, their policy could not score their number in it.
+
+### 4. The gap is episode LENGTH, and the reward RATE was never the problem
+
+`exec_R_eps` is a rate times a length, and the two move in opposite directions
+here, so the aggregate hides the mechanism. Split out (`exec_R` is already in
+both logs; length is their ratio):
+
+| epoch | port R/step | port len | port `R_eps` | ref s1 R/step | ref s1 len | ref s1 `R_eps` | ref s2 R/step | ref s2 len | ref s2 `R_eps` |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 1.00 | 42.2 | 42.2 | 1.00 | 42.1 | 42.1 | 1.00 | 42.1 | 42.1 |
+| 10 | 1.01 | 43.0 | 43.4 | 2.68 | 78.7 | 211.0 | 2.74 | 75.2 | 206.1 |
+| 25 | 4.28 | **27.2** | 116.7 | 3.64 | 91.4 | 332.7 | 3.60 | 97.8 | 352.2 |
+| 50 | 4.33 | 52.2 | 225.7 | 1.31 | **1002.7** | 1313.6 | 1.36 | **997.9** | 1357.1 |
+| 100 | 3.58 | 85.8 | 306.9 | 1.82 | 1000.6 | 1821.1 | 1.53 | 1002.6 | 1534.0 |
+| 156 | 3.83 | 94.4 | 362.1 | 2.31 | 998.7 | 2307.0 | 2.53 | 1001.0 | 2532.6 |
+| 250 | 4.03 | 102.9 | 414.4 | 5.12 | 1000.0 | 5120.2 | 4.12 | 769.6 | 3170.8 |
+| 391 | 4.19 | 107.7 | 451.6 | 5.61 | 1000.7 | 5613.8 | 5.18 | 962.1 | 4983.8 |
+| 400 | 4.20 | 107.4 | 450.5 | 6.21 | 999.3 | 6205.6 | 5.61 | 527.2 | 2957.6 |
+
+Read the shapes, not the endpoints. **Both curves start at 42 steps, which is
+free-fall**: a hopper is dropped from `rootz = 1.25` and the episode ends when
+the root passes 0.7, which takes `sqrt(2*0.55/9.81) = 0.335 s = 42` control
+steps. The reference **buys survival first** — by epoch 50 its episodes hit the
+1,000-step limit and its reward RATE has fallen to 1.31, i.e. almost pure alive
+bonus — and spends the next 950 epochs converting that into speed. The port
+does the opposite: it takes the reward rate to 4.3 by epoch 25 while its
+episodes get SHORTER than the untrained ones, and then creeps back up 27 -> 107
+over 375 epochs. **At epoch 50 the port's agent is faster per step than theirs
+and scores a sixth as much.**
+
+What the port's agent actually does, at epoch 400 (64 sampled episodes, 9
+topologies):
+
+```sh
+PYTHONPATH=. MUJOCO_GL=egl .venv/bin/python -m rower_soccer.t2a_port.end_probe \
+    --ckpt runs/t2a_port/port_s1/models/epoch_0400.p --worlds 64 --seed 7 --trace
+```
+
+**100% of episodes end `FELL`, none time out, none go non-finite**, at a mean
+length of 103.3 with a spread of 98-112 across every design. The height trace
+explains why it is so tight: it is one ballistic arc.
+
+```
+t=   0 h=1.2537   t=  30 h=1.8657   t=  60 h=1.9489   t=  90 h=1.3505
+t=  10 h=1.5116   t=  40 h=1.9582   t=  70 h=1.8267   t= 100 h=0.9988
+t=  20 h=1.7170   t=  50 h=1.9896   t=  80 h=1.6275   -> done at ~105
+```
+
+It launches, coasts to **1.9896** — the `max_height` cut-off is 2.0 — and dies
+on landing. The policy has learned to ride the ceiling of the done condition
+for one jump. Note that no metric in the training log says this; `exec_R_eps`
+just climbs slowly, exactly as `hopper_gpu_t32`'s sprawl did.
+
+### 5. The cause: `agent_specs.batch_design` was never ported
+
+`hopper_gpu_s2.yml` opens with `agent_specs: {batch_design: true}`, and
+`use_mini_batch` is `cfg.mini_batch_size (2048) < cfg.min_batch_size (50000)`,
+so this branch runs on every one of their epochs
+(`design_opt/agents/transform2act_agent.py:272-297`):
+
+```python
+perm_np = np.arange(num_state); np.random.shuffle(perm_np)          # shuffle
+...
+if self.cfg.agent_specs.get('batch_design', False):
+    perm_design_np, perm_design = self.get_perm_batch_design(states)  # then SORT BY STAGE
+```
+
+`get_perm_batch_design` returns `inds[0] + inds[1] + inds[2]` — skeleton rows,
+then attribute rows, then execution rows. Minibatches are consecutive slices of
+that array, so **each of their minibatches is stage-PURE** except at the two
+boundaries. The port sliced a plain `randperm`, so **every** port minibatch was
+stage-mixed. Nothing in `t2a_port/` or `PORT_MAP.md` mentions `batch_design` or
+`agent_specs` at all; it was not a rejected option, it was unseen.
+
+It is not a wash. A batch holds `6 * n_episodes` design rows (5 skeleton + 1
+attribute per episode) against `batch_steps` execution rows, and the trainer's
+own logged `minibatches` confirms the composition exactly at every epoch:
+
+| epoch | episodes | design rows | exec rows | minibatches (logged = computed) | minibatches touching a design tower — theirs | ours |
+|---|---|---|---|---|---|---|
+| 0 | 2,023 | 12,138 | 57,605 | 34 | **6** | 34 |
+| 50 | 1,405 | 8,430 | 58,431 | 32 | **5** | 32 |
+| 100 | 881 | 5,286 | 57,484 | 30 | **3** | 30 |
+| 400 | 568 | 3,408 | 58,500 | 30 | **2** | 30 |
+
+Each minibatch is one Adam step. So per optimisation epoch the design towers
+take **2 steps in the reference and 30 in the port** at epoch 400 — 15x — and
+the port's steps are computed from ~120 design rows instead of 2,048. Adam
+divides a gradient by its own running RMS, so a tower that sees a seventeenth
+of the data does **not** take a seventeenth of a step; it takes a full-sized
+step from a seventeenth of the data, ten times more often. The attribute tower
+is worse still: it is 1/6 of the design rows, so it fits inside a single
+minibatch of theirs (10 Adam steps per epoch) against the port's 300.
+
+That is a plausible mechanism for exactly what the port shows — a skeleton
+distribution that never settles (**30-35 topology groups at epoch 400**, where
+`topology_census.py` found 2 in their epoch-1000 batch) and a control policy
+that never gets a stable body to master, so it learns a body-independent trick
+instead. **It is a mechanism, not yet a demonstration.** See "Not tested".
+
+**Fixed and gated.** `train_t2a.py` grows `stage_sorted_perm()` and reads
+`agent_specs.batch_design` from the cfg, so the default now follows theirs;
+`--no-batch-design` restores the old behaviour for an A/B.
+
+```sh
+PYTHONPATH=. .venv/bin/python -m rower_soccer.t2a_port.gate_batch_design   # 9/9
+```
+
+The gate builds the real epoch-400 composition, checks the permutation is a
+permutation, that at most two minibatches straddle a boundary, that exactly two
+carry a design row, that the stage profile equals a transcription of their
+`get_perm_batch_design`, and that within a stage the order is still shuffled —
+with three controls that must fail and do (an unsorted permutation puts design
+rows in 30/30 minibatches; a constant sort key purifies nothing).
+
+### 6. The fp64 training arm, matched to `port_s1`
+
+Launched anyway, because "their policy scores their number" is an argument
+about the env and someone could still ask about the update:
+
+```sh
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. MUJOCO_GL=egl setsid nohup .venv/bin/python \
+    -m rower_soccer.t2a_port.train_t2a --cfg hopper_gpu_s2 --run port_s1_fp64 \
+    --outdir runs/t2a_port --seed 1 --fp64 --eval-worlds 16 --max-worlds 1024 \
+    --mempool-mb 256 --epochs 1000 --save-interval 100 \
+    --stop-file /tmp/stop_t2a_port_s1_fp64 > runs/t2a_port/port_s1_fp64.log 2>&1 &
+```
+
+Identical to `port_s1` in every argument but `--fp64`. **Two differences from
+`port_s1` that are not precision and must be recorded**: it carries the
+`len_est` fix (`port_s1` does not), which changes the world count per
+generation but not `batch_steps`; and it predates the `batch_design` fix, like
+`port_s1`, so the A/B is clean for precision.
+
+
+It ran **52 epochs** (0-51) and was ended with its stop file, not killed —
+`stop file /tmp/stop_t2a_port_s1_fp64 present -- saving and exiting cleanly at
+epoch 52`, leaving `runs/t2a_port/port_s1_fp64/models/stopped.p`. 52 epochs is
+enough because **the port's pathology is fully formed by epoch 15**, and both
+arms show it:
+
+| epoch | fp32 `R_eps` | len | R/step | fp64 `R_eps` | len | R/step | ref s1 `R_eps` | len | ref s2 `R_eps` | len |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 42.2 | 42.2 | 1.00 | 42.1 | 42.1 | 1.00 | 42.1 | 42.1 | 42.1 | 42.1 |
+| 5 | 42.3 | 42.2 | 1.00 | 42.7 | 42.6 | 1.00 | 93.5 | 66.3 | 207.0 | 131.0 |
+| 10 | 43.4 | 43.0 | 1.01 | 43.6 | 43.0 | 1.01 | 211.0 | 78.7 | 206.1 | 75.2 |
+| 15 | 74.7 | **21.9** | 3.40 | 72.4 | **21.0** | 3.45 | 275.6 | 86.4 | 265.5 | 82.2 |
+| 20 | 93.3 | 23.9 | 3.91 | 88.2 | 22.4 | 3.94 | 335.2 | 90.4 | 311.0 | 92.0 |
+| 25 | 116.7 | 27.2 | 4.28 | 108.5 | 24.9 | 4.35 | 332.7 | 91.4 | 352.2 | 97.8 |
+| 30 | 206.3 | 48.4 | 4.27 | 144.1 | 31.8 | 4.54 | 370.7 | 99.1 | 420.7 | 116.9 |
+| 35 | 217.3 | 50.2 | 4.33 | 222.8 | 50.7 | 4.40 | 463.7 | 138.8 | 465.5 | 132.6 |
+| 40 | 224.0 | 51.0 | 4.39 | 223.3 | 50.8 | 4.40 | 493.7 | 150.1 | 519.8 | 195.4 |
+| 45 | 228.2 | 52.5 | 4.35 | 224.2 | 50.9 | 4.41 | 1095.6 | 725.6 | 594.7 | 191.8 |
+| 50 | 225.7 | 52.2 | 4.33 | 210.0 | 46.6 | 4.50 | 1313.6 | 1002.7 | 1357.1 | 997.9 |
+
+Block means, like for like:
+
+| block | fp32 `R_eps` (len) | fp64 `R_eps` (len) | ref s1 | ref s2 |
+|---|---|---|---|---|
+| 0-24 | **64.8** (32.4) | **62.7** (32.8) | 216.1 | 223.8 |
+| 25-49 | **206.0** (47.3) | **195.5** (44.3) | 670.3 | 553.8 |
+
+**fp64 is 3-5% BELOW fp32, and the reference's own two seeds differ by 21% in
+the same block.** The difference between the arms is not distinguishable from
+nothing; the difference between either arm and the reference is a factor of
+3.3. Both arms make the *same wrong move at the same epoch*: between epoch 10
+and 15 the reward RATE jumps from 1.01 to ~3.4 while episode LENGTH **halves**,
+43 -> 21, and length then crawls back to ~50 while the rate sits at 4.4. The
+reference does the opposite in the same window.
+
+Two caveats on how controlled this is. The arms share `--seed 1` and start from
+the same initialisation (`exec_R_eps` 42.2 against 42.1), but their RNG streams
+are not identical once fp64 changes the numbers the samplers consume, so this
+is a paired-start comparison, not a bitwise-controlled one — which is why the
+block means matter more than epoch 30's 206.3 against 144.1. And the fp64 arm
+carries the `len_est` fix that `port_s1` does not.
+
+**Verdict: precision is not why the port trains to a twelfth of the reference,
+and the fp64 arm was the weakest of the four pieces of evidence saying so.**
+
+Also worth recording, because it is a design-diversity measurement and it is
+the thing `batch_design` predicts: sampled (not mean) designs at 32 worlds,
+same probe, same seed —
+
+| policy | distinct topologies in 32 sampled designs | bodies |
+|---|---|---|
+| `port_s1` epoch 400 | **8** | 6-8 |
+| their `hopper_gpu_s2` epoch 1000 | **2** | 7 exactly |
+
+with both collapsing to 1 under mean actions. Their `topology_census.py` found
+1 topology in 199 of 200 designs by **epoch 100**. The port's skeleton
+distribution is still wide at epoch 400 — which is what a design tower taking
+15x the Adam steps on a seventeenth of the data would look like, and is the
+observable to watch in the next experiment.
+
+#### The throughput and memory cost of fp64
+
+| | `port_s1` (fp32) | `port_s1_fp64` |
+|---|---|---|
+| `T_update`, epoch 0-1 | **30.4 / 29.4 s** | **64.0 / 68.5 s** |
+| `T_sample`, epoch 0-1 | 91.0 / 89.9 s | 75.1 / 82.7 s |
+| torch peak (`gpu_mib`), epoch 0-1 | 2,944 / 3,167 MiB | **5,380 / 6,312 MiB** |
+| process GPU, `nvidia-smi` mid-epoch | ~4.2 GB | **7.4-7.9 GB** |
+
+The **update is 2.2x slower** and torch's peak is **1.9x** — consistent with
+the isolated 27.0 ms -> 108.1 ms per gradient step already recorded above,
+diluted by the parts of an epoch that are not fp64 matmul. **Sampling is not
+slower**, and that is the tell: the physics is fp32 in both arms, so only the
+policy forward inside the rollout changes. (The two `T_sample` columns are not
+directly comparable anyway — they were measured under different contention on a
+shared card.)
+
+**Card budget, reported as asked**: `port_s1` ~0.8 GB between epochs and ~4.2 GB
+at the mid-epoch peak; `port_s1_fp64` 7.4-7.9 GB at peak. With both plus the
+probes the card reached **~9.1 GB of 20 GB**. The fp64 arm alone is at the
+stated ~8 GB ceiling, which is another reason not to run fp64 arms casually.
+
+### What is NOT tested
+
+* **The `batch_design` fix has not been trained.** It is gated for what the
+  permutation does, not for what it buys. The mechanism above (15x the Adam
+  steps on the design towers, from a seventeenth of the rows) is an argument
+  from the reference's source plus row counts; **no training run has shown that
+  fixing it closes any part of the gap.** That is the next experiment and it is
+  not optional before anyone believes this section's headline.
+* **`port_s1` and `port_s1_fp64` both predate the fix**, so neither is evidence
+  about it either way.
+* **Nothing here rules out a second cause.** `batch_design` is the only
+  unported piece found by reading their `update_params`/`update_policy` line by
+  line against the port's; the rest (fixed log-probs recomputed under frozen
+  norm statistics, `value_opt_niter = 1`, grad clip 40 on the policy only, no
+  value clip, advantage normalised by std over the whole batch, `noise_rate`
+  1.0 so every training transition is sampled, `end_reward` false,
+  `running_state` None) all match. Matching by reading is not matching by
+  measurement: **`gate_dense_policy.py` still does not drive one optimiser step
+  in both codebases and compare the weights**, which the previous handoff
+  already listed as the cheapest missing gate and which would have caught this
+  one.
+* **fp64 physics on the GPU is untestable here**, so "would fp64 physics train
+  differently" is answered only indirectly — by their policy scoring the same
+  in fp32 warp and fp64 CPU MuJoCo, which is a statement about evaluation, not
+  about training.
+* **A pre-training discrepancy in the TRAINING distribution is unexplained.**
+  At epoch 0 the eval metric matches theirs to 0.3% (`exec_R_eps` 42.25 against
+  42.12/42.10), but the sampled rollouts do not: `train_R` 1.00 and
+  `train_R_eps` 28.53 here against **0.83 and 28.93** in BOTH their seeds, i.e.
+  their sampled episodes are ~34.9 steps long with a mean `dx/dt` of -0.17 m/s
+  and ours are 28.5 with 0.00. The design sampler is not the cause -- 200
+  untrained port designs give **24 distinct topologies** against the 21 their
+  `topology_census.py` reports for 200, with a similar size profile. Small, and
+  it predates training, so it should be chased before any further training
+  comparison is called clean.
+* **`--backend cpu` in the trainer.** Now usable with `--fp64` (and gated only
+  to the extent that `end_probe --backend cpu` ran); with `--fp32` it is still
+  broken in the mirror image, because `CompeteCpuBackend` is float64 and the
+  cast added here goes one way only. Nothing trains on the CPU backend, so this
+  is a latent trap rather than a live bug.
+* **Correction to settled decision 6.** "Theirs averages `exec_R_eps` over
+  `num_threads` episodes" is true only at convergence. Their eval is
+  `sample(cfg.eval_batch_size, mean_action=True)` with `eval_batch_size = 10000`
+  **agent-steps** (`design_opt/utils/config.py:49`), split over the workers, so
+  at ~950-step episodes it is 16 episodes but at epoch 10 (79-step episodes) it
+  is ~128. The port's 16 is right at convergence and 8x too few early. It does
+  not explain anything here -- the gaps at those epochs are 5x, far outside
+  eval noise -- but the early part of the port's curve is noisier than theirs
+  by construction.
+
+### The single next experiment
+
+**Train one seed with `batch_design` on, everything else matched to `port_s1`,
+and compare episode LENGTH at matched epochs — not the return.**
+
+```sh
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-mps-log
+cd /workspace/utmist-vc2-phase2
+PYTHONPATH=. MUJOCO_GL=egl setsid nohup .venv/bin/python \
+    -m rower_soccer.t2a_port.train_t2a --cfg hopper_gpu_s2 --run port_s2_bd \
+    --outdir runs/t2a_port --seed 1 --eval-worlds 16 --max-worlds 1024 \
+    --mempool-mb 256 --epochs 1000 --save-interval 100 \
+    --stop-file /tmp/stop_t2a_port_s2_bd > runs/t2a_port/port_s2_bd.log 2>&1 &
+```
+
+The read-out is cheap and early: **the reference's episodes reach the 1,000-step
+limit by epoch 50.** `port_s1`'s were 52.2 there and 27.2 at epoch 25. So by
+epoch 50-75 -- about 1.5 hours -- this either shows episode length climbing
+toward the limit or it does not, and no one has to wait 1,000 epochs to learn
+which. Log `eval_len` beside `exec_R_eps` when reporting it; the return alone is
+what hid this for 400 epochs.
+
+If it does not move, the next candidates in order are (1) write the missing
+one-optimiser-step gate against their codebase, which is the only thing that
+would catch a second `batch_design`-shaped omission, and (2) two more seeds,
+because `hopper_gpu_t32` shows this task's seed spread is bimodal rather than
+tight. The sampler shape and the batch/world count are **not** on that list:
+the port's batch at epoch 0 is 2,023 episodes against their ~1,760 for the same
+50,000-step budget, its generations produce only complete episodes as theirs
+do, and its untrained design distribution matches theirs.
+
+### Files added or changed
+
+| file | what |
+|---|---|
+| `t2a_port/train_t2a.py` | `stage_sorted_perm` + `agent_specs.batch_design`; fp64 dtype cast at the sim boundary |
+| `t2a_port/gate_batch_design.py` | **new.** 9/9, three controls that must fail |
+| `t2a_port/end_probe.py` | **new.** Termination census; runs THEIR checkpoint through the port |

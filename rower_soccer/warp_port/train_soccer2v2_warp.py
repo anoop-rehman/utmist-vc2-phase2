@@ -879,9 +879,27 @@ def run(args):
     latest_path = os.path.join(run_dir, "latest.pt")
     log_path = os.path.join(run_dir, "log.json")
     start_steps = 0
+    rows_prior = []
     if args.resume and os.path.exists(ckpt_path):
         start_steps = load_checkpoint(trainer, ckpt_path)
-        print(f"[setup] resumed at step {start_steps:,}", flush=True)
+        # Carry the existing log forward. Without this the resumed run opens
+        # log.json fresh and the previous run's curve is gone the first time it
+        # writes -- which is exactly what happened resuming the 2B-step run: a
+        # 560 kB, 763-point history became 1.7 kB. The series was recoverable
+        # from train.log only because the monitor line happens to carry
+        # goals/match; that is luck, not a design.
+        if os.path.exists(log_path):
+            try:
+                with open(log_path) as fh:
+                    prev = json.load(fh)
+                rows_prior = prev.get("iters", prev) if isinstance(prev, dict) else prev
+                rows_prior = [r for r in rows_prior if isinstance(r, dict)]
+            except Exception as e:
+                print(f"[setup] WARNING: could not read {log_path} ({e}); "
+                      f"the previous curve will NOT be carried forward",
+                      flush=True)
+        print(f"[setup] resumed at step {start_steps:,}, "
+              f"carrying {len(rows_prior)} logged rows forward", flush=True)
 
     print(f"[setup] worlds={env.n} agents/world={env.n_agents} "
           f"rows={trainer.N} obs={env.obs_dim} act={env.act_dim} "
@@ -893,7 +911,7 @@ def run(args):
            {k: (v if not isinstance(v, list) else v)
             for k, v in warm.items() if k != "loaded"},
            "warm_start_loaded_n": None if warm is None else len(warm["loaded"]),
-           "iters": []}
+           "iters": list(rows_prior)}
 
     def flush_log():
         tmp = log_path + ".tmp"

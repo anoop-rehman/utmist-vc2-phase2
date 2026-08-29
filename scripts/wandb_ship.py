@@ -159,6 +159,7 @@ def ship_t2a(args):
         r".*?dtype\s+(?P<dtype>\S+)")
 
     cfg = {}
+    is_port = False
     with open(args.t2a_log) as f:
         for line in f:
             m = startup.match(line)
@@ -166,6 +167,7 @@ def ship_t2a(args):
                 cfg = dict(m.groupdict())
                 cfg["seed"] = int(cfg["seed"])
                 cfg["batch_design"] = cfg["batch_design"] == "True"
+                is_port = True
                 print(f"[ship] startup line: {cfg}")
                 break
     for kv in args.config:
@@ -190,10 +192,18 @@ def ship_t2a(args):
 
     # How many zero-reward design steps their `avg_reward` denominator carries
     # per episode. Set to 0 for a PORT log, whose `train_R` counts execution
-    # steps only -- decided below, from whether the file has the port's JSON
-    # sidecar, and re-decided on every re-read so `--follow` cannot latch it
-    # wrong on an empty first pass.
-    design_steps = [args.design_steps]
+    # steps only.
+    #
+    # Decided from TWO independent marks, because one of them was not enough.
+    # The sidecar mark below fires only once a `{"epoch": ...}` line has been
+    # read, and the trainer writes the monitor line and its sidecar as two
+    # separate `write()`s -- so a `--follow` poll can land between them, parse
+    # the monitor line as if it were a REFERENCE log, subtract 6, and flush it.
+    # `flush` never re-sends an epoch, so that row would stay six short
+    # forever. The startup line (`run ... cfg ... batch_design ...`) is written
+    # only by `train_t2a.py`, is the first line of the file, and is already
+    # scanned above, so it settles the provenance before any row is parsed.
+    design_steps = [0 if is_port else args.design_steps]
 
     def parse(fh, rows):
         """Lines -> {epoch: flat row}. A later line for an epoch wins."""
@@ -221,6 +231,11 @@ def ship_t2a(args):
                 # execution-only on BOTH sides
                 # (`design_opt/utils/logger.py:22`), so `exec_ep_len` needs no
                 # correction. See D3_HANDOFF.md, "Update 2026-08-28 (second)".
+                #
+                # `train_t2a.py` now logs `t2a/train_ep_len` natively on the
+                # same convention (with `t2a/train_ep_len_all_stages` beside
+                # it), so a natively-logged port run and a shipped reference
+                # log land on ONE axis. Change the two together or they part.
                 for tag in ("train", "exec"):
                     r, r_eps = row.get(f"{tag}_R"), row.get(f"{tag}_R_eps")
                     if r_eps is not None and r is not None and abs(r) > 1e-9:

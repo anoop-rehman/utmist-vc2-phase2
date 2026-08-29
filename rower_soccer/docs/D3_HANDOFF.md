@@ -2147,3 +2147,114 @@ difference from restoring one `reset_parameters()` call.
   reference's own run stops exploring by epoch 100 (199 of 200 designs share
   one topology), which is the finding that should shape 3f before it is
   designed, not after.
+
+## 2026-08-29 (second) — wandb metrics and periodic video, native in `train_t2a.py`
+
+D3 runs were being read by tailing a text log and hand-building comparison
+tables in a terminal. That is how a `-6` episode-length offset and a silently
+truncated wandb upload both got through. `train_t2a.py` now logs to wandb and
+films itself, both off by default and both structurally unable to end a run.
+
+### What was added
+
+* `--wandb` (off by default) with `--wandb-project creature-soccer`. The run
+  **id is the run name** with `resume="allow"`, so restarting `--run port_s1`
+  reattaches instead of opening a second run beside it.
+* The monitor line's fields go under `t2a/` and the JSON sidecar's under
+  `port/` — **the same prefixes `scripts/wandb_ship.py` writes**, so a
+  natively-logged port run and a shipped reference log land on one axis
+  instead of forming two half-populated panels. Change the two together.
+* `--video-secs 900` fires a best/median/worst clip, ranked by EPISODE REWARD
+  (single-agent, so reward is the eval metric — unlike D1, where the self-play
+  reward is zero-sum and ranking by it ranks noise). The first clip fires at
+  the first epoch boundary, not after a full cadence.
+* `gate_t2a_logging.py`, five checks with five negative controls.
+
+### The episode-length convention, settled in both places
+
+`train_R_eps / train_R` is **not the same quantity on the two sides**. Their
+`LoggerRL.avg_reward` divides by every logged step and
+`khrylib/rl/agents/agent.py:70` logs the 5 skeleton and 1 attribute steps
+(reward 0) as well, so their ratio is `exec_steps + 6`. The port's `train_R`
+divides by execution steps only. So:
+
+| | `t2a/train_ep_len` |
+|---|---|
+| port (native, or shipped) | `train_R_eps / train_R` |
+| reference (shipped) | that **minus 6** |
+
+`t2a/train_ep_len_all_stages` carries the uncorrected ratio on both sides.
+`exec_R` is execution-only on both (`design_opt/utils/logger.py:22`) and needs
+no correction.
+
+The previous entry's open item ("`wandb_ship.py`'s `t2a/train_ep_len` needs the
+-6 correction") is closed, and one residual hole in it is closed too: the
+correction was decided from the port's JSON sidecar alone, and the trainer
+writes the monitor line and its sidecar as two separate `write()`s — so a
+`--follow` poll landing between them parsed the monitor line as a REFERENCE
+row, subtracted 6, and flushed it, and `flush` never re-sends an epoch. The
+provenance is now decided from the startup line as well, which is the first
+line of the file. Gated (`check_ep_len`, case `port_before_sidecar`).
+
+### The measured cost of a video event — it is the rollout, and it grows 30x
+
+RTX 4000 Ada under MPS with four other GPU clients and a load average near 30,
+`--video-panel 320 240`. Long episodes were produced by WIDENING the done
+condition to force the 1,000-step limit, not by training a policy that survives
+it:
+
+| episodes | frames/panel | rollout | render+encode | total |
+|---|---|---|---|---|
+| 12 x ~30 steps (epoch 0, cold) | 52 | 34.0 s | 6.5 s | 40.5 s |
+| 12 x ~30 steps (epoch 0, warm) | 69 | 13.9 s | 1.7 s | **15.6 s** |
+| 12 x 1,000 steps | 400 | 455.5 s | 8.5 s | **463.9 s** |
+| 12 x 1,000 steps | 1,000 | 219.0 s | 64.1 s | 283.1 s |
+| 24 x 1,000 steps | 400 | 531.9 s | 25.3 s | 557.2 s |
+
+**Read the two 12 x 1,000 rows together before trusting any single number**:
+they are the same rollout at 455 s and 219 s, a 2x spread from contention
+alone, and 24 worlds then cost only 1.2-2.4x what 12 did. So the scaling in
+worlds is real but the constant is not stable on a shared card. What IS stable
+across every row is the split: rendering and encoding are 2-23% of the event
+(7-21 ms per panel frame) and the rollout is the rest. The cost is the **sequential steps of one
+generation**: every design is its own topology group and the GPU rolls groups
+one after another, so an event is about `worlds x episode_length` batched
+steps, ~38 s per 1,000-step episode. That is the opposite of D1's finding,
+where cutting worlds 4x barely moved the number — there one env holds every
+world, here one group holds one design.
+
+~460 s is 52% of a 900 s cadence and is not acceptable. Rather than truncate
+the rollout (which would rank a *truncated* return and quietly change what
+"best" means), the interval self-limits: the next event is due at
+`max(--video-secs, cost / --video-budget-frac)`, default frac 0.1, and the
+stretched interval is printed and logged as `video/next_interval_s`. The knobs
+for getting the cadence back are `--video-worlds` (the default is 8, ~310 s at
+convergence) and `--video-max-steps` (off by default, and documented as
+ranking a truncated return).
+
+### What the gate asserts
+
+1. **Bit-identical to git HEAD.** The baseline is loaded from `git show
+   HEAD:rower_soccer/t2a_port/train_t2a.py`, not from the tree. Two epochs,
+   86 tensors of both networks plus the RunningNorm buffers, with wandb/video
+   OFF *and* with video ON — the video draws from its own generator and every
+   global stream is snapshotted around the event. Control: an unisolated video
+   does perturb it.
+2. A raising `wandb.init` prints and training continues; so does a raising
+   `wandb.log`, which disables itself after five consecutive failures.
+3. A render exception prints and training continues, losing no epoch.
+4. **The clip is of the CURRENT design.** The model compiled behind each panel
+   has exactly that episode's body count (`model.nbody == len(robot.bodies) +
+   1`, measured), and biasing the live skeleton head to ADD moves the sampled
+   distribution 3.0 -> 13.0 bodies. Control: caching the worlds makes the check
+   fail.
+5. The episode-length convention above, natively and through the shipper.
+
+### Not tested
+
+* Anything beyond hopper. `_camera` falls back to a tracking free camera when
+  a task's XML has no `track` camera, and that fallback has not been exercised.
+* A resumed run's wandb reattachment is asserted against a fake client in the
+  gate and was exercised once live; a long resume is not.
+* The video cost at convergence was measured by WIDENING the done condition to
+  force 1,000-step episodes, not by training a policy that survives that long.

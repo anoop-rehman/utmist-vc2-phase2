@@ -118,8 +118,11 @@ These are settled; do not re-litigate them without new evidence.
 
 ## An observation about the method, not the port
 
-By epoch 100 the skeleton stage has **stopped exploring** — 199 of 200 sampled
-designs share one topology, and every mean-action design does — while
+**[CORRECTED 2026-08-29 — see `D3_E0_ANT.md` section 3.** Re-measured with the census fixed to sample in TEST mode, `hopper_gpu` at epoch 100 is **3 distinct topologies with the most common at 89.0%**, and `hopper_gpu_s2` is 5 at 91.0% — heavy convergence, but not the near-unanimity stated here. The original figure was never reproduced.]**
+
+By epoch 100 the skeleton stage has largely **stopped exploring** — 3 distinct
+topologies among 200 sampled designs, the most common holding 89.0%, and every
+mean-action design agreeing — while
 `exec_R_eps` climbs from 1,376 to 6,836 over the remaining 900 epochs. The back
 nine tenths of the run is attribute tuning and control, not body plan.
 
@@ -1324,7 +1327,8 @@ same probe, same seed —
 | their `hopper_gpu_s2` epoch 1000 | **2** | 7 exactly |
 
 with both collapsing to 1 under mean actions. Their `topology_census.py` found
-1 topology in 199 of 200 designs by **epoch 100**. The port's skeleton
+1 topology in 89% of 200 designs by **epoch 100** (3 distinct; the
+"199 of 200" written here earlier did not reproduce). The port's skeleton
 distribution is still wide at epoch 400 — which is what a design tower taking
 15x the Adam steps on a seventeenth of the data would look like, and is the
 observable to watch in the next experiment.
@@ -2144,8 +2148,8 @@ difference from restoring one `reset_parameters()` call.
 * A second seed.
 * Anything on the ant task; `ant_gpu` was abandoned when its pod went away.
 * Whether the skeleton stage explores longer on OUR drills than on hopper. The
-  reference's own run stops exploring by epoch 100 (199 of 200 designs share
-  one topology), which is the finding that should shape 3f before it is
+  reference's own run stops exploring by epoch 100 (3 distinct topologies
+  among 200 designs, most common 89.0%), which is the finding that should shape 3f before it is
   designed, not after.
 
 ## 2026-08-29 (second) — wandb metrics and periodic video, native in `train_t2a.py`

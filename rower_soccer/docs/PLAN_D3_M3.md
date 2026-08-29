@@ -62,10 +62,12 @@ home for "start from a quadruped and evolve it".
 
 | | bodies | joints | motors |
 |---|---|---|---|
-| Transform2Act `ant.xml` | 5 | 6 | 4 |
+| Transform2Act `ant.xml` | 5 | 5 | 4 |
 | CompetEvo `dev_ant_body.xml` (D1/D2's ant) | 13 | 10 | 8 |
 
-Theirs is a torso plus four single-segment limbs, one actuator each. Ours is
+Theirs is a torso plus four single-segment limbs, one actuator each — 5 joints,
+being a free root plus four hinges (`nq 11 / nv 10`), measured by
+`gate_their_ant.py`; this table said 6 when first written. Ours is
 the DeepMind-style ant: four legs of two segments, hip and ankle per leg. They
 are different creatures with different capabilities, and any result on one does
 not transfer to the other by assumption.

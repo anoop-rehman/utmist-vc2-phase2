@@ -225,3 +225,9 @@ runs/competevo_port/*/policies_ep*.pt
 # the log is the thing worth keeping, so the models directory is ignored and
 # the logs are not.
 runs/t2a_port/*/models/
+
+# Rendered clips. Derived artifacts: every one is reproducible from a committed
+# policies.pt via `render_sweep.py` / `eval_soccer2v2.py`, and the set is 66 MB
+# against ~2 MB for the logs that actually carry the results. The inputs are
+# versioned; the renders are not.
+runs/d2_sweep_clips/

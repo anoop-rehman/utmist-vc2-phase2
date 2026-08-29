@@ -1,0 +1,134 @@
+[2026-08-29 07:48:09,165] E0: cfg ant_e0_s1  seed 1  num_threads 15  max_epoch_num 100  save_model_interval 10  stop_file /tmp/stop_ant_e0_s1
+[2026-08-29 07:52:58,330] 0	T_sample 129.00	T_update 154.54	T_eval 5.49	ETA 7:56:53	train_R -0.00	train_R_eps -0.02	exec_R 0.00	exec_R_eps 4.42	ant_e0_s1
+[2026-08-29 07:52:58,331] save best checkpoint with rewards 4.42!
+[2026-08-29 07:56:21,676] 1	T_sample 65.40	T_update 131.73	T_eval 5.70	ETA 5:31:18	train_R 0.04	train_R_eps 1.45	exec_R 0.01	exec_R_eps 5.63	ant_e0_s1
+[2026-08-29 07:56:21,677] save best checkpoint with rewards 5.63!
+[2026-08-29 07:58:59,527] 2	T_sample 27.25	T_update 124.15	T_eval 5.93	ETA 4:14:21	train_R 0.11	train_R_eps 3.62	exec_R 0.00	exec_R_eps 3.81	ant_e0_s1
+[2026-08-29 08:01:40,018] 3	T_sample 26.95	T_update 126.06	T_eval 7.29	ETA 4:16:29	train_R 0.18	train_R_eps 6.23	exec_R 0.00	exec_R_eps 2.13	ant_e0_s1
+[2026-08-29 08:04:28,089] 4	T_sample 28.73	T_update 118.96	T_eval 19.82	ETA 4:25:14	train_R 0.21	train_R_eps 7.29	exec_R 0.00	exec_R_eps 0.75	ant_e0_s1
+[2026-08-29 08:08:30,075] 5	T_sample 44.85	T_update 149.35	T_eval 46.00	ETA 6:16:19	train_R 0.31	train_R_eps 11.45	exec_R -0.00	exec_R_eps -0.59	ant_e0_s1
+[2026-08-29 08:17:03,888] 6	T_sample 165.05	T_update 328.96	T_eval 19.02	ETA 13:15:12	train_R 0.36	train_R_eps 13.77	exec_R -0.00	exec_R_eps -0.40	ant_e0_s1
+[2026-08-29 08:20:44,566] 7	T_sample 66.12	T_update 134.56	T_eval 19.67	ETA 5:37:53	train_R 0.42	train_R_eps 16.21	exec_R 0.00	exec_R_eps 0.16	ant_e0_s1
+[2026-08-29 08:24:18,070] 8	T_sample 72.26	T_update 129.26	T_eval 11.66	ETA 5:23:19	train_R 0.46	train_R_eps 19.27	exec_R -0.00	exec_R_eps -0.53	ant_e0_s1
+[2026-08-29 08:27:20,008] 9	T_sample 68.16	T_update 103.89	T_eval 9.52	ETA 4:32:21	train_R 0.52	train_R_eps 22.91	exec_R -0.00	exec_R_eps -0.74	ant_e0_s1
+[2026-08-29 08:30:04,762] 10	T_sample 62.60	T_update 93.02	T_eval 8.19	ETA 4:02:59	train_R 0.57	train_R_eps 26.33	exec_R -0.00	exec_R_eps -1.77	ant_e0_s1
+[2026-08-29 08:32:44,774] 11	T_sample 58.82	T_update 94.06	T_eval 6.81	ETA 3:54:12	train_R 0.59	train_R_eps 29.98	exec_R 0.00	exec_R_eps 0.01	ant_e0_s1
+[2026-08-29 08:36:02,684] 12	T_sample 58.75	T_update 113.23	T_eval 24.69	ETA 4:45:11	train_R 0.62	train_R_eps 31.94	exec_R 0.00	exec_R_eps 3.06	ant_e0_s1
+[2026-08-29 08:40:20,865] 13	T_sample 81.74	T_update 169.26	T_eval 6.61	ETA 6:09:14	train_R 0.64	train_R_eps 34.14	exec_R -0.00	exec_R_eps -0.25	ant_e0_s1
+[2026-08-29 08:44:38,469] 14	T_sample 61.71	T_update 189.30	T_eval 6.33	ETA 6:04:34	train_R 0.68	train_R_eps 38.52	exec_R 0.00	exec_R_eps 3.37	ant_e0_s1
+[2026-08-29 08:48:38,157] 15	T_sample 53.42	T_update 179.22	T_eval 6.81	ETA 5:35:13	train_R 0.68	train_R_eps 40.71	exec_R 0.01	exec_R_eps 11.51	ant_e0_s1
+[2026-08-29 08:48:38,158] save best checkpoint with rewards 11.51!
+[2026-08-29 08:51:04,893] 16	T_sample 29.79	T_update 110.08	T_eval 6.26	ETA 3:22:08	train_R 0.70	train_R_eps 43.85	exec_R 0.01	exec_R_eps 10.71	ant_e0_s1
+[2026-08-29 08:54:20,366] 17	T_sample 27.39	T_update 128.19	T_eval 38.01	ETA 4:24:35	train_R 0.73	train_R_eps 49.34	exec_R 0.01	exec_R_eps 8.55	ant_e0_s1
+[2026-08-29 09:00:25,397] 18	T_sample 155.20	T_update 187.39	T_eval 22.19	ETA 8:12:27	train_R 0.79	train_R_eps 56.97	exec_R 0.01	exec_R_eps 11.84	ant_e0_s1
+[2026-08-29 09:00:25,398] save best checkpoint with rewards 11.84!
+[2026-08-29 09:03:20,661] 19	T_sample 54.12	T_update 112.94	T_eval 7.56	ETA 3:52:50	train_R 0.77	train_R_eps 55.32	exec_R 0.02	exec_R_eps 19.89	ant_e0_s1
+[2026-08-29 09:03:20,970] save best checkpoint with rewards 19.89!
+[2026-08-29 09:06:22,815] 20	T_sample 57.66	T_update 116.33	T_eval 7.31	ETA 3:58:43	train_R 0.83	train_R_eps 64.56	exec_R 0.03	exec_R_eps 26.38	ant_e0_s1
+[2026-08-29 09:06:22,816] save best checkpoint with rewards 26.38!
+[2026-08-29 09:10:46,816] 21	T_sample 54.55	T_update 201.51	T_eval 7.36	ETA 5:42:27	train_R 0.84	train_R_eps 63.09	exec_R 0.04	exec_R_eps 35.10	ant_e0_s1
+[2026-08-29 09:10:46,817] save best checkpoint with rewards 35.10!
+[2026-08-29 09:13:48,264] 22	T_sample 34.69	T_update 119.79	T_eval 25.59	ETA 3:51:05	train_R 0.83	train_R_eps 70.50	exec_R 0.03	exec_R_eps 27.76	ant_e0_s1
+[2026-08-29 09:19:32,760] 23	T_sample 104.41	T_update 232.47	T_eval 7.34	ETA 7:16:01	train_R 0.85	train_R_eps 73.13	exec_R 0.02	exec_R_eps 19.32	ant_e0_s1
+[2026-08-29 09:22:04,487] 24	T_sample 31.28	T_update 113.85	T_eval 6.38	ETA 3:09:23	train_R 0.86	train_R_eps 81.31	exec_R 0.04	exec_R_eps 36.44	ant_e0_s1
+[2026-08-29 09:22:04,488] save best checkpoint with rewards 36.44!
+[2026-08-29 09:24:37,752] 25	T_sample 29.82	T_update 116.78	T_eval 6.16	ETA 3:08:24	train_R 0.88	train_R_eps 88.65	exec_R 0.04	exec_R_eps 36.90	ant_e0_s1
+[2026-08-29 09:24:37,753] save best checkpoint with rewards 36.90!
+[2026-08-29 09:27:08,462] 26	T_sample 30.25	T_update 113.76	T_eval 6.13	ETA 3:02:41	train_R 0.90	train_R_eps 97.95	exec_R 0.03	exec_R_eps 32.93	ant_e0_s1
+[2026-08-29 09:29:37,091] 27	T_sample 27.09	T_update 115.21	T_eval 6.09	ETA 2:58:05	train_R 0.92	train_R_eps 104.61	exec_R 0.04	exec_R_eps 39.85	ant_e0_s1
+[2026-08-29 09:29:37,092] save best checkpoint with rewards 39.85!
+[2026-08-29 09:32:00,410] 28	T_sample 25.60	T_update 111.67	T_eval 5.49	ETA 2:48:56	train_R 0.93	train_R_eps 101.81	exec_R 0.04	exec_R_eps 36.05	ant_e0_s1
+[2026-08-29 09:34:32,743] 29	T_sample 28.54	T_update 118.03	T_eval 5.55	ETA 2:57:28	train_R 0.92	train_R_eps 112.77	exec_R 0.05	exec_R_eps 45.04	ant_e0_s1
+[2026-08-29 09:34:33,006] save best checkpoint with rewards 45.04!
+[2026-08-29 09:38:38,880] 30	T_sample 26.23	T_update 213.66	T_eval 5.48	ETA 4:42:10	train_R 0.91	train_R_eps 119.52	exec_R 0.05	exec_R_eps 49.19	ant_e0_s1
+[2026-08-29 09:38:38,882] save best checkpoint with rewards 49.19!
+[2026-08-29 09:41:10,449] 31	T_sample 31.92	T_update 113.69	T_eval 5.43	ETA 2:51:11	train_R 0.97	train_R_eps 127.48	exec_R 0.06	exec_R_eps 56.09	ant_e0_s1
+[2026-08-29 09:41:10,451] save best checkpoint with rewards 56.09!
+[2026-08-29 09:44:00,458] 32	T_sample 26.75	T_update 120.31	T_eval 21.52	ETA 3:08:15	train_R 0.97	train_R_eps 136.10	exec_R 0.05	exec_R_eps 48.66	ant_e0_s1
+[2026-08-29 09:48:04,222] 33	T_sample 121.27	T_update 116.56	T_eval 5.64	ETA 4:27:49	train_R 1.00	train_R_eps 143.18	exec_R 0.06	exec_R_eps 55.65	ant_e0_s1
+[2026-08-29 09:50:47,835] 34	T_sample 40.22	T_update 117.90	T_eval 5.26	ETA 2:56:59	train_R 0.95	train_R_eps 143.61	exec_R 0.06	exec_R_eps 63.38	ant_e0_s1
+[2026-08-29 09:50:47,836] save best checkpoint with rewards 63.38!
+[2026-08-29 09:54:16,265] 35	T_sample 37.77	T_update 164.75	T_eval 5.35	ETA 3:41:44	train_R 0.99	train_R_eps 158.97	exec_R 0.07	exec_R_eps 68.11	ant_e0_s1
+[2026-08-29 09:54:16,266] save best checkpoint with rewards 68.11!
+[2026-08-29 09:56:31,452] 36	T_sample 18.96	T_update 110.52	T_eval 5.17	ETA 2:21:23	train_R 1.01	train_R_eps 171.35	exec_R 0.08	exec_R_eps 79.92	ant_e0_s1
+[2026-08-29 09:56:31,453] save best checkpoint with rewards 79.92!
+[2026-08-29 09:59:31,891] 37	T_sample 19.40	T_update 146.96	T_eval 13.55	ETA 3:05:54	train_R 0.99	train_R_eps 170.13	exec_R 0.08	exec_R_eps 79.16	ant_e0_s1
+[2026-08-29 10:01:43,483] 38	T_sample 19.07	T_update 106.40	T_eval 5.87	ETA 2:13:31	train_R 1.01	train_R_eps 184.75	exec_R 0.09	exec_R_eps 85.81	ant_e0_s1
+[2026-08-29 10:01:43,484] save best checkpoint with rewards 85.81!
+[2026-08-29 10:04:00,314] 39	T_sample 19.79	T_update 111.02	T_eval 5.46	ETA 2:16:16	train_R 1.07	train_R_eps 183.57	exec_R 0.07	exec_R_eps 72.48	ant_e0_s1
+[2026-08-29 10:08:12,371] 40	T_sample 19.27	T_update 202.17	T_eval 28.93	ETA 4:06:12	train_R 0.98	train_R_eps 204.61	exec_R 0.07	exec_R_eps 72.80	ant_e0_s1
+[2026-08-29 10:12:30,442] 41	T_sample 49.55	T_update 202.60	T_eval 5.55	ETA 4:09:06	train_R 1.04	train_R_eps 198.34	exec_R 0.07	exec_R_eps 74.88	ant_e0_s1
+[2026-08-29 10:14:51,335] 42	T_sample 23.30	T_update 112.07	T_eval 5.29	ETA 2:13:37	train_R 1.03	train_R_eps 212.33	exec_R 0.09	exec_R_eps 87.70	ant_e0_s1
+[2026-08-29 10:14:51,335] save best checkpoint with rewards 87.70!
+[2026-08-29 10:18:14,390] 43	T_sample 26.19	T_update 151.63	T_eval 24.40	ETA 3:08:45	train_R 1.06	train_R_eps 241.73	exec_R 0.08	exec_R_eps 79.86	ant_e0_s1
+[2026-08-29 10:21:14,669] 44	T_sample 49.85	T_update 117.18	T_eval 12.98	ETA 2:45:01	train_R 1.06	train_R_eps 272.28	exec_R 0.16	exec_R_eps 122.34	ant_e0_s1
+[2026-08-29 10:21:14,670] save best checkpoint with rewards 122.34!
+[2026-08-29 10:24:58,302] 45	T_sample 45.32	T_update 165.37	T_eval 12.12	ETA 3:20:32	train_R 1.04	train_R_eps 258.46	exec_R 0.11	exec_R_eps 88.81	ant_e0_s1
+[2026-08-29 10:27:56,963] 46	T_sample 41.86	T_update 120.84	T_eval 15.50	ETA 2:37:25	train_R 1.04	train_R_eps 269.82	exec_R 0.08	exec_R_eps 79.05	ant_e0_s1
+[2026-08-29 10:31:19,459] 47	T_sample 29.51	T_update 141.69	T_eval 29.39	ETA 2:53:51	train_R 1.01	train_R_eps 288.23	exec_R 0.09	exec_R_eps 86.48	ant_e0_s1
+[2026-08-29 10:34:37,058] 48	T_sample 61.67	T_update 119.85	T_eval 15.50	ETA 2:47:28	train_R 1.05	train_R_eps 288.37	exec_R 0.09	exec_R_eps 89.62	ant_e0_s1
+[2026-08-29 10:37:13,320] 49	T_sample 25.76	T_update 114.47	T_eval 15.67	ETA 2:09:55	train_R 1.01	train_R_eps 291.97	exec_R 0.08	exec_R_eps 81.70	ant_e0_s1
+[2026-08-29 10:41:17,563] 50	T_sample 63.40	T_update 174.62	T_eval 5.52	ETA 3:18:53	train_R 1.02	train_R_eps 318.21	exec_R 0.09	exec_R_eps 87.04	ant_e0_s1
+[2026-08-29 10:43:36,936] 51	T_sample 20.34	T_update 113.49	T_eval 5.34	ETA 1:51:20	train_R 1.06	train_R_eps 368.54	exec_R 0.09	exec_R_eps 90.94	ant_e0_s1
+[2026-08-29 10:46:48,293] 52	T_sample 18.46	T_update 139.10	T_eval 32.68	ETA 2:29:02	train_R 1.04	train_R_eps 367.12	exec_R 0.12	exec_R_eps 118.94	ant_e0_s1
+[2026-08-29 10:51:47,700] 53	T_sample 75.70	T_update 216.37	T_eval 6.98	ETA 3:49:16	train_R 1.06	train_R_eps 371.89	exec_R 0.11	exec_R_eps 108.12	ant_e0_s1
+[2026-08-29 10:54:07,139] 54	T_sample 19.35	T_update 114.54	T_eval 5.31	ETA 1:44:24	train_R 1.06	train_R_eps 357.13	exec_R 0.11	exec_R_eps 106.19	ant_e0_s1
+[2026-08-29 10:56:25,395] 55	T_sample 18.78	T_update 109.62	T_eval 9.62	ETA 1:41:13	train_R 1.07	train_R_eps 378.30	exec_R 0.16	exec_R_eps 118.15	ant_e0_s1
+[2026-08-29 11:00:01,195] 56	T_sample 19.61	T_update 188.12	T_eval 7.84	ETA 2:34:29	train_R 1.03	train_R_eps 401.43	exec_R 0.13	exec_R_eps 127.28	ant_e0_s1
+[2026-08-29 11:00:01,196] save best checkpoint with rewards 127.28!
+[2026-08-29 11:02:23,498] 57	T_sample 19.52	T_update 110.74	T_eval 11.44	ETA 1:39:11	train_R 1.07	train_R_eps 385.03	exec_R 0.17	exec_R_eps 134.53	ant_e0_s1
+[2026-08-29 11:02:23,499] save best checkpoint with rewards 134.53!
+[2026-08-29 11:05:19,280] 58	T_sample 19.38	T_update 128.96	T_eval 26.20	ETA 1:59:16	train_R 1.12	train_R_eps 367.82	exec_R 0.12	exec_R_eps 111.56	ant_e0_s1
+[2026-08-29 11:09:04,001] 59	T_sample 78.71	T_update 139.97	T_eval 5.78	ETA 2:29:39	train_R 1.07	train_R_eps 400.48	exec_R 0.13	exec_R_eps 131.14	ant_e0_s1
+[2026-08-29 11:11:21,171] 60	T_sample 18.79	T_update 110.40	T_eval 7.42	ETA 1:28:48	train_R 1.07	train_R_eps 456.99	exec_R 0.20	exec_R_eps 153.47	ant_e0_s1
+[2026-08-29 11:11:21,172] save best checkpoint with rewards 153.47!
+[2026-08-29 11:14:52,995] 61	T_sample 18.89	T_update 152.74	T_eval 38.49	ETA 2:13:04	train_R 1.07	train_R_eps 439.27	exec_R 0.15	exec_R_eps 132.93	ant_e0_s1
+[2026-08-29 11:20:14,828] 62	T_sample 75.02	T_update 239.12	T_eval 7.22	ETA 3:18:11	train_R 1.08	train_R_eps 477.89	exec_R 0.15	exec_R_eps 133.05	ant_e0_s1
+[2026-08-29 11:24:23,659] 63	T_sample 68.58	T_update 174.20	T_eval 5.81	ETA 2:29:09	train_R 1.07	train_R_eps 507.55	exec_R 0.16	exec_R_eps 135.23	ant_e0_s1
+[2026-08-29 11:26:41,113] 64	T_sample 19.21	T_update 112.29	T_eval 5.69	ETA 1:20:02	train_R 1.06	train_R_eps 532.89	exec_R 0.19	exec_R_eps 155.96	ant_e0_s1
+[2026-08-29 11:26:41,114] save best checkpoint with rewards 155.96!
+[2026-08-29 11:29:44,805] 65	T_sample 19.34	T_update 131.81	T_eval 31.30	ETA 1:43:23	train_R 1.07	train_R_eps 516.94	exec_R 0.16	exec_R_eps 145.87	ant_e0_s1
+[2026-08-29 11:32:53,703] 66	T_sample 36.44	T_update 146.41	T_eval 5.70	ETA 1:43:42	train_R 1.10	train_R_eps 522.28	exec_R 0.17	exec_R_eps 160.73	ant_e0_s1
+[2026-08-29 11:32:53,704] save best checkpoint with rewards 160.73!
+[2026-08-29 11:35:07,548] 67	T_sample 19.12	T_update 108.48	T_eval 5.65	ETA 1:11:04	train_R 1.09	train_R_eps 490.13	exec_R 0.31	exec_R_eps 261.35	ant_e0_s1
+[2026-08-29 11:35:07,549] save best checkpoint with rewards 261.35!
+[2026-08-29 11:38:18,989] 68	T_sample 19.72	T_update 158.65	T_eval 11.59	ETA 1:38:09	train_R 1.09	train_R_eps 536.60	exec_R 0.26	exec_R_eps 220.06	ant_e0_s1
+[2026-08-29 11:41:41,990] 69	T_sample 83.53	T_update 113.13	T_eval 5.98	ETA 1:41:19	train_R 1.14	train_R_eps 542.36	exec_R 0.28	exec_R_eps 245.57	ant_e0_s1
+[2026-08-29 11:43:57,093] 70	T_sample 19.24	T_update 109.56	T_eval 5.77	ETA 1:05:03	train_R 1.11	train_R_eps 562.29	exec_R 0.26	exec_R_eps 229.70	ant_e0_s1
+[2026-08-29 11:47:49,576] 71	T_sample 19.56	T_update 204.18	T_eval 7.65	ETA 1:47:59	train_R 1.11	train_R_eps 570.49	exec_R 0.25	exec_R_eps 234.61	ant_e0_s1
+[2026-08-29 11:54:06,410] 72	T_sample 100.30	T_update 244.91	T_eval 31.19	ETA 2:49:23	train_R 1.12	train_R_eps 534.44	exec_R 0.36	exec_R_eps 328.81	ant_e0_s1
+[2026-08-29 11:54:06,457] save best checkpoint with rewards 328.81!
+[2026-08-29 11:56:52,197] 73	T_sample 39.50	T_update 115.29	T_eval 9.93	ETA 1:11:23	train_R 1.10	train_R_eps 560.12	exec_R 0.22	exec_R_eps 216.52	ant_e0_s1
+[2026-08-29 11:59:49,803] 74	T_sample 44.21	T_update 119.30	T_eval 13.69	ETA 1:13:50	train_R 1.13	train_R_eps 588.94	exec_R 0.38	exec_R_eps 379.55	ant_e0_s1
+[2026-08-29 11:59:49,804] save best checkpoint with rewards 379.55!
+[2026-08-29 12:04:05,201] 75	T_sample 80.40	T_update 162.93	T_eval 10.97	ETA 1:41:43	train_R 1.10	train_R_eps 619.39	exec_R 0.32	exec_R_eps 316.35	ant_e0_s1
+[2026-08-29 12:07:03,078] 76	T_sample 45.25	T_update 118.20	T_eval 14.02	ETA 1:08:02	train_R 1.14	train_R_eps 623.18	exec_R 0.35	exec_R_eps 347.08	ant_e0_s1
+[2026-08-29 12:10:53,984] 77	T_sample 31.10	T_update 189.09	T_eval 10.30	ETA 1:24:31	train_R 1.16	train_R_eps 672.84	exec_R 0.51	exec_R_eps 510.73	ant_e0_s1
+[2026-08-29 12:10:53,985] save best checkpoint with rewards 510.73!
+[2026-08-29 12:13:45,580] 78	T_sample 41.21	T_update 118.80	T_eval 10.59	ETA 0:59:43	train_R 1.12	train_R_eps 580.48	exec_R 0.58	exec_R_eps 491.92	ant_e0_s1
+[2026-08-29 12:17:10,381] 79	T_sample 36.29	T_update 132.81	T_eval 34.70	ETA 1:07:56	train_R 1.18	train_R_eps 627.83	exec_R 0.70	exec_R_eps 698.80	ant_e0_s1
+[2026-08-29 12:17:12,184] save best checkpoint with rewards 698.80!
+[2026-08-29 12:21:54,982] 80	T_sample 61.02	T_update 213.88	T_eval 5.74	ETA 1:28:52	train_R 1.16	train_R_eps 664.34	exec_R 0.57	exec_R_eps 475.57	ant_e0_s1
+[2026-08-29 12:24:40,913] 81	T_sample 36.24	T_update 122.29	T_eval 6.97	ETA 0:49:39	train_R 1.14	train_R_eps 625.16	exec_R 0.46	exec_R_eps 457.46	ant_e0_s1
+[2026-08-29 12:27:57,684] 82	T_sample 43.93	T_update 131.06	T_eval 21.44	ETA 0:55:39	train_R 1.15	train_R_eps 625.56	exec_R 0.59	exec_R_eps 551.19	ant_e0_s1
+[2026-08-29 12:33:26,166] 83	T_sample 79.59	T_update 214.18	T_eval 32.89	ETA 1:27:07	train_R 1.16	train_R_eps 631.79	exec_R 0.52	exec_R_eps 520.23	ant_e0_s1
+[2026-08-29 12:38:01,810] 84	T_sample 79.16	T_update 185.75	T_eval 10.30	ETA 1:08:48	train_R 1.16	train_R_eps 701.31	exec_R 0.59	exec_R_eps 496.11	ant_e0_s1
+[2026-08-29 12:40:49,266] 85	T_sample 39.38	T_update 116.60	T_eval 11.08	ETA 0:38:59	train_R 1.18	train_R_eps 648.22	exec_R 0.74	exec_R_eps 654.14	ant_e0_s1
+[2026-08-29 12:45:15,277] 86	T_sample 38.25	T_update 187.06	T_eval 38.88	ETA 0:57:15	train_R 1.18	train_R_eps 634.74	exec_R 0.62	exec_R_eps 580.34	ant_e0_s1
+[2026-08-29 12:49:11,794] 87	T_sample 37.49	T_update 182.64	T_eval 15.81	ETA 0:47:11	train_R 1.13	train_R_eps 646.23	exec_R 0.53	exec_R_eps 424.07	ant_e0_s1
+[2026-08-29 12:51:40,429] 88	T_sample 20.83	T_update 114.37	T_eval 13.15	ETA 0:27:12	train_R 1.15	train_R_eps 750.07	exec_R 0.65	exec_R_eps 538.78	ant_e0_s1
+[2026-08-29 12:55:00,506] 89	T_sample 20.62	T_update 160.86	T_eval 18.21	ETA 0:33:17	train_R 1.14	train_R_eps 719.33	exec_R 0.74	exec_R_eps 698.42	ant_e0_s1
+[2026-08-29 13:00:09,275] 90	T_sample 63.02	T_update 206.29	T_eval 37.50	ETA 0:46:01	train_R 1.20	train_R_eps 623.72	exec_R 0.80	exec_R_eps 772.83	ant_e0_s1
+[2026-08-29 13:00:09,359] save best checkpoint with rewards 772.83!
+[2026-08-29 13:03:26,677] 91	T_sample 66.62	T_update 111.49	T_eval 16.01	ETA 0:25:53	train_R 1.15	train_R_eps 636.25	exec_R 0.75	exec_R_eps 747.93	ant_e0_s1
+[2026-08-29 13:05:55,226] 92	T_sample 22.60	T_update 110.81	T_eval 14.88	ETA 0:17:18	train_R 1.21	train_R_eps 661.19	exec_R 0.68	exec_R_eps 623.19	ant_e0_s1
+[2026-08-29 13:10:10,270] 93	T_sample 19.05	T_update 204.39	T_eval 31.14	ETA 0:25:27	train_R 1.18	train_R_eps 715.46	exec_R 0.76	exec_R_eps 679.58	ant_e0_s1
+[2026-08-29 13:14:49,108] 94	T_sample 50.83	T_update 199.11	T_eval 28.47	ETA 0:23:12	train_R 1.19	train_R_eps 720.48	exec_R 0.93	exec_R_eps 826.61	ant_e0_s1
+[2026-08-29 13:14:49,109] save best checkpoint with rewards 826.61!
+[2026-08-29 13:19:08,487] 95	T_sample 91.02	T_update 160.03	T_eval 7.23	ETA 0:17:13	train_R 1.18	train_R_eps 730.73	exec_R 0.78	exec_R_eps 678.32	ant_e0_s1
+[2026-08-29 13:22:06,883] 96	T_sample 47.60	T_update 116.64	T_eval 13.75	ETA 0:08:54	train_R 1.25	train_R_eps 733.85	exec_R 1.05	exec_R_eps 767.40	ant_e0_s1
+[2026-08-29 13:26:08,778] 97	T_sample 41.02	T_update 190.59	T_eval 9.79	ETA 0:08:03	train_R 1.23	train_R_eps 756.27	exec_R 1.02	exec_R_eps 987.04	ant_e0_s1
+[2026-08-29 13:26:08,779] save best checkpoint with rewards 987.04!
+[2026-08-29 13:31:02,083] 98	T_sample 98.19	T_update 188.54	T_eval 5.67	ETA 0:04:52	train_R 1.27	train_R_eps 674.73	exec_R 1.03	exec_R_eps 948.43	ant_e0_s1
+[2026-08-29 13:32:37,811] 99	T_sample 18.03	T_update 71.79	T_eval 5.65	ETA 0:00:00	train_R 1.26	train_R_eps 624.12	exec_R 0.99	exec_R_eps 963.84	ant_e0_s1
+[2026-08-29 13:32:38,168] training done!

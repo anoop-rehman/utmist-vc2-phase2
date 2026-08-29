@@ -30,6 +30,15 @@ second one resumes a run whose step is already 0 and is dropped (measured:
 `video/initial_ant` was absent from the history while `video/best_median_worst`
 at the same step was present). Sidecars are therefore GROUPED by (project, run,
 step) and each group is one log call.
+
+Media is therefore logged with NO explicit step at all. Passing `step=` only
+ever creates ways to lose a row -- a backfill (a video rendered for epoch 30
+after epoch 100 was logged) is dropped, and `run.step` on a resumed run reads 0
+rather than the run's real last step, so detecting the backfill from inside the
+process does not work either (tried; the rows were still dropped). Letting wandb
+append at its own counter cannot drop anything, and `epoch` is logged as a
+metric and declared as the step metric, so every chart plots at the right epoch.
+Only the raw `_step` slider is out of order, which nothing here reads.
 """
 
 import argparse
@@ -75,9 +84,9 @@ def main():
             payload.update(side["scalars"])
             payload[side["key"]] = wandb.Video(side["mp4"], fps=side["fps"],
                                                format="mp4")
-        wandb.log(payload, step=step)
+        wandb.log(payload)
         run.finish()
-        print(f"[media] {name} step {step} <- " +
+        print(f"[media] {name} epoch {step} <- " +
               ", ".join(os.path.basename(s["mp4"]) for _, s in items))
         n += len(items)
         if not args.keep:

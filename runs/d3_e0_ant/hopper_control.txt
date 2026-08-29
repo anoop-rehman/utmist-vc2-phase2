@@ -1,0 +1,13 @@
+# all censuses below run in TEST mode (topology_census fix, 2026-08-29)
+ant_e0_s1 epoch    0  distinct  182/200  top    4 (2.0%)  mean-action topo 45d9344be831 17 bodies / 16 motors  [0,1,11,111,112,12,121,123,13,14,2,21,22,223,23,3,4]
+ant_e0_s2 epoch    0  distinct  176/200  top    3 (1.5%)  mean-action topo aa03b76992ee 7 bodies / 6 motors  [0,1,13,14,2,3,4]
+ant_e0_s3 epoch    0  distinct  173/200  top    5 (2.5%)  mean-action topo 9a51d315a8da 5 bodies / 4 motors  [0,1,2,3,4]
+hopper_gpu epoch    0  distinct   21/200  top   61 (30.5%)  mean-action topo 992b4aee3a32 3 bodies / 2 motors  [0,1,11]
+hopper_gpu epoch   50  distinct    7/200  top  112 (56.0%)  mean-action topo 818fd6f7c0a2 7 bodies / 6 motors  [0,1,11,111,21,211,31]
+hopper_gpu epoch  100  distinct    3/200  top  178 (89.0%)  mean-action topo 53607ca9d9be 8 bodies / 7 motors  [0,1,11,111,21,211,31,311]
+hopper_gpu epoch  200  distinct    2/200  top  196 (98.0%)  mean-action topo 53607ca9d9be 8 bodies / 7 motors  [0,1,11,111,21,211,31,311]
+hopper_gpu epoch  400  distinct    3/200  top  193 (96.5%)  mean-action topo 53607ca9d9be 8 bodies / 7 motors  [0,1,11,111,21,211,31,311]
+hopper_gpu epoch 1000  distinct    3/200  top  198 (99.0%)  mean-action topo 818fd6f7c0a2 7 bodies / 6 motors  [0,1,11,111,21,211,31]
+hopper_gpu_s2 epoch    0  distinct   19/200  top   71 (35.5%)  mean-action topo ae31e892f55b 2 bodies / 1 motors  [0,1]
+hopper_gpu_s2 epoch   50  distinct    9/200  top   99 (49.5%)  mean-action topo 479928342d5f 6 bodies / 5 motors  [0,1,11,111,21,31]
+hopper_gpu_s2 epoch  100  distinct    5/200  top  182 (91.0%)  mean-action topo 818fd6f7c0a2 7 bodies / 6 motors  [0,1,11,111,21,211,31]

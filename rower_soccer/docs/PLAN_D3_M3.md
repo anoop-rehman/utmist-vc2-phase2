@@ -111,6 +111,33 @@ we would learn that after spending the compute rather than before.
   mechanism (longer skeleton annealing, an exploration bonus, or population
   diversity pressure).
 
+#### E0 RESULT, 2026-08-29 — run, and it did NOT falsify. See `D3_E0_ANT.md`.
+
+Three seeds, 100 epochs, on THEIR ant on their CPU reference (our GPU port has
+no ant path — four hopper-only hardcodings, listed in `gate_their_ant.py`).
+
+* **The skeleton stage keeps exploring.** At epoch 20 all three seeds sample
+  187/188/187 distinct topologies out of 200; at epoch 100 they are at 34/20/27
+  with the most common topology holding 20/41/26%. The hopper is at 3 distinct
+  and 89% by epoch 100. The mean-action design changes at 9, 7 and 9 of the 11
+  censuses and had still not settled at epoch 100.
+* **But seeds do not give different bodies.** The three final bodies are
+  Jaccard 0.76-0.82 apart and 0.39-0.50 SMD apart — LESS divergent than the
+  hopper's two seeds (0.88, 0.70) — while their gaits differ enormously
+  (`exec_R_eps` 800 / 256 / 331; 37.0 / 5.9 / 15.6 m travelled; 47% / 4% / 25%
+  airborne). Same body, different gait. The "different bodies for different
+  roles" ambition needs role pressure or a diversity term, not more seeds.
+* **Their ant's design box is far better behaved than their hopper's**: zero
+  parameters at any bound across 1,745 sampled capsules and actuators, against
+  40-44% of hopper capsules at the minimum radius; floor penetration 0.09-0.11 m
+  against 0.27 m; net/path 0.93-0.99.
+* **Correction to `D3_HANDOFF.md` carried by this experiment**: the "199 of 200
+  designs share one topology by epoch 100" figure is an epoch-1000 number. At
+  epoch 100 the measured value is 178/200 (89%) on `hopper_gpu`.
+
+Open question §3.2 ("how much of E0 to run?") is answered: 100 epochs answers
+the convergence and variability questions and does not converge a body.
+
 ### E1 — Our ant inside Transform2Act, on a locomotion task
 
 The porting rung. Transform2Act's `Robot` parses a specific XML dialect

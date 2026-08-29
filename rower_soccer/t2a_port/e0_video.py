@@ -26,12 +26,37 @@ all identical in length and body count). mujoco-py's render path touches the
 sim, and the solver's warm start carries that into the next step. So pass 2
 cannot be asserted equal to pass 1 on the return.
 
-What IS asserted is episode identity -- same step count and same body count, the
-things that would change if the replay had actually diverged onto a different
-design or trajectory -- and every panel is LABELLED with the return pass 2
-measured for the frames it is showing. The label therefore always describes the
-video, and the only thing pass 1 is trusted for is the ranking, over gaps
-(-3.4 to 66.2 at epoch 10) four orders of magnitude larger than the drift.
+That perturbation also breaks the replay in a way a tolerance cannot fix, and
+this is the reason for the per-episode seeding below. One episode terminating a
+step later (measured: 236 -> 237 at `ant_e0_s2` epoch 30) means one extra action
+is drawn from the shared torch generator, so EVERY LATER EPISODE draws from a
+shifted stream and gets a genuinely different design. Widening the tolerance
+would have hidden that rather than fixed it.
+
+So `seed_all` runs at the start of every episode with `seed + i`, not once per
+pass. Each episode's design and start state then depend only on its own index,
+and rendering episode 4 cannot touch episode 5. With that, the design is
+identical between passes by construction.
+
+What is asserted is therefore the DESIGN, and ONLY the design: body count,
+exact. Episode length and return are reported, not asserted, because the
+perturbation is chaotic once an episode is long -- measured at `ant_e0_s2`
+epoch 90, the same design ran 597 steps unrendered and 427 rendered, a 28%
+difference from a 4th-decimal nudge, because the tilt/height test trips at a
+different point after the trajectories separate. A tolerance that passed that
+would be vacuous, and one that failed it would reject a correct replay. The
+design is the thing per-episode seeding actually guarantees, so it is the thing
+worth asserting.
+
+The consequence, stated rather than hidden: the best/median/worst RANKING comes
+from pass 1, and pass 2's returns differ from it by up to ~7% on long episodes,
+so on a close call the "best" panel may not be the true best of the nine. Every
+panel is labelled with its own pass-2 return, so the numbers on screen are
+always right even when the rank ordering is marginal.
+
+Every panel is LABELLED with the return pass 2 measured for the frames it is
+showing, so the label always describes the video, and the only thing pass 1 is
+trusted for is the ranking.
 
     cd /workspace/Transform2Act && source env-gpu.sh
     MUJOCO_GL=osmesa .venv-gpu/bin/python .../t2a_port/e0_video.py \
@@ -156,9 +181,9 @@ def main():
     env.cfg = cfg
 
     # ---- pass 1: rank, no rendering ------------------------------------
-    seed_all(env, args.seed)
     stats = []
     for i in range(args.episodes):
+        seed_all(env, args.seed + i)
         r, n, _, nb = roll(env, policy, args, False, args.initial_body)
         stats.append((r, n, nb))
     order = np.argsort([s[0] for s in stats])
@@ -168,22 +193,26 @@ def main():
           " ".join(f"{s[0]:.2f}" for s in stats))
 
     # ---- pass 2: replay the same episodes, render the three chosen -----
-    seed_all(env, args.seed)
-    panels, drift = {}, 0.0
+    panels, drift, step_drift = {}, 0.0, 0
     for i in range(args.episodes):
+        seed_all(env, args.seed + i)
         want = i in pick
         r, n, frames, nb = roll(env, policy, args, want, args.initial_body)
-        assert n == stats[i][1] and nb == stats[i][2], (
-            f"replay landed on a DIFFERENT episode at index {i}: pass 1 gave "
-            f"{stats[i][1]} steps / {stats[i][2]} bodies, pass 2 gave {n} / "
-            f"{nb}. Fix the seeding rather than loosening this.")
-        drift = max(drift, abs(r - stats[i][0]) / max(abs(stats[i][0]), 1e-9))
+        rel = abs(r - stats[i][0]) / max(abs(stats[i][0]), 1e-9)
+        assert nb == stats[i][2], (
+            f"replay built a DIFFERENT DESIGN at index {i}: pass 1 gave "
+            f"{stats[i][2]} bodies, pass 2 gave {nb}. Per-episode seeding makes "
+            f"the design independent of rendering, so this is a real bug, not "
+            f"drift. Do not loosen it.")
+        drift = max(drift, rel)
+        step_drift = max(step_drift, abs(n - stats[i][1]))
         if want:
             panels[pick[i]] = (
                 [label(f, f"{pick[i]}  R={r:.1f}  {n} steps  {nb} bodies")
                  for f in frames], r, n, nb)
 
-    print(f"  render drift (pass2 vs pass1 return, relative): {drift:.2e}")
+    print(f"  render drift: return {drift:.2e} relative, "
+          f"episode length {step_drift} step(s)")
     order3 = ["best", "median", "worst"]
     tiles = [panels[k][0] for k in order3 if panels.get(k) and panels[k][0]]
     if not tiles:

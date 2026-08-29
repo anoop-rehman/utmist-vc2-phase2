@@ -231,3 +231,12 @@ runs/t2a_port/*/models/
 # against ~2 MB for the logs that actually carry the results. The inputs are
 # versioned; the renders are not.
 runs/d2_sweep_clips/
+
+# D3 M3 E0 rollout videos. 81 MB of mp4 across 53 clips, and every one of them
+# is already in wandb under d3_e0_ant_seed{1,2,3}_media, which is where anyone
+# would actually look at them. The PNG contact sheets ARE committed, because a
+# still of the final bodies is what the doc points at. Sidecars are upload
+# receipts and mean nothing after the fact.
+runs/d3_e0_ant/renders/*.mp4
+runs/d3_e0_ant/renders/*.mp4.json
+runs/d3_e0_ant/renders/*.mp4.json.sent

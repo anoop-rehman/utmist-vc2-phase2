@@ -129,6 +129,58 @@ Our `dev_ant_body.xml` is a different dialect.
 * **Note**: this is on the critical path regardless of E0's outcome — every rung
   from E3 onward needs our ant in their representation.
 
+### E1.1 — Is the GNN controller as good as plain PPO? (added 2026-08-29, user)
+
+E1 runs design+control. **E1.1 nulls the skeleton and attribute stages** so only
+the execution stage does anything, on the **DeepMind ant**, and asks the
+question E0 could not: how good is Transform2Act's *controller* on its own,
+measured against ordinary PPO on the same body?
+
+**The comparison must be run in-house, not against published Ant numbers.** The
+two reward functions are different objectives, measured from source:
+
+| | forward | control cost | contact | survive |
+|---|---|---|---|---|
+| gym `Ant-v2/3/4` (`gym/envs/mujoco/ant.py:14-19`) | `dx/dt` | `0.5 * sum(a^2)` | `0.5e-3 * sum(clip(cfrc)^2)` | **+1.0 / step** |
+| Transform2Act ant (`design_opt/envs/ant.py:153-165`) | `dx/dt` | `1e-4 * mean(a^2)` | none | **0.0** (cfg default) |
+
+Three incompatibilities, any one of which breaks a naive comparison:
+
+1. **The survive bonus.** Gym pays +1.0 every step; over a 1,000-step episode
+   that is +1,000 of the ~5,000-6,000 a published PPO Ant run reports. Roughly a
+   fifth of the headline number is standing still.
+2. **Control cost differs by ~40,000x.** `0.5 * sum` over 8 actuators against
+   `1e-4 * mean` is a factor of 8 from sum-vs-mean and 5,000 from the
+   coefficient.
+3. Gym charges a contact cost; Transform2Act does not.
+
+So "the GNN reached X, published PPO reaches Y" would compare two different
+objectives and mean nothing.
+
+**Design.** Run **PPO with an ordinary MLP policy inside the Transform2Act ant
+env itself**, morphology frozen exactly as for the GNN arm, same reward, same
+episode structure, same step budget. Then the only difference between arms is
+the policy architecture. Published Ant numbers are useful as a *sanity check on
+the environment* -- if our PPO-in-their-env lands nowhere near the literature
+after adjusting for the reward difference, the env is the suspect -- but they
+are not the comparison.
+
+**Open decision: how to null the stages.** Two readings, and they are not
+equivalent:
+* *Skip* the design stages entirely -- the episode is execution only. Changes
+  episode length and removes the stage flag's meaning from the observation.
+* *Run* them but force a zero/identity action. Keeps the episode structure and
+  the observation layout, costs 6 steps per episode, and is closer to "the same
+  agent with evolution switched off".
+The second is the better control for "does the GNN control well", because it
+holds everything except the design action constant. Worth gating that the body
+really is unchanged across the episode either way.
+
+**What would falsify.** If the GNN materially underperforms a plain MLP on the
+same body, same reward and same budget, then every design+control result rests
+on a weaker controller than the task allows, and that is a bigger problem than
+any morphology finding.
+
 ### E2 — GNN control only, morphology frozen, on run-to-goal
 
 The sanity rung, and the user's own suggestion. We know the CompetEvo ant can

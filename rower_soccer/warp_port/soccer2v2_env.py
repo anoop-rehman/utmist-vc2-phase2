@@ -81,11 +81,44 @@ rules here are dm_control's, evaluated analytically on this scene's geometry:
   * AFTER A GOAL: `MultiturnTask` re-runs the initializer and does NOT terminate
     (`match.py` passes `terminate_on_goal=False`). So does this env: the scoring
     world alone is re-spawned, in place, and the match clock keeps running.
-  * OUT OF PLAY: the ball's centre outside dm_control's inverted `field`
-    detector, `|x| >= field_half_x or |y| >= field_half_y`, where the field is
-    the pitch inset by the goal depth on every side. dm_soccer answers this with
-    a THROW-IN (`Task._throw_in`): the ball is moved to `(x*u, y*u)` with
-    `u ~ U[0.7, 0.9]` and its velocity zeroed. Same here, per world.
+  * OUT OF PLAY: THERE IS NONE, AND THERE IS NO THROW-IN. The ball BOUNCES OFF
+    the pitch boundary instead. This is dm_control's own alternative --
+    `Pitch(field_box=True)`, surfaced as `soccer.load(..., enable_field_box=True)`
+    -- and it is what the DeepMind 2021 football paper specifies:
+
+        "To emulate the football rules, the players can travel outside of the
+         boundaries of the pitch (but cannot travel outside of the gradient-
+         coloured physical hoardings), whereas the ball 'bounces off' of the
+         pitch boundary. This simplification removes the need for a throw-in
+         mechanism, and leaves the physics simulation to determine the range of
+         strategies that players can execute (including deliberately bouncing
+         the ball off the pitch boundary)."
+
+    So there are TWO boundaries here and they are DIFFERENT SURFACES:
+
+        field box  |x| = field_half_x, |y| = field_half_y   BALL ONLY
+        wall_*     |x| = pitch_half_x, |y| = pitch_half_y   EVERYTHING
+
+    The field box is 8 box geoms built by `scene.fieldbox_pos_size`, a
+    transcription of `pitch._fieldbox_pos_size`, carrying dm_control's
+    `_FIELD_BOX_CONTACT_BIT` so they collide with the ball and with nothing
+    else. Players run straight through them and are stopped only by the
+    hoardings 1.67 m further out, which is the paper's "players can travel
+    outside of the boundaries of the pitch". Holes are left at the goal mouths
+    (|y| < goal_half_width, z < goal_height) so the ball still reaches the goal
+    detector: the boundary's x plane and the goal line are the SAME plane, so a
+    ball crossing the goal line either scores through the mouth or bounces off
+    the rest of the line, which is the football rule rather than an
+    approximation of it.
+
+    dm_control disables its throw-in the same way -- `Pitch.register_ball` only
+    calls `self._field.register_entities(ball)` in the NON-field-box branch, so
+    with a field box the out-of-play detector never sees the ball.
+
+    `detected_off_court` is kept as a DIAGNOSTIC (it is what the gate reads to
+    prove the ball stays in), and `throw_ins` is kept and stays 0 forever so the
+    trainer's metric schema is unchanged and a regression shows up as a number
+    moving rather than as a key disappearing.
   * TIME LIMIT: `match_seconds` (45 s in the game). This is the one thing that
     ends an episode, and it ends every world at once -- the drills' trainer keys
     on a single `done` bool for the whole batch and this env keeps that contract.
@@ -120,9 +153,16 @@ from rower_soccer.warp_port.worm_env_base import (CONTROL_DT, SUBSTEPS,
                                                   to_ego3, vec_to_ego3)
 
 # dm_control soccer constants, transcribed. See the module docstring.
-DM_THROW_IN_Z = 0.5              # task._THROW_IN_BALL_Z, scaled by pitch_scale
-DM_THROW_IN_SHRINK = (0.7, 0.9)  # task._throw_in's random_state.uniform bounds
 DM_SPAWN_RATIO = 0.6             # initializers._SPAWN_RATIO
+# The throw-in constants (_THROW_IN_BALL_Z, _throw_in's U[0.7, 0.9] shrink) are
+# GONE, not merely unused: the ball bounces now. See the RULES section.
+#
+# How far past the field line the ball's CENTRE may be before the escape guard
+# calls it out. The ball legitimately rests up to one radius past the line (the
+# contact is surface-to-surface, not centre-to-plane) and legitimately goes far
+# past it in x inside the goal mouth, so the guard is applied per axis and only
+# outside the mouth. This is the slack it allows on top of the radius.
+BALL_ESCAPE_MARGIN = 0.20
 
 
 def drill_ball():
@@ -297,7 +337,6 @@ class WarpSoccer2v2Env:
         # leave a sliver that is out of play but not yet past the goal line.
         goal_depth = self.pitch_half[0] - self.goal_x
         self.field_half = (self.goal_x, self.pitch_half[1] - goal_depth)
-        self.throw_in_z = max(self.ball_radius, DM_THROW_IN_Z * pitch_scale)
         # attack_x[t] = the x of the goal team t shoots at; +1 home, -1 away.
         self.attack_sign = torch.tensor([1.0, -1.0], device=self.device)
         self.attack_x = self.attack_sign * self.goal_x
@@ -346,7 +385,10 @@ class WarpSoccer2v2Env:
         self.goal_reward = torch.zeros(self.n, self.n_agents, device=self.device)
         self.world_reset = torch.zeros(self.n, dtype=torch.bool,
                                        device=self.device)
+        # Kept at 0 forever so the trainer's metric schema does not change and a
+        # regression to the throw-in shows as a number moving, not a key vanishing.
         self.throw_ins = torch.zeros(self.n, device=self.device)
+        self.ball_escapes = torch.zeros(self.n, device=self.device)
         self._ball_vcols = torch.arange(self.bv, self.bv + 6,
                                         device=self.device).unsqueeze(0)
         self.t = 0
@@ -544,16 +586,45 @@ class WarpSoccer2v2Env:
         return ~((b[:, 0].abs() < self.field_half[0])
                  & (b[:, 1].abs() < self.field_half[1]))
 
-    def _throw_in(self, mask):
-        """`Task._throw_in`, per world: pull the ball back toward the centre by
-        a random 10-30% and drop it, velocity zeroed."""
+    def ball_escaped(self):
+        """[n] bool: the ball is on the WRONG SIDE of the field box.
+
+        Not a rule -- a smoke alarm. The field box is a physical wall, so this
+        should be identically False, and the gate asserts it is over a long
+        rollout. It is here because the one way it can fail is silent and
+        permanent: the ball can only get out over the top (40 m) or through a
+        solver blow-out, and once out it is TRAPPED in the 1.67 m strip between
+        the field box and the hoardings for the rest of the match -- a dead ball
+        that no reward signal distinguishes from a boring one.
+
+        Per axis, because the two axes are not alike:
+          * y: the boundary is unbroken, so any |y| past the line is an escape.
+          * x: the goal mouth is a legitimate hole in the line, so a ball past
+            the line THROUGH the mouth (|y| < goal_half_width, z < goal_height)
+            is a goal in progress, not an escape.
+        """
+        b = self.ball_xyz()
+        r = self.ball_radius + BALL_ESCAPE_MARGIN
+        out_y = b[:, 1].abs() > self.field_half[1] + r
+        in_mouth = ((b[:, 1].abs() < self.goal_half_width)
+                    & (b[:, 2] < self.goal_height))
+        out_x = (b[:, 0].abs() > self.field_half[0] + r) & ~in_mouth
+        return out_x | out_y
+
+    def _recover_escaped(self, mask):
+        """Put an escaped ball back on the centre spot and count it.
+
+        Deliberately NOT a throw-in: a throw-in is a rule the policy can learn
+        to farm, and this is a fault. It is counted separately (`ball_escapes`)
+        so that if it ever fires it shows up as a number rather than as a
+        mysteriously well-behaved boundary.
+        """
         idx = mask.nonzero(as_tuple=True)[0]
         if idx.numel() == 0:
             return
-        lo, hi = DM_THROW_IN_SHRINK
-        shrink = lo + (hi - lo) * self._rand(int(idx.numel()), 2)
-        self._write_ball(idx, self.ball_xy()[idx] * shrink, z=self.throw_in_z)
-        self.throw_ins[idx] += 1.0
+        self._write_ball(idx, torch.zeros(int(idx.numel()), 2,
+                                          device=self.device))
+        self.ball_escapes[idx] += 1.0
 
     def _apply_rules(self):
         """One control step of match bookkeeping, in `match.py`'s order.
@@ -580,10 +651,12 @@ class WarpSoccer2v2Env:
             self._spawn_worlds(fresh.nonzero(as_tuple=True)[0])
             self.goal_latch = self.goal_latch & ~fresh
             self._forward()
-        # -- out of play -> throw-in (no re-spawn of the players).
-        out = self.detected_off_court()
-        if bool(out.any()):
-            self._throw_in(out)
+        # -- out of play: nothing to do. The ball bounces off the field box in
+        # the physics, so there is no throw-in and no rule here at all. What
+        # remains is the fault guard; see `ball_escaped`.
+        esc = self.ball_escaped()
+        if bool(esc.any()):
+            self._recover_escaped(esc)
             self._forward()
 
     # -- physics ------------------------------------------------------------
@@ -613,6 +686,7 @@ class WarpSoccer2v2Env:
         self.scored_now.zero_()
         self.goal_reward.zero_()
         self.throw_ins.zero_()
+        self.ball_escapes.zero_()
         self.prev_ctrl.zero_()
         self._forward()
         self.reward.reset(self)
@@ -655,6 +729,7 @@ class WarpSoccer2v2Env:
             home_goals=float(self.score[:, 0].mean()),
             away_goals=float(self.score[:, 1].mean()),
             throw_ins=float(self.throw_ins.mean()),
+            ball_escapes=float(self.ball_escapes.mean()),
             ball_dist=float(torch.linalg.norm(self.ball_xy(), dim=-1).mean()),
             upright=float(self.upright().mean()),
             diverged=self.n_diverged)

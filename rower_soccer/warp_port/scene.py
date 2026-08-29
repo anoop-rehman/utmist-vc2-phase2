@@ -105,6 +105,200 @@ def goal_geometry(scale=1.0):
     return (42.6667 * scale, 11.88 * scale, 5.3333 * scale)
 
 
+def field_geometry(scale=1.0):
+    """(field_half_x, field_half_y) -- dm_control's `field` detector, the line
+    the BALL may not cross. `Pitch._build` sizes it `self._size - 2*goal_size[0]`
+    with `goal_size[0] = _SIDE_WIDTH/2`, which for this pitch is the pitch half
+    inset by the goal DEPTH on every side. So field_half_x IS the goal line: the
+    x wall of the field box and the plane the goal posts stand on are the same
+    plane, which is what makes "crosses the goal line" mean either a goal
+    (through the mouth) or a bounce (off the rest of the line)."""
+    return (48.0 * scale - 2 * (5.3333 / 2) * scale,
+            36.0 * scale - 2 * (5.3333 / 2) * scale)
+
+
+# ---------------------------------------------------------------------------
+# The field box -- dm_control's own "ball bounces off the pitch boundary".
+# ---------------------------------------------------------------------------
+# This is NOT an invention. `dm_control.locomotion.soccer.pitch.Pitch` takes
+# `field_box=True` (surfaced as `soccer.load(..., enable_field_box=True)`) and
+# builds exactly these 8 boxes from `_fieldbox_pos_size`, whose docstring reads:
+#
+#     "Walls are placed around the field so that the ball cannot travel beyond
+#      `field` but walkers can walk outside of the `field` but not the
+#      surrounding pitch. Holes are left in the fieldbox at the goal positions
+#      to enable scoring."
+#
+# which is the DeepMind 2021 football paper's rule verbatim:
+#
+#     "the players can travel outside of the boundaries of the pitch (but cannot
+#      travel outside of the gradient-coloured physical hoardings), whereas the
+#      ball 'bounces off' of the pitch boundary. This simplification removes the
+#      need for a throw-in mechanism."
+#
+# It is also how dm_control DISABLES the throw-in: `register_ball` calls
+# `self._field.register_entities(ball)` only in the `else` branch, so with a
+# field box the out-of-play detector never sees the ball at all.
+#
+# Two surfaces, and they are different surfaces:
+#   * field box  at +/- field_geometry(scale)  -- ball only  (the pitch boundary)
+#   * wall_*     at +/- pitch_half             -- everything (the hoardings)
+# The 1.67 m (at scale 0.3125) between them is the strip players may run in and
+# the ball may not enter. Collapsing them onto one line would delete that strip
+# and with it the paper's rule.
+FIELD_BOX_CONTACT_BIT = 128      # pitch._FIELD_BOX_CONTACT_BIT, verbatim
+# _fieldbox_pos_size's box_half_height, and deliberately NOT scaled by
+# pitch_scale. Scaled it would be 6.25 m at 0.3125, and the known ball energy
+# injection (see build_creature_scene: the ball can leave a contact at 20-30 m/s)
+# reaches 20-45 m. A ball that clears the boundary is not just out of play, it is
+# TRAPPED in the strip between the field box and the hoardings for the rest of
+# the match, which is the exact dead-ball failure the throw-in existed to
+# prevent. 20 m is dm_control's own absolute number; keeping it absolute costs
+# nothing (it is 8 geoms either way) and removes the failure.
+FIELD_BOX_HALF_HEIGHT = 20.0
+FIELD_BOX_THICKNESS = 1.0        # _fieldbox_pos_size's thickness
+# priority 2 beats the BALL's priority 1, so this geom -- not the ball -- sets
+# condim/friction/solref for the ball<->boundary contact. mujoco_warp honours
+# geom_priority identically to MuJoCo (collision_core._contact_params: the higher
+# priority sets mix to 1.0/0.0 outright). Without it the ball's own solref wins
+# every contact it is in and the boundary cannot be given a restitution of its
+# own without also changing how the ball meets the ground and the creatures.
+FIELD_BOX_PRIORITY = 2
+# solref = (timeconst, dampratio). dampratio 1.0 is critically damped, i.e. NO
+# bounce: measured on the existing hoardings the ball arrives at 8 m/s, leaves at
+# 0.71 m/s (restitution 0.089) and then dies against the wall. That is what "the
+# ball hits an invisible wall" looked like. Underdamping the contact is the only
+# lever MuJoCo gives for restitution, so this value was MEASURED off a 2-D sweep
+# (Warp, ball fired at the boundary at 8 / 15 / 22 / 30 / 40 / 50 m/s):
+#
+#   timeconst   dampratio      restitution over 8..50 m/s
+#   0.005       0.45..0.17     0.06 .. 76      <- pumps almost everywhere
+#   0.01        0.45..0.20     0.20 .. 0.71    ; 0.17 PUMPS (e = 1.12)
+#   0.02        0.20..0.10     0.46 .. 0.81    ; 0.07 PUMPS (e = 4.8)
+#   0.03        0.20..0.07     0.44 .. 0.96    ; 0.05 PUMPS (e = 1.9)
+#
+# "PUMP" means restitution > 1: the contact returns MORE energy than it received
+# and the ball is flung clean past the hoardings (measured to x = 17.1 against a
+# 13.33 boundary). That is the same energy-injection failure that NaN'd
+# dribble_paper_v5/v6 through the ball's own solref, and in a 24 h run it is
+# fatal, so the value is picked for margin and not for the springiest bounce.
+#
+# (0.03, 0.15): restitution 0.50 .. 0.64, essentially FLAT from 8 to 50 m/s,
+# with the pump cliff measured at dampratio < 0.07 -- a 2.1x margin -- and a
+# timeconst 12x the 0.0025 timestep rather than the 2x floor that pumped.
+#
+# Note the direction is the OPPOSITE of the ball's own solref, where SOFTER
+# (0.02) was the unstable choice. It differs because the counter-body differs: a
+# 22 kg creature pushed 20 cm into the ball separates violently, whereas an
+# immovable static wall just pushes back longer and more gently. The sweep above
+# is on the contact actually in question, not an extrapolation from that one.
+FIELD_BOX_SOLREF = (0.03, 0.15)
+# condim 3 + low sliding friction: a hoarding should reverse the normal
+# component and keep the tangential one. The ball's own (0.7, 0.075, 0.075) is
+# for grass and would scrub a glancing bounce almost to a stop.
+FIELD_BOX_CONDIM = 3
+FIELD_BOX_FRICTION = (0.05, 0.005, 0.0001)
+
+
+def fieldbox_pos_size(scale=1.0):
+    """`pitch._fieldbox_pos_size` transcribed, scaled by `scale`.
+
+    Returns 8 (pos, size) box specs: two full-length side walls in y, and on
+    each x end a pair of corner walls either side of the goal mouth plus a
+    lintel above it. The gap is therefore exactly the goal mouth --
+    |y| < goal_half_width and z < goal_height -- so the ball reaches the goal
+    detector through it and bounces off everything else.
+    """
+    fx, fy = field_geometry(scale)
+    _, gw, gh = goal_geometry(scale)          # half-width, FULL height of the mouth
+    # dm_control's `goal_size` is a HALF-extent triple, so its `goal_size[2]` is
+    # half the goal height (the Goal body sits at z = goal_size[2] with half-
+    # height goal_size[2], spanning 0 .. 2*goal_size[2]). `goal_geometry` returns
+    # the FULL height instead, so the lintel formulas take gh/2 where
+    # `_fieldbox_pos_size` takes goal_size[2] -- which puts the lintel's underside
+    # at exactly 2*(gh/2) = gh, the crossbar. Using gh directly here leaves a
+    # goal-height-tall slot above the crossbar that a lofted ball escapes through;
+    # that was measured, not reasoned about.
+    gh_half = 0.5 * gh
+    bh = FIELD_BOX_HALF_HEIGHT          # absolute, see the constant
+    th = FIELD_BOX_THICKNESS * scale
+    corner_pos_y = 0.5 * (fy + gw)
+    corner_size_y = 0.5 * (fy - gw)
+    top_pos_z = bh + gh_half
+    top_size_z = bh - gh_half
+    ox, oy = fx + th, fy + th
+    return [
+        ((0.0, -oy, bh), (fx, th, bh)),                     # near side
+        ((0.0, oy, bh), (fx, th, bh)),                      # far side
+        ((-ox, -corner_pos_y, bh), (th, corner_size_y, bh)),
+        ((-ox, 0.0, top_pos_z), (th, gw, top_size_z)),      # over the home mouth
+        ((-ox, corner_pos_y, bh), (th, corner_size_y, bh)),
+        ((ox, -corner_pos_y, bh), (th, corner_size_y, bh)),
+        ((ox, 0.0, top_pos_z), (th, gw, top_size_z)),       # over the away mouth
+        ((ox, corner_pos_y, bh), (th, corner_size_y, bh)),
+    ]
+
+
+def field_box_names(n=8):
+    return [f"field_box_{i}" for i in range(n)]
+
+
+def _add_field_box(spec, scale=1.0, visual=True):
+    """Append the 8 collision boxes (+ an optional visible marker strip).
+
+    The collision boxes are alpha 0, as dm_control's are: they are 12.5 m tall
+    at this scale and drawing them would hide the pitch. But the whole reason
+    for this change is that the old throw-in "reads as the ball hitting an
+    invisible wall" on video -- so a knee-high, NON-COLLIDING strip is drawn
+    along the same line, and it is a `site`, which carries no contype at all and
+    so cannot enter the broadphase even by accident.
+    """
+    for name, (pos, size) in zip(field_box_names(), fieldbox_pos_size(scale)):
+        g = spec.worldbody.add_geom(
+            name=name, type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=list(pos), size=list(size))
+        g.rgba = [0.3, 0.3, 0.3, 0.0]
+    if not visual:
+        return
+    _, _, gh = goal_geometry(scale)
+    h = gh / 8.0                      # dm_control's hoarding width
+    for i, (pos, size) in enumerate(fieldbox_pos_size(scale)):
+        if abs(pos[2] - FIELD_BOX_HALF_HEIGHT) > 1e-9:
+            continue                  # skip the lintels over the goal mouths
+        s = spec.worldbody.add_site(
+            name=f"field_line_{i}", type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=[pos[0], pos[1], h], size=[size[0], size[1], h])
+        s.rgba = [0.95, 0.95, 0.98, 0.55]
+
+
+def _wire_field_box(model, ball_geom="ball_geom"):
+    """Post-compile: make the boxes collide with the BALL ONLY, and give them
+    priority over it so the boundary's own solref/friction govern the bounce.
+
+    Collision filter is dm_control's, bit for bit (`Pitch.register_ball`):
+    geoms a and b collide iff (a.contype & b.conaffinity) | (b.contype &
+    a.conaffinity). The boxes carry only bit 7; the ball gains bit 7 on top of
+    its normal contype. Creatures, ground, walls and goals keep contype 1 /
+    conaffinity 1, so (1 & 128) == 0 both ways and they pass straight through
+    the field box -- which IS the paper's "players can travel outside the
+    boundaries of the pitch".
+
+    Must run AFTER `_stiffen_warp_contacts`, which rewrites geom_solref[:, 0]
+    for every geom in the model and would otherwise clobber the value here.
+    """
+    bit = FIELD_BOX_CONTACT_BIT
+    bid = model.geom(ball_geom).id
+    model.geom_contype[bid] = int(model.geom_contype[bid] or 1) | bit
+    for name in field_box_names():
+        i = model.geom(name).id
+        model.geom_contype[i] = bit
+        model.geom_conaffinity[i] = bit
+        model.geom_priority[i] = FIELD_BOX_PRIORITY
+        model.geom_condim[i] = FIELD_BOX_CONDIM
+        model.geom_solref[i] = list(FIELD_BOX_SOLREF)
+        model.geom_friction[i] = list(FIELD_BOX_FRICTION)
+
+
 # Goal mouth centres, for the `shoot` task obs. Home goal is at -x, away at +x.
 GOAL_X = 42.6667
 GOAL_HALF_WIDTH = 11.88
@@ -410,13 +604,20 @@ def colour_teams(model, prefixes, n_per_team, team_rgba=TEAM_RGBA):
 def build_soccer_scene(creature_xml_path, n_players=4, ball: BallSpec = None,
                        pitch_scale=0.3125, prefix_fmt="p{}-",
                        topdown_cam=False, cam_height=25.0, view_half=12.0,
-                       team_rgba=TEAM_RGBA):
+                       team_rgba=TEAM_RGBA, field_box=True):
     """The 2v2 scene: `n_players` creatures + one ball on the scaled pitch.
 
     Returns (model, [SceneMeta per player], player_prefixes). Players are
     attached in slot order, so slot k is `prefix_fmt.format(k)`; slots 0..n/2-1
     are HOME (defending -x) and the rest AWAY, matching `game/match.py`'s
     SLOTS = (home_1, home_2, away_1, away_2).
+
+    `field_box=True` adds dm_control's own ball-only pitch boundary (see
+    `_add_field_box`): the ball bounces off it, players run straight through it,
+    and the goal mouths are gaps in it. It replaces the throw-in, exactly as
+    `soccer.load(..., enable_field_box=True)` does upstream. The drills' scene
+    (`build_creature_scene`) does NOT get it -- their ball never reaches the
+    boundary and adding geoms there would move their contact counts.
 
     Everything except the creature count is `build_creature_scene`'s scene:
     same pitch XML, same ball spec, same Warp contact stiffening, same meta
@@ -430,6 +631,8 @@ def build_soccer_scene(creature_xml_path, n_players=4, ball: BallSpec = None,
         _attach_creature(spec, creature_xml_path, p,
                          xy=default_formation(k, n_players, pitch_scale))
     _add_ball(spec, ball)
+    if field_box:
+        _add_field_box(spec, pitch_scale)
     if topdown_cam:
         import math as _math
         fovy = 2.0 * _math.degrees(_math.atan(view_half / cam_height))
@@ -439,6 +642,9 @@ def build_soccer_scene(creature_xml_path, n_players=4, ball: BallSpec = None,
     if team_rgba is not None:
         colour_teams(model, prefixes, n_players // 2, team_rgba)
     _stiffen_warp_contacts(model, ball)
+    if field_box:
+        # AFTER the stiffening -- it rewrites geom_solref[:, 0] for every geom.
+        _wire_field_box(model)
     ball_body = model.body("ball").id
     metas = [creature_meta(model, creature_xml_path, prefix=p, ball=ball,
                            ball_body=ball_body) for p in prefixes]

@@ -662,15 +662,20 @@ def render_clip(env, ren, ac, path, seconds=15.0, deterministic=True):
     return path, env.match_stats()
 
 
-def render_best_median_worst(env, ren, ac, path, rank_key="goals",
+def render_best_median_worst(env, ren, ac, path, rank_key="ball_path",
                              deterministic=True, seed=0):
     """One full match across `env.n` worlds; film the best, median and worst.
 
-    Ranked by GOALS, not by reward. Under symmetric self-play the team reward
-    is zero-sum and one shared policy plays both sides, so per-world reward is
-    ~0 by construction and would rank noise. Goals (tie-broken by how far the
-    ball actually travelled) is what separates a lively match from a dead one,
-    which is the thing a human watching the clip wants to see.
+    Ranked by BALL PATH -- total distance the ball travelled -- not by reward
+    and not by goals. Under symmetric self-play the team reward is zero-sum and
+    one shared policy plays both sides, so per-world reward is ~0 by
+    construction and would rank noise. Goals are better but are integer-valued
+    and usually 0 at this stage, so they rank almost every world equal and the
+    "best" clip is then chosen by the tie-break anyway. Ball path is continuous,
+    is non-zero from the first iteration, and is exactly what separates a lively
+    match from a dead one -- which is the thing a human watching the clip wants
+    to see. It is also `eval_soccer2v2.pick_quartiles`'s own default, so the
+    in-loop clip and the end-of-run evaluation rank worlds the same way.
 
     Reuses `eval_soccer2v2`: the same rollout-then-render-from-qpos path the
     final evaluation uses, so the in-loop clip and the end-of-run evaluation
@@ -832,6 +837,16 @@ def build_parser():
     # -- plumbing -----------------------------------------------------------
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--ckpt-secs", type=float, default=900.0)
+    p.add_argument("--archive-steps", type=int, default=1_000_000_000,
+                   help="additionally write an immutable, step-stamped "
+                        "checkpoint_step_<N>.pt every N env steps. 0 disables. "
+                        "WHY THIS EXISTS: checkpoint.pt / latest.pt / final.pt "
+                        "are each OVERWRITTEN every --ckpt-secs, so before this "
+                        "flag a 4.28B-step run had exactly one archived copy in "
+                        "the world (a manual cp at 2B) and no history at all -- "
+                        "no way to bisect a regression, and one bad write from "
+                        "losing the run. The archive carries the optimiser "
+                        "state, so it is RESUMABLE, not merely evaluable.")
     p.add_argument("--video-secs", type=float, default=900.0,
                    help="0 disables in-loop video")
     p.add_argument("--video-worlds", type=int, default=32,
@@ -848,9 +863,15 @@ def build_parser():
                         "almost nothing, take them.")
     p.add_argument("--video-panel", type=int, nargs=2, default=(640, 480),
                    metavar=("W", "H"))
-    p.add_argument("--video-rank", default="goals",
+    p.add_argument("--video-rank", default="ball_path",
                    help="per-world key to rank best/median/worst on. NOT "
-                        "reward: self-play reward is zero-sum and ~0 per world")
+                        "reward: self-play reward is zero-sum and ~0 per world. "
+                        "ball_path (total distance the ball travelled) is the "
+                        "default because it is continuous and non-zero from "
+                        "iteration 0, where goals are integer and usually 0 for "
+                        "every world; it is also what "
+                        "eval_soccer2v2.pick_quartiles ranks on, so the in-loop "
+                        "clip and the final evaluation agree.")
     p.add_argument("--video-mode", default="bmw", choices=("bmw", "single"),
                    help="bmw = best/median/worst over --video-worlds; single "
                         "= the old one-world clip")
@@ -1024,9 +1045,40 @@ def run(args):
     bmw_pair = None
     t0 = time.perf_counter()
     deadline = t0 + args.minutes * 60.0 if args.minutes > 0 else float("inf")
-    last_ckpt = last_video = t0
+    last_ckpt = t0
+    # Fire the FIRST video at the first iteration rather than one full cadence
+    # in. On a resume it is the cheapest confirmation that the env change did
+    # what it was supposed to, and on a fresh run it is the only record of what
+    # the starting behaviour looked like -- by the time the first timed event
+    # would land, 15 minutes of training have already changed it.
+    last_video = t0 - args.video_secs
     last_steps, last_t = start_steps, t0
     it = 0
+
+    archive_dir = os.path.join(run_dir, "archive")
+
+    def archive_checkpoint(tag="periodic"):
+        """Step-stamped, never overwritten. Same payload as the rolling
+        checkpoint (ac + opt + total_steps), so `--resume` can be pointed at any
+        of these and pick the run up exactly where it was."""
+        os.makedirs(archive_dir, exist_ok=True)
+        pth = os.path.join(archive_dir,
+                           f"checkpoint_step_{trainer.total_steps:012d}.pt")
+        if os.path.exists(pth):
+            return None
+        save_checkpoint(trainer, pth)
+        print(f"[archive] {tag} {pth} ({trainer.total_steps:,} steps)",
+              flush=True)
+        if args.gcs_bucket:
+            from rower_soccer.warp_port.gcs import sync_async
+            sync_async(pth, args.gcs_bucket, args.run_name)
+        return pth
+
+    # Bucket on the step counter, not on wall clock, so the archive cadence is
+    # reproducible across restarts and machine speeds. Seeded from the RESUMED
+    # step count so a resume does not immediately re-archive what it just loaded.
+    archive_bucket = (trainer.total_steps // args.archive_steps
+                      if args.archive_steps > 0 else 0)
     while trainer.total_steps < args.steps and time.perf_counter() < deadline:
         if args.stop_file and os.path.exists(args.stop_file):
             print(f"[setup] stop file {args.stop_file} seen -- finishing "
@@ -1082,6 +1134,11 @@ def run(args):
                   f"upright={m.get('upright', float('nan')):.2f} "
                   f"shap={env.shaping_scale:.2f} "
                   f"div={trainer.n_diverged}/{env.n_diverged}", flush=True)
+        if args.archive_steps > 0:
+            b = trainer.total_steps // args.archive_steps
+            if b > archive_bucket:
+                archive_bucket = b
+                archive_checkpoint()
         if now - last_ckpt >= args.ckpt_secs:
             last_ckpt = now
             save_checkpoint(trainer, ckpt_path)
@@ -1127,6 +1184,11 @@ def run(args):
     save_checkpoint(trainer, ckpt_path)
     export_sb3_compatible(ac, os.path.join(run_dir, "final.pt"))
     export_sb3_compatible(ac, latest_path)
+    # The end-of-run state is the one most worth keeping and, before this, the
+    # one most reliably lost: `final.pt` is overwritten by the NEXT run of the
+    # same name, and carries no optimiser state, so it cannot be resumed from.
+    if args.archive_steps > 0:
+        archive_checkpoint(tag="end-of-run")
     flush_log()
     print(f"[setup] done: {it} iters, {trainer.total_steps:,} env steps, "
           f"{(time.perf_counter() - t0) / 60:.1f} min", flush=True)

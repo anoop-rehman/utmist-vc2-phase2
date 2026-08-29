@@ -37,7 +37,11 @@ What this exists to defend
  4. THE RULES ARE dm_control's. Goals, out of play and the reward are compared
     against dm_control's OWN detector (`PositionDetector._is_in_zone`) on a
     `Pitch` configured to this scene's geometry -- the same class `game/match.py`
-    counts goals with -- not against a re-derivation of the rule.
+    counts goals with -- not against a re-derivation of the rule. As of the 1f
+    boundary change there is no out-of-play rule at all: the ball bounces off
+    dm_control's own field box instead, and the tests around that are built so
+    that "the pitch is sealed shut" (which would make scoring impossible) cannot
+    pass -- every boundary claim is paired with a scoring claim.
  5. IT RUNS. N worlds x M steps, finite observations, zero diverged worlds.
 """
 
@@ -484,31 +488,305 @@ def t_goal_counting_and_reward():
     return "rising edge counts once, +1/-1 by team, ball re-spotted after a goal"
 
 
-def t_out_of_play_throw_in():
-    """dm_soccer's throw-in: the ball comes back by a random 10-30%, its
-    velocity is zeroed, and nobody else is moved."""
-    e = env2v2()
-    e.reset()
-    before = [e.root_xy(k)[0].clone() for k in range(e.n_agents)]
-    x0, y0 = 0.5 * e.field_half[0], e.field_half[1] + 1.0
-    e.qpos[:, e.bq + 0] = x0
-    e.qpos[:, e.bq + 1] = y0
-    e.qpos[:, e.bq + 2] = 0.15
-    e.qvel[:, e.bv + 0] = 4.0
+# ---------------------------------------------------------------------------
+# The pitch boundary: the ball bounces, the players walk through (D1 1f).
+# ---------------------------------------------------------------------------
+# These replace `t_out_of_play_throw_in`. The throw-in is gone; see the env's
+# RULES section and D1_UNIT1F.md for the paper quote that removed it.
+#
+# The trap this set is built around: a gate that only checks "the ball stays
+# inside" passes perfectly on a pitch that has been sealed shut, and a sealed
+# pitch cannot be scored in. So every boundary claim below is paired with a
+# scoring claim, and `t_goals_survive_the_boundary` fires through the mouth from
+# angles that skim the posts -- the shots most likely to be eaten by a wall that
+# is 1 cm too wide.
+
+# Measured on this scene; see D1_UNIT1F.md for the dampratio sweep these came
+# off. Not a target that was designed for -- a band around what the contact
+# actually does, wide enough for the CPU and Warp solvers to both sit in it and
+# narrow enough that "the wall absorbs everything" (the old walls: 0.089) and
+# "the wall injects energy" (>1) are both failures.
+BOUNCE_E_MIN = 0.25
+BOUNCE_E_MAX = 0.95
+
+# Chosen to clear EVERY ball path used below by >= 3 m. The first version of
+# this list put a creature at (6, -5), which is exactly where the "angled left"
+# shot starts, and the shot was deflected into a post -- the gate failed on the
+# fixture, not on the env.
+_PARK = [(5.0, -8.5), (-5.0, -8.5), (-6.0, 2.0), (-6.0, -2.0)]
+
+
+def _park_players(e):
+    """Put the four creatures somewhere they cannot touch the ball or a wall.
+
+    Not cosmetic: an earlier version of this probe parked them at (-100, -100),
+    which is on the far side of the hoardings -- the walls are INFINITE planes,
+    so the players were instantly ejected and the whole scene NaN'd. Inside the
+    pitch, away from the ball's line, is the only safe place."""
+    for k in range(e.n_agents):
+        qr = e.qpos_root[k]
+        e.qpos[:, qr + 0] = _PARK[k % 4][0]
+        e.qpos[:, qr + 1] = _PARK[k % 4][1]
     e._forward()
-    assert bool(e.detected_off_court()[0])
+
+
+def _fire_ball(e, start, vel, steps=140):
+    """Roll the ball from `start` at `vel` and record its path.
+
+    Returns (pos[steps, 3], vel[steps, 3]) for world 0, stepping the BACKEND
+    directly so no rule (goal respawn, escape guard) can move the ball behind
+    the measurement's back."""
+    e.reset()
+    _park_players(e)
+    e.qpos[:, e.bq + 0] = start[0]
+    e.qpos[:, e.bq + 1] = start[1]
+    e.qpos[:, e.bq + 2] = start[2]
+    e.qvel[:, e.bv:e.bv + 6] = 0.0
+    for i in range(3):
+        e.qvel[:, e.bv + i] = vel[i]
+    e._forward()
+    P, V = [], []
+    for _ in range(steps):
+        e.backend.step()
+        P.append(e.ball_xyz()[0].clone())
+        V.append(e.ball_vel_xyz()[0].clone())
+    return torch.stack(P).cpu().numpy(), torch.stack(V).cpu().numpy()
+
+
+def t_ball_bounces_off_the_boundary(use_gpu=False, speed=8.0):
+    """Fired at each of the four boundary walls, the ball REVERSES the normal
+    component and keeps a measured fraction of its speed.
+
+    The old behaviour is the thing being excluded: the hoardings at +/-15 /
+    +/-11.25 have always been there, and a ball fired at them returns 0.089 of
+    its speed and then dies against them -- which is what "the ball hits an
+    invisible wall and stops" looked like on video. A bounce has to be
+    measurably better than that, and it must not be better than 1.0 either,
+    because a contact that returns more than it received is an energy pump and
+    this scene has NaN'd on exactly that before."""
+    e = (WarpSoccer2v2Env(num_worlds=1, use_gpu=True, seed=0, match_seconds=1.0)
+         if use_gpu else env2v2())
+    fx, fy = e.field_half
+    r = e.ball_radius
+    cases = {
+        # name          start            velocity        axis  sign  limit
+        "+x": ((9.0, 6.0, r), (speed, 0.0, 0.0), 0, +1, fx),
+        "-x": ((-9.0, 6.0, r), (-speed, 0.0, 0.0), 0, -1, fx),
+        "+y": ((0.0, 5.0, r), (0.0, speed, 0.0), 1, +1, fy),
+        "-y": ((0.0, -5.0, r), (0.0, -speed, 0.0), 1, -1, fy),
+    }
+    out = []
+    for name, (start, vel, ax, sgn, lim) in cases.items():
+        P, V = _fire_ball(e, start, vel)
+        comp = sgn * V[:, ax]                       # +ve = travelling outward
+        # Restitution is out/in AT THE CONTACT, not out/launch: the ball loses a
+        # few m/s to rolling friction on the way to the wall, and dividing by the
+        # launch speed understated the bounce by ~25% in the first version of
+        # this test. `hit` is the first step where the outward component dies.
+        rev = np.nonzero(comp <= 0.0)[0]
+        assert rev.size, f"{name}: the ball never stopped travelling outward"
+        hit = int(rev[0])
+        v_in = float(comp[:hit].max()) if hit else speed
+        v_ret = float((-comp).max())                # best reversed speed
+        peak = float((sgn * P[:, ax]).max())
+        ecoef = v_ret / v_in
+        assert v_ret > 0.0, f"{name}: the ball never reversed (no bounce at all)"
+        assert BOUNCE_E_MIN <= ecoef <= BOUNCE_E_MAX, (
+            f"{name}: restitution {ecoef:.3f} outside the measured band "
+            f"[{BOUNCE_E_MIN}, {BOUNCE_E_MAX}] -- a wall that absorbs "
+            f"everything is not a bounce, and one that returns >1 is a pump")
+        # the CENTRE may reach the line plus one radius (surface contact) and no
+        # further; the old throw-in line is where the bounce happens.
+        assert peak <= lim + r + 0.06, (
+            f"{name}: ball centre reached {peak:.3f}, past the boundary "
+            f"{lim:.3f} + r {r:.3f}")
+        out.append(f"{name} {v_in:.2f}->{v_ret:.2f} e={ecoef:.3f} "
+                   f"peak={peak:.3f}")
+    return ("launched at " + str(speed) + " m/s; in->out at the wall: "
+            + ", ".join(out) + "  (old hoardings: e=0.089)")
+
+
+def t_players_cross_the_boundary_but_not_the_hoardings():
+    """The paper's other half: "the players can travel outside of the
+    boundaries of the pitch (but cannot travel outside of the gradient-coloured
+    physical hoardings)".
+
+    So the field box must be transparent to a creature and the hoardings must
+    not be. Checked as a CONTACT-FILTER claim rather than by driving an ant into
+    a wall and hoping: a policy that cannot reach the strip would make a
+    behavioural test vacuously pass."""
+    import mujoco
+    from rower_soccer.warp_port.scene import field_box_names
+    e = env2v2()
+    m = e.model
+    fb = [m.geom(n).id for n in field_box_names()]
+    ball = m.geom("ball_geom").id
+    walls = [m.geom(n).id for n in
+             ("wall_nx", "wall_px", "wall_ny", "wall_py")]
+
+    def collide(a, b):
+        return bool((m.geom_contype[a] & m.geom_conaffinity[b])
+                    or (m.geom_contype[b] & m.geom_conaffinity[a]))
+
+    # every creature geom (they carry the player prefixes) vs the two surfaces
+    n_creature = 0
+    for g in range(m.ngeom):
+        name = m.geom(g).name or ""
+        if not any(name.startswith(f"p{k}-") for k in range(e.n_agents)):
+            continue
+        n_creature += 1
+        for f in fb:
+            assert not collide(g, f), \
+                f"creature geom {name} collides with the field box"
+        assert any(collide(g, w) for w in walls), \
+            f"creature geom {name} passes through the hoardings"
+    assert n_creature > 0, "no creature geoms found -- the filter is untested"
+    for f in fb:
+        assert collide(ball, f), "the ball does NOT collide with the field box"
+    assert all(collide(ball, w) for w in walls), \
+        "the ball does not collide with the hoardings"
+    # and the ball must still meet the ground and the goal frame
+    assert collide(ball, m.geom("ground").id)
+    assert collide(ball, m.geom("away_goal_left_post").id)
+    return (f"{n_creature} creature geoms: through the field box, stopped by "
+            f"the hoardings; ball stopped by both, still meets ground + posts")
+
+
+def t_goals_survive_the_boundary():
+    """The failure this whole change is most likely to cause: sealing the pitch
+    so well that it can no longer be scored in.
+
+    The boundary's x plane IS the goal line, so the mouth is a hole in the wall
+    the ball has to thread. Shots are fired from realistic positions, including
+    two that pass within a ball's width of a post, and one deliberately WIDE
+    shot that must NOT score (or "it always scores" would pass too)."""
+    e = env2v2()
+    gw, gh, gx = e.goal_half_width, e.goal_height, e.goal_x
+    r = e.ball_radius
+    shots = [
+        ("centre",        (6.0, 0.0, r),  (12.0, 0.0, 0.0),   True),
+        ("angled left",   (6.0, -5.0, r), (11.0, 4.5, 0.0),   True),
+        ("angled right",  (6.0, 5.0, r),  (11.0, -4.5, 0.0),  True),
+        ("near post L",   (8.0, 0.0, r),  (12.0, 7.5, 0.0),   True),
+        ("near post R",   (8.0, 0.0, r),  (12.0, -7.5, 0.0),  True),
+        ("lofted",        (7.0, 0.0, r),  (11.0, 0.0, 2.2),   True),
+        ("wide (miss)",   (6.0, 6.0, r),  (12.0, 3.0, 0.0),   False),
+    ]
+    out = []
+    for name, start, vel, want in shots:
+        P, _ = _fire_ball(e, start, vel, steps=110)
+        inside = ((P[:, 0] > gx) & (P[:, 0] < e.pitch_half[0])
+                  & (np.abs(P[:, 1]) < gw) & (P[:, 2] > 0.0) & (P[:, 2] < gh))
+        got = bool(inside.any())
+        assert got == want, (
+            f"{name}: scored={got}, expected {want}. closest approach "
+            f"x={P[:, 0].max():.2f} |y|@maxx="
+            f"{abs(P[int(P[:, 0].argmax()), 1]):.2f}")
+        if got:
+            out.append(f"{name} @x={P[inside][0, 0]:.2f},y={P[inside][0, 1]:+.2f}")
+        else:
+            out.append(f"{name} correctly no goal")
+    # and the env's own detector agrees on a live step, not just the geometry
+    e.reset()
+    _park_players(e)
+    e.qpos[:, e.bq + 0] = gx + 0.3
+    e.qpos[:, e.bq + 1] = 0.0
+    e.qpos[:, e.bq + 2] = r
+    e._forward()
+    assert int(e.detected_goal()[0]) == 1, "detected_goal did not fire"
     e.step(torch.zeros(e.n_agents, e.act_dim))
-    bx, by = e.ball_xy()[0].tolist()
-    ux, uy = bx / x0, by / y0
-    assert 0.7 <= ux <= 0.9 and 0.7 <= uy <= 0.9, \
-        f"throw-in shrink ({ux:.3f}, {uy:.3f}) outside dm_control's U[0.7, 0.9]"
-    assert float(torch.linalg.norm(e.ball_vel_xyz()[0])) < 1e-5, \
-        "the throw-in did not zero the ball velocity"
-    moved = max(float((e.root_xy(k)[0] - before[k]).abs().max())
-                for k in range(e.n_agents))
-    assert moved < 0.15, f"a throw-in teleported the players ({moved:.3f} m)"
-    assert float(e.throw_ins[0]) == 1.0
-    return f"shrink ({ux:.3f}, {uy:.3f}), ball velocity zeroed, players untouched"
+    assert float(e.score[0, 0]) == 1.0, "the goal was not counted"
+    return "; ".join(out) + "; detected_goal + score still fire"
+
+
+def t_no_throw_ins_and_the_ball_stays_in(worlds=2, steps=400, use_gpu=False):
+    """A long random rollout: no throw-in ever, no escape ever, and the ball
+    outside the field line ONLY when it is in a goal mouth.
+
+    `throw_ins` is deliberately still a field and still logged. If someone
+    reinstates the throw-in, this goes from 0 to non-zero and says so; if the
+    field were deleted instead, the trainer's metric would silently vanish."""
+    e = WarpSoccer2v2Env(num_worlds=worlds, use_gpu=use_gpu, seed=3,
+                         match_seconds=max(1.0, steps * 0.025),
+                         spawn="uniform")
+    assert not hasattr(e, "_throw_in"), \
+        "WarpSoccer2v2Env._throw_in still exists -- the throw-in was not removed"
+    dev = "cuda" if use_gpu else "cpu"
+    e.reset()
+    g = torch.Generator(device=dev).manual_seed(11)
+    fx, fy = e.field_half
+    r = e.ball_radius
+    worst_x = worst_y = 0.0
+    n_out_of_mouth = 0
+    n_kicks = 0
+    for t in range(steps):
+        # Random ANT torques barely move the ball, so a rollout driven by them
+        # alone would prove the boundary holds against a ball that never
+        # reaches it. Every 20 steps the ball is re-launched at 14 m/s in a
+        # random direction instead, which is faster than the policy ever kicks
+        # it and drives it into all four walls and both corners repeatedly.
+        if t % 20 == 0:
+            th = torch.rand(worlds, generator=g, device=dev) * (2 * np.pi)
+            e.qvel[:, e.bv + 0] = 14.0 * torch.cos(th)
+            e.qvel[:, e.bv + 1] = 14.0 * torch.sin(th)
+            e.qvel[:, e.bv + 2] = 0.0
+            e._forward()
+            n_kicks += worlds
+        a = (torch.rand(worlds * e.n_agents, e.act_dim, generator=g,
+                        device=dev) * 2 - 1)
+        e.step(a)
+        b = e.ball_xyz()
+        in_mouth = ((b[:, 1].abs() < e.goal_half_width)
+                    & (b[:, 2] < e.goal_height))
+        bad_x = (b[:, 0].abs() > fx + r + 0.06) & ~in_mouth
+        n_out_of_mouth += int(bad_x.sum())
+        off = b[:, 0].abs()[~in_mouth]
+        if off.numel():
+            worst_x = max(worst_x, float(off.max()))
+        worst_y = max(worst_y, float(b[:, 1].abs().max()))
+    assert float(e.throw_ins.max()) == 0.0, \
+        f"throw_ins reached {float(e.throw_ins.max())} -- the throw-in is back"
+    assert float(e.ball_escapes.max()) == 0.0, \
+        f"the ball escaped the field box {float(e.ball_escapes.max())} times"
+    assert n_out_of_mouth == 0, \
+        f"ball was past the goal line off-mouth on {n_out_of_mouth} world-steps"
+    assert worst_y <= fy + r + 0.06, f"ball reached |y|={worst_y:.3f} > {fy:.3f}"
+    assert e.n_diverged == 0, f"{e.n_diverged} diverged worlds"
+    return (f"{worlds}x{steps} steps on {dev}, {n_kicks} random 14 m/s "
+            f"launches: throw_ins=0, escapes=0, "
+            f"max |x| off-mouth {worst_x:.3f} (line {fx:.3f}), "
+            f"max |y| {worst_y:.3f} (line {fy:.3f})")
+
+
+def t_negative_control_boundary():
+    """The gate must be capable of failing.
+
+    Rebuild the SAME env with the field box removed -- which is exactly the
+    pre-change scene -- and require that the bounce check rejects it. If this
+    passes, the three tests above are measuring nothing.
+    """
+    import rower_soccer.warp_port.scene as S
+    e = WarpSoccer2v2Env(num_worlds=1, use_gpu=False, seed=0, match_seconds=1.0)
+    # Surgical: clear the field box's contact bits on THIS env's own compiled
+    # model. The CPU backend holds a reference to that same MjModel and MuJoCo
+    # re-reads contype/conaffinity every step, so this restores the pre-change
+    # pitch without rebuilding anything -- and it cannot leak into the cached
+    # envs the other tests share, because this env is built fresh here.
+    for n in S.field_box_names():
+        i = e.model.geom(n).id
+        e.model.geom_contype[i] = 0
+        e.model.geom_conaffinity[i] = 0
+    P, V = _fire_ball(e, (9.0, 6.0, e.ball_radius), (8.0, 0.0, 0.0))
+    peak = float(P[:, 0].max())
+    e_coef = float((-V[:, 0]).max()) / 8.0
+    failed = not (BOUNCE_E_MIN <= e_coef <= BOUNCE_E_MAX
+                  and peak <= e.field_half[0] + e.ball_radius + 0.06)
+    assert failed, (
+        "NEGATIVE CONTROL DID NOT FAIL: with the field box disabled the ball "
+        f"still 'bounced' (e={e_coef:.3f}, peak={peak:.3f}). The bounce test "
+        "is not measuring the field box.")
+    return (f"field box disabled -> e={e_coef:.3f}, ball reached x={peak:.3f} "
+            f"(past the {e.field_half[0]:.3f} line) -> gate correctly FAILS")
 
 
 def t_time_limit():
@@ -607,13 +885,27 @@ def main():
           t_goal_box_matches_dm_control)
     check("goals count on a rising edge and pay dm_soccer's +1/-1",
           t_goal_counting_and_reward)
-    check("out of play -> dm_soccer throw-in", t_out_of_play_throw_in)
+    check("the ball BOUNCES off the pitch boundary (cpu)",
+          t_ball_bounces_off_the_boundary)
+    check("players cross the boundary, the hoardings stop them",
+          t_players_cross_the_boundary_but_not_the_hoardings)
+    check("goals still register through the mouth, incl. near-post shots",
+          t_goals_survive_the_boundary)
+    check("no throw-ins, no escapes, the ball stays in (cpu)",
+          lambda: t_no_throw_ins_and_the_ball_stays_in(2, 400, False))
+    check("NEGATIVE CONTROL: the bounce gate fails without the field box",
+          t_negative_control_boundary)
     check("the match ends at the time limit, and only there", t_time_limit)
     check("the env steps N worlds for M steps, finite, 0 diverged (cpu)",
           lambda: t_env_runs(2, 40, False))
     if args.gpu:
         check("the env steps N worlds for M steps, finite, 0 diverged (warp)",
               lambda: t_env_runs(args.worlds, args.steps, True))
+        check("the ball BOUNCES off the pitch boundary (warp)",
+              lambda: t_ball_bounces_off_the_boundary(use_gpu=True))
+        check("no throw-ins, no escapes, the ball stays in (warp)",
+              lambda: t_no_throw_ins_and_the_ball_stays_in(
+                  args.worlds, args.steps, True))
 
     check("team colours are visual only (a coloured scene steps identically)",
           t_team_colour_is_inert)

@@ -533,3 +533,276 @@ opponent.
   compare it against is this run.
 * `runs_v2/` is gitignored, so checkpoints and logs live only on the box (and
   in GCS if `--gcs-bucket` is passed, which the baseline does not).
+
+---
+
+## 8. The pitch boundary: the ball bounces, the throw-in is gone (2026-08-29)
+
+*Changed: `warp_port/scene.py`, `warp_port/soccer2v2_env.py`,
+`warp_port/train_soccer2v2_warp.py`, `tests/test_soccer2v2.py` (12/12 -> 19/19).*
+
+### 8.1 The rule that changed, and why
+
+Until now the env implemented dm_soccer's **throw-in**: when the ball's centre
+left the `field` box it was teleported to `xy * u`, `u ~ U[0.7, 0.9]`, with its
+**velocity zeroed** (`_throw_in`, `DM_THROW_IN_SHRINK`). Measured over 256
+matches of the 4.28B checkpoint, that fired **2.46 times per 45 s match**, and
+on video it reads as the ball hitting an invisible wall and dying.
+
+The DeepMind 2021 football paper specifies the opposite:
+
+> "To emulate the football rules, the players can travel outside of the
+> boundaries of the pitch (but cannot travel outside of the gradient-coloured
+> physical hoardings), whereas the ball 'bounces off' of the pitch boundary.
+> This simplification removes the need for a throw-in mechanism, and leaves the
+> physics simulation to determine the range of strategies that players can
+> execute (including deliberately bouncing the ball off the pitch boundary)."
+
+**This is not a reinterpretation of dm_control — it is dm_control's other
+branch.** `dm_control.locomotion.soccer.pitch.Pitch` takes `field_box=True`
+(surfaced as `soccer.load(..., enable_field_box=True)`), and
+`_fieldbox_pos_size`'s own docstring says:
+
+> "Walls are placed around the field so that the ball cannot travel beyond
+> `field` but walkers can walk outside of the `field` but not the surrounding
+> pitch. Holes are left in the fieldbox at the goal positions to enable
+> scoring."
+
+It is also how dm_control **disables** the throw-in: `Pitch.register_ball` calls
+`self._field.register_entities(ball)` only in the *non*-field-box branch, so with
+a field box the out-of-play detector never sees the ball at all. So the change
+here is a transcription of an upstream option, not an invention.
+
+### 8.2 Where the bounce surface goes, and why not at the hoardings
+
+There are now **two** boundaries, and the whole point is that they are at
+**different radii**:
+
+| surface | at (pitch_scale 0.3125) | collides with |
+|---|---|---|
+| field box (the *pitch boundary*) | \|x\| = 13.333, \|y\| = 9.583 | the **ball only** |
+| `wall_nx/px/ny/py` (the *hoardings*) | \|x\| = 15.0, \|y\| = 11.25 | **everything** |
+
+The 1.67 m strip between them is the ground players may run on and the ball may
+not enter — which is exactly the paper's "players can travel outside of the
+boundaries of the pitch (but cannot travel outside of the ... hoardings)". Put
+the bounce at the hoardings instead and that strip vanishes, taking the rule
+with it.
+
+The field box is at `field_half`, i.e. dm_control's own `field` detector — the
+line the throw-in used to fire on. Two independent reasons, beyond it being
+upstream's choice:
+
+1. **`field_half_x` IS the goal line.** The goal posts stand on |x| = 13.333.
+   With the boundary on that plane, a ball crossing the goal line either goes
+   through the mouth (a goal) or bounces off the rest of the line. That is the
+   football rule, not an approximation of it. A boundary at 15.0 would let the
+   ball roll 1.67 m *past* the goal line beside the post and come back, which no
+   football does.
+2. **It leaves the hoardings free to do their own job.** They already existed and
+   already stop everything; they are now the players' limit and nothing else.
+
+**One honest mismatch, recorded rather than papered over:** dm_control's pitch
+*texture* has its white border at the edge of the ground plane, i.e. at
+±15.0/±11.25, so the drawn touchline is ~1.67 m outside the line the ball
+bounces off. That is an upstream texture property that predates this change (the
+same is true in dm_control's own renders), and the physics was NOT moved to
+match a texture. To stop the bounce reading as another invisible wall on video,
+`_add_field_box` also draws a knee-high **site** strip along the real boundary —
+sites carry no contype at all, so it cannot affect a single number.
+
+### 8.3 Does it actually bounce? (measured, and it did not at first)
+
+Restitution in MuJoCo is `solref = (timeconst, dampratio)`; `dampratio = 1.0` is
+critically damped, i.e. no bounce. **The existing hoardings were measured first,
+and they are not a bounce**: ball fired at 8 m/s returns at 0.71 m/s,
+
+> **restitution 0.089** — the wall absorbs 99.2% of the kinetic energy, then the
+> ball dies against it (final velocity 0.000).
+
+So "just delete the throw-in and let the existing walls do it" would have
+swapped a teleport for a ball that stops dead at the line. The field box needed
+a restitution of its own, which required `geom_priority = 2`: the **ball** has
+`priority = 1`, so *its* solref governs every contact it is in, and without
+outranking it the boundary cannot be tuned without also changing how the ball
+meets the ground and the creatures. mujoco_warp honours `geom_priority`
+identically to MuJoCo (`collision_core._contact_params`).
+
+The value was then swept, not guessed — ball fired at the boundary at
+8/15/22/30/40/50 m/s on Warp:
+
+| timeconst | dampratio range | restitution over 8..50 m/s | verdict |
+|---|---|---|---|
+| 0.005 | 0.45 .. 0.17 | 0.06 .. 76 | pumps almost everywhere |
+| 0.01 | 0.45 .. 0.20 | 0.20 .. 0.71 | 0.17 **pumps** (e = 1.12) |
+| 0.02 | 0.20 .. 0.10 | 0.46 .. 0.81 | 0.07 **pumps** (e = 4.8) |
+| 0.03 | 0.20 .. 0.07 | 0.44 .. 0.96 | 0.05 **pumps** (e = 1.9) |
+
+"Pump" means restitution **> 1**: the contact returns more energy than it
+received, and the ball is flung clean past the hoardings (measured to x = 17.1
+against a 13.33 boundary). That is the same energy-injection failure that NaN'd
+`dribble_paper_v5/v6` through the ball's own solref. In a 24 h run it is fatal,
+so the value is chosen for **margin**, not for the springiest bounce:
+
+**`FIELD_BOX_SOLREF = (0.03, 0.15)`** — restitution **0.50 .. 0.64, essentially
+flat from 8 to 50 m/s**, with the pump cliff measured at dampratio < 0.07 (a
+2.1x margin) and a timeconst 12x the 0.0025 timestep rather than the 2x floor
+that pumped.
+
+Note the direction is the **opposite** of the ball's own solref, where *softer*
+(0.02) was the unstable choice. It differs because the counter-body differs: a
+22 kg creature pushed 20 cm into the ball separates violently; an immovable
+static wall pushes back longer and more gently. The sweep above is on the
+contact actually in question, not extrapolated from that one.
+
+Measured through the gate's own probe (impact speed -> rebound speed, at the
+wall rather than divided by launch speed):
+
+| backend | +x | -x | +y | -y |
+|---|---|---|---|---|
+| CPU MuJoCo | 7.15 -> 3.09, e = 0.433 | same | 7.15 -> 2.89, e = 0.405 | same |
+
+### 8.4 Players, and the goal that nearly broke
+
+Players pass through the field box and are stopped by the hoardings, by
+dm_control's **contact filter**, transcribed bit for bit: the boxes carry only
+`_FIELD_BOX_CONTACT_BIT` (128), and the ball gains bit 7 on top of its normal
+contype. Creature/ground/wall/goal geoms keep contype 1 / conaffinity 1, so
+`1 & 128 == 0` both ways. The gate checks this on all **52 creature geoms**
+rather than by driving an ant at a wall, because a policy that cannot reach the
+strip would make a behavioural test vacuously pass.
+
+**The thing that nearly broke, and did break once.** The goal mouth is a hole in
+the boundary — `|y| < goal_half_width`, `z < goal_height` — built by
+`_fieldbox_pos_size` from two corner boxes and a lintel above the crossbar. My
+first transcription used `goal_geometry`'s **full** height where dm_control's
+`goal_size[2]` is a **half**-height, which put the lintel's underside at z = 3.33
+instead of z = 1.67 and left a goal-height-tall slot above the crossbar that a
+lofted ball flew straight out through. It was found by probing the mouth at a
+range of heights, not by reading the code again. A ball that escapes is worse
+than out of play: it is **trapped** in the 1.67 m strip for the rest of the
+match. For the same reason `FIELD_BOX_HALF_HEIGHT` is dm_control's absolute
+20 m and is deliberately **not** scaled by `pitch_scale` — scaled it is 6.25 m,
+and the documented 20-30 m/s ball ejections reach 20-45 m.
+
+### 8.5 Stalling: the throw-in's other job, measured
+
+The throw-in also stopped the ball dying in a corner. Same 4.28B policy, 256
+matches (64 worlds x 4), deterministic actions, before vs after:
+
+| metric | BEFORE (throw-in) | AFTER (bounce) |
+|---|---|---|
+| goals / match | 1.902 ± 0.100 | 1.547 ± 0.088 |
+| throw-ins / match | 2.465 ± 0.117 | 0.000 ± 0.000 |
+| ball escapes / match | 0.000 ± 0.000 | 0.000 ± 0.000 |
+| ball path / match (m) | 96.6 ± 3.5 | 91.6 ± 3.3 |
+| time within 1 m of the boundary | 0.097 ± 0.010 | 0.254 ± 0.016 |
+| time in a corner (within 3 m of both lines) | 0.060 ± 0.010 | 0.128 ± 0.013 |
+| time with ball speed < 0.5 m/s | 0.729 ± 0.009 | 0.692 ± 0.010 |
+| longest unbroken stall (s) | 16.70 ± 0.88 | 16.89 ± 0.83 |
+
+*256 matches each (64 worlds x 4), 45 s, deterministic actions, the SAME 4,276,224,000-step policy in both. ± is the standard error over matches.*
+
+Reading it:
+
+* **The throw-in is gone and nothing escaped.** 2.465 -> 0.000 throw-ins per
+  match, 0 escapes in 256 matches.
+* **The ball lives at the boundary now, as it must.** Time within 1 m of the
+  line 0.097 -> **0.254** (2.6x) and time in a corner 0.060 -> **0.128** (2.1x).
+  That is the mechanical consequence of deleting a rule whose whole job was to
+  teleport the ball back toward the centre 2.5 times a match.
+* **It does not, however, die there.** This was the real worry, and the answer
+  is no: time with the ball essentially stationary went **down**, 0.729 ->
+  0.692, and the longest unbroken stall is unchanged inside its error bar
+  (16.70 +- 0.88 s vs 16.89 +- 0.83 s, difference 0.19 +- 1.20). The ball spends
+  twice as long near the wall and is not any deader for it -- a bounce keeps it
+  moving where a throw-in used to stop it dead (`_throw_in` **zeroed the
+  velocity**). Caveat: the 0.69-0.73 stalled fraction is mostly this policy
+  failing to reach the ball at all, not corners specifically, so this is
+  evidence that corners did not get *worse*, not that stalling is solved.
+* **The expected performance dip is real and measured:** goals/match
+  **1.902 +- 0.100 -> 1.547 +- 0.088**, a drop of **0.356 +- 0.133** (~2.7
+  standard errors, -19%). Ball path is down 5.0 +- 4.8 m, i.e. not
+  distinguishable from no change.
+
+The dip is what it should be. The observation layout, action space and reward
+are byte-identical, so nothing the policy reads has moved; what changed is the
+ball's dynamics on ~2.5 events per match, and the policy has never seen a
+boundary that returns the ball at half speed instead of re-spotting it at rest.
+Some of the drop is also mechanical rather than a skill loss: a throw-in pulled
+the ball 10-30% back toward the centre, which is a free advance up the pitch
+that the bounce does not give. **An early dip is not a failure, and this number
+is the baseline the resumed run has to beat.** For comparison, the throw-in
+run's own training curve sat at 1.93 goals/match over its last block of
+iterations, which agrees with the 1.902 measured here.
+
+### 8.6 The boundary is VISIBLE in the render
+
+The clip's model comes from `probe_soccer2v2.Soccer2v2Renderer`, which calls
+`build_soccer_scene` with the same arguments, so it draws the same world the
+physics uses. Rendering the top-down camera with and without the field box and
+differencing the frames: **16,805 pixels change, and 90% of them lie on the
+boundary lines** (|x| in 13.3-14.3, |y| in 9.3-10.5). So the surface the ball
+bounces off is drawn, and the bounce should not read as another invisible wall.
+
+### 8.6a What the gate proves (19/19, was 12/12)
+
+`tests/test_soccer2v2.py` gained five checks. `t_out_of_play_throw_in` is gone.
+
+* **the ball BOUNCES** (cpu + warp) — fired at each of the four walls, the
+  normal component reverses and the ball keeps a measured fraction of its speed,
+  asserted inside `[0.25, 0.95]`. The band's lower edge is above the old
+  hoardings' 0.089 and its upper edge excludes an energy pump.
+* **players cross the boundary, the hoardings stop them** — the contact filter,
+  on every creature geom, plus the ball must still meet ground and posts.
+* **goals still register** — 6 shots that must score (centre, two angled, two
+  that pass within a ball's width of a post, one lofted) and **one wide shot
+  that must not**, so "it always scores" cannot pass either; then
+  `detected_goal` and `score` on a live step.
+* **no throw-ins, no escapes, the ball stays in** — `throw_ins` stays 0 and
+  `ball_escapes` stays 0 over a rollout in which the ball is **re-launched at
+  14 m/s in a random direction every 20 steps** (960 launches on the warp run).
+  Random ant torques barely move the ball, so without the launches this would
+  have proved the boundary holds against a ball that never reaches it.
+* **NEGATIVE CONTROL** — the same env with the field box's contact bits cleared
+  (i.e. the pre-change pitch) must FAIL the bounce check, and does: e = 0.037,
+  ball reaches x = 14.857 past the 13.333 line.
+
+`throw_ins` is deliberately **kept** as a field and still logged. If someone
+reinstates the throw-in it goes from 0 to non-zero and says so; had the field
+been deleted, the trainer's metric would have silently vanished instead.
+
+### 8.7 Checkpoint archiving
+
+Before this there was **no step-stamped checkpoint history at all**:
+`checkpoint.pt`, `latest.pt` and `final.pt` are each overwritten every
+`--ckpt-secs` (900 s), so a 4.28B-step run had exactly one archived copy in the
+world (a manual `cp` at 2B) — no way to bisect a regression and one bad write
+from losing the run.
+
+* `--archive-steps` (default 1e9) additionally writes
+  `runs_v2/<run>/archive/checkpoint_step_<N>.pt`, never overwritten. It carries
+  the **optimiser state**, so an archive is resumable, not merely evaluable.
+* The bucket is on the **step counter**, not the wall clock, so the cadence is
+  reproducible across restarts, and it is seeded from the resumed step count so
+  a resume does not immediately re-archive what it just loaded.
+* An archive is also written at **clean exit**, which is the state that was most
+  reliably lost before (`final.pt` is overwritten by the next run of the same
+  name and has no optimiser state).
+
+### 8.8 What I did NOT test
+
+* **No trained policy has been trained against this boundary yet** at the time
+  of writing. Everything above is the 4.28B throw-in policy evaluated on the new
+  rule, plus the gate. The recovery claim in 8.5 is a prediction, not a result.
+* **The `(0.03, 0.15)` solref is validated by a sweep and the gate, not by a long
+  run.** The pump cliff was measured at dampratio < 0.07 with the ball fired
+  head-on at a wall; it was NOT measured for a ball squeezed between a creature
+  and the boundary, which is the geometry most likely to find an instability.
+  `_sanitize` and the escape guard both cover that case if it happens, and
+  `ball_escapes` is in `match_stats` so it would show.
+* **No comparison against dm_control's own `enable_field_box` run.** The geometry
+  and the contact filter are transcribed and unit-checked against dm_control's
+  `Pitch` at this scale, but no side-by-side rollout was done.
+* The `--video-rank ball_path` and first-video-at-iteration-0 changes are
+  behavioural changes to the trainer that the gate does not cover.

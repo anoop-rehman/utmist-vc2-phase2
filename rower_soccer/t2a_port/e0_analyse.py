@@ -175,11 +175,20 @@ def compare(cfgs, epoch):
           ", ".join(f"{n} {s:.4f}" for n, s in zip(GENOME_COLS, sd)))
 
     n = len(cfgs)
-    print("\n  topology identity matrix (SAME / DIFF):")
+    print("\n  topology distance: SAME/DIFF, then Jaccard on the body-name "
+          "sets (1.00 = identical tree, 0 = no shared position).")
+    print("   SAME/DIFF alone is nearly useless here: every seed starts from "
+          "the same ant, so two designs can differ by one leaf limb and still "
+          "read DIFF.")
     for i in range(n):
-        print("   " + " ".join(
-            ("SAME" if rows[i]["mean_action"]["topo"]
-             == rows[j]["mean_action"]["topo"] else "DIFF") for j in range(n)))
+        cells = []
+        for j in range(n):
+            a = set(rows[i]["mean_action"]["names"])
+            b = set(rows[j]["mean_action"]["names"])
+            tag = ("SAME" if rows[i]["mean_action"]["topo"]
+                   == rows[j]["mean_action"]["topo"] else "DIFF")
+            cells.append(f"{tag} J={len(a & b) / len(a | b):.2f}")
+        print(f"   {cfgs[i]:<12} " + " ".join(f"{c:>12}" for c in cells))
 
     print("\n  attribute distance, TWO definitions, both over the body names "
           "the two designs SHARE:")

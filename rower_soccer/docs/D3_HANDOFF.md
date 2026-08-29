@@ -2094,3 +2094,56 @@ about 5.9 GB of 20 GB with both live.
 | `scripts/wandb_ship.py` | `t2a/train_ep_len` subtracts the six design steps on REFERENCE logs (`--design-steps`, default 6, zeroed automatically for a port log by the presence of its JSON sidecar); the uncorrected ratio is kept as `t2a/train_ep_len_all_stages`. `exec_ep_len` is execution-only on both sides and is unchanged |
 | `t2a_port/compare_arms.py` | **new.** The five-arm training-curve table, with the reference's six design steps subtracted in one place so nobody re-derives the correction by hand |
 | `runs/t2a_port/port_s1_init/` | the 26-epoch confirmation arm |
+
+---
+
+## 2026-08-29 — M2 IS MET
+
+`port_s2_fixed`, 1,000/1,000 epochs, argv matched to `port_s1` (`--cfg
+hopper_gpu_s2 --seed 1 --eval-worlds 16 --max-worlds 1024 --mempool-mb 256`),
+fp32, `batch_design` on from the cfg. Log: `runs/t2a_port/port_s2_fixed.log`.
+
+`exec_R_eps` by block, against both reference seeds:
+
+| block | port_s2_fixed | ref seed 1 | ref seed 2 |
+|---|---|---|---|
+| 0-99 | 968 | 902 | 930 |
+| 200-299 | 5,241 | 4,403 | 4,701 |
+| 500-599 | 8,137 | 6,481 | 6,476 |
+| 900-999 | 9,510 | 8,397 | 10,210 |
+| **final-20** | **10,240** | 7,482 | 10,594 |
+
+Final-20 execution episode length **912**, against 916 and 808. Inside the
+reference's two-seed band on both metrics, above one seed on return.
+
+It also clears the paper: Figure 3's 2D Locomotion converges to ~9,000
+(`TRANSFORM2ACT_M1_REPRO_NOTES.md`), and this is 10,240.
+
+**The same port with the uninitialised heads finished at 485.** A 21x
+difference from restoring one `reset_parameters()` call.
+
+### What this does and does not establish
+
+* It DOES establish the port trains to the reference's numbers on their task at
+  their settings, with the sampler, batch and time-limit conventions settled in
+  the M2 acceptance criterion above.
+* It is **one seed**. The reference's own two seeds differ by 42% in the
+  final-20 block (7,482 vs 10,594), so a single point cannot tighten that band,
+  only sit inside it. A second seed remains the cheapest thing that would.
+* Everything invalidated by the init bug stays invalidated: the training curves
+  of `port_s1`, `port_s1_bd` and `port_s1_fp64`, and with them the
+  `batch_design` A/B, which compared two frozen policies. The non-training
+  conclusions (fp32, env fidelity, sampler shape, batch size, the permutation
+  itself and its 2.1x cheaper update) still stand.
+* The wandb D3 report predates this run and charts the dead-policy curves. It
+  needs regenerating, and `wandb_ship.py`'s `t2a/train_ep_len` needs the -6
+  design-step correction on the reference side first.
+
+### Not tested
+
+* A second seed.
+* Anything on the ant task; `ant_gpu` was abandoned when its pod went away.
+* Whether the skeleton stage explores longer on OUR drills than on hopper. The
+  reference's own run stops exploring by epoch 100 (199 of 200 designs share
+  one topology), which is the finding that should shape 3f before it is
+  designed, not after.

@@ -49,6 +49,17 @@ def main():
     p.add_argument("--skip-design", action="store_true",
                    help="start at the first execution step")
     p.add_argument("--camera", default="track")
+    p.add_argument("--untrained", action="store_true",
+                   help="no checkpoint: render a freshly initialised policy. "
+                        "Mirrors topology_census.py's flag of the same name.")
+    p.add_argument("--initial-body", action="store_true",
+                   help="apply NO design action at all -- step the design "
+                        "stages with a zero action so the skeleton and the "
+                        "attributes stay exactly as the task's starting XML "
+                        "defines them, then run execution on that body. This "
+                        "is how you look at the body a run STARTS from, which "
+                        "no checkpoint can show you because every checkpoint "
+                        "has already edited it.")
     args = p.parse_args()
 
     import imageio
@@ -60,12 +71,17 @@ def main():
     cfg = Config(args.cfg, tmp=False)
     np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
-    epoch = int(args.epoch) if args.epoch.isnumeric() else args.epoch
+    epoch = 0 if args.untrained else (int(args.epoch) if args.epoch.isnumeric()
+                                      else args.epoch)
     agent = Transform2ActAgent(cfg=cfg, dtype=torch.float64,
                                device=torch.device("cpu"), seed=cfg.seed,
                                num_threads=1, training=False, checkpoint=epoch)
     env, policy = agent.env, agent.policy_net
     policy.eval()
+
+    def info_stage(e):
+        return ["skeleton_transform", "attribute_transform",
+                "execution"][e.if_use_transform_action()]
 
     frames, stage_of = [], []
     state = env.reset()
@@ -74,8 +90,16 @@ def main():
 
     with torch.no_grad():
         for t in range(args.max_steps):
-            action = policy.select_action(
-                tensorfy([state]), True).numpy().astype(np.float64)
+            if args.initial_body and info_stage(env) != "execution":
+                # A zero skeleton action is "no add, no remove"
+                # (`apply_skel_action` only acts on 1 and 2); a zero attribute
+                # action is a zero DELTA, and `abs_design` is false in every
+                # cfg here, so `design_params = design_cur_params + 0`.
+                action = np.zeros((len(env.robot.bodies),
+                                   env.attr_design_dim + 2))
+            else:
+                action = policy.select_action(
+                    tensorfy([state]), True).numpy().astype(np.float64)
             state, _, done, info = env.step(action)
             if agent.running_state is not None:
                 state = agent.running_state(state)

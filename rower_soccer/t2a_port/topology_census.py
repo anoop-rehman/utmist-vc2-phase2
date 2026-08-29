@@ -65,6 +65,10 @@ def census(agent, episodes, mean_action):
     n_bodies = collections.Counter()
     per_episode_indices = []
     all_indices = set()
+    # D3 M3 E0 needs the NAMES behind a topology hash, not only its count, to
+    # say what the winning body plan actually is. Filled here so E0's analysis
+    # reuses this function rather than reimplementing the sampling loop.
+    names_of = {}
 
     for _ in range(episodes):
         state = env.reset()
@@ -80,22 +84,25 @@ def census(agent, episodes, mean_action):
             if info.get("stage") == "execution":
                 break
         key, names = topo_key(env)
+        names_of[key] = names
         topos[key] += 1
         n_bodies[len(names)] += 1
         idx = set(env.get_body_index().tolist())
         per_episode_indices.append(len(idx))
         all_indices |= idx
 
-    return topos, n_bodies, per_episode_indices, all_indices
+    return topos, n_bodies, per_episode_indices, all_indices, names_of
 
 
-def report(tag, episodes, topos, n_bodies, per_ep_idx, all_idx):
+def report(tag, episodes, topos, n_bodies, per_ep_idx, all_idx, names_of=None):
     print(f"\n=== {tag}: {episodes} designs ===")
     print(f"distinct topologies      {len(topos):4d}  "
           f"({100 * len(topos) / episodes:.1f}% of designs are unique)")
     top = topos.most_common(5)
     print("  most common:            " +
           ", ".join(f"{c} x{n}" for c, n in top))
+    if names_of is not None and top:
+        print("  most common body names: " + ",".join(names_of[top[0][0]]))
     print("  body count histogram:   " +
           ", ".join(f"{k} bodies: {v}" for k, v in sorted(n_bodies.items())))
     print(f"distinct body_index values, whole batch  {len(all_idx):4d}"

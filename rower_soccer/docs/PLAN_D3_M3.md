@@ -118,7 +118,8 @@ Our `dev_ant_body.xml` is a different dialect.
 * **Build**: a converter from `dev_ant_body.xml` to their `Robot` format, plus a
   gate that the resulting body is the same creature — mass, geometry, joint
   ranges and actuator gears equal to the CompetEvo ant to tolerance, and one
-  rendered clip looked at.
+  rendered clip looked at. **DONE 2026-08-29 —
+  [`D3_M3_E1_ANT_CONVERTER.md`](D3_M3_E1_ANT_CONVERTER.md).**
 * **Run**: their ant task with our ant as the initial design, 3 seeds, ~100
   epochs.
 * **Question**: does it evolve, and into what? Same variability measurement as
@@ -229,13 +230,66 @@ together.
    (fully specified, no distribution-shift confound)? Recommend running the
    scripted one first precisely because it cannot be blamed.
 
-## 4. Not tested / not assumed
+---
+
+## 5. 2026-08-29 — E1's prerequisite is built and gated
+
+`rower_soccer/t2a_port/competevo_to_t2a.py` puts `dev_ant_body.xml` into
+Transform2Act's `Robot` representation;
+`rower_soccer/t2a_port/gate_competevo_ant.py` gates it in four phases plus nine
+negative controls. Full write-up, with every number and every tolerance, in
+[`D3_M3_E1_ANT_CONVERTER.md`](D3_M3_E1_ANT_CONVERTER.md). The headline:
+
+* **The conversion is not lossy on the creature.** 95 compiled `mjModel` arrays,
+  compared against the model D1/D2 *actually compile*
+  (`scene.dev_run_to_goal_xml`) rather than against the asset file: largest
+  residual exactly `0.000e+00`. 500 steps of physics from an identical state
+  with identical recorded actions in an identical arena: `max|dqpos|` exactly
+  `0.000e+00`. Section 4's open question — "whether their `Robot` XML dialect
+  can express our ant's two-segment legs without loss" — is **answered: it can**,
+  because a chain of bodies with one capsule each is precisely the bone model
+  `Robot` implements. `dev_ant_body.xml`'s body names already match `reindex()`
+  exactly, so the converter mostly gives the fragment a `<worldbody>`.
+* **`Robot` mutates it**: add a limb, remove a limb, change a length — each
+  recompiles and steps, and `AntEnv` runs skeleton -> attribute -> execution on
+  it. Rendered and looked at: same creature as D1/D2's, standing on its feet,
+  nothing through the floor.
+* **It found a real bug in `khrylib/robot/xml_robot.py`.** `Body.get_params`
+  pads one zero for a jointless body and `Body.set_params` did not consume it.
+  No Transform2Act robot has a jointless body; ours has four (the leg stubs), so
+  one attribute transform silently reset each stub capsule to radius 0.065 from
+  0.08. Fixed with the missing three lines; a strict no-op for hopper, swimmer,
+  gap and their ant.
+* **And two in our own `t2a_port/xml_global_to_local.py`**: `legacy_inertial`
+  was silently dropped for a local-coordinate input, and both legacy passes
+  assumed density 1000 where `ant.xml` and our ant use 5.0 — a 200x mass error
+  had anyone pointed `two_stage_pipeline` at an ant. Hopper is unaffected, so no
+  existing number moves.
+
+Three caveats E1's reading has to carry, none of them the converter's doing:
+
+1. E1 trains in **their** stack, where MuJoCo 2.1 counts a capsule's caps as ¾ of
+   a sphere: legs **3.5% lighter** than D1/D2's ant (0.8787 vs 0.9109 kg).
+2. With mass and inertia corrected to 1e-14 the two engines agree to `1.2e-14`
+   through 17 contact-free steps and part at the **first floor contact**. That is
+   the 2.1-vs-3.12 contact solver and no XML can fix it.
+3. Transform2Act's floor inherits `margin="0.01"`; CompetEvo's is 0. **Our ant's
+   feet touch down 1 cm earlier on their floor** — visible in the render as a
+   settled torso 0.010 higher.
+
+**Not done, deliberately**: no training run. The smoke shows the agent builds on
+a 13-body graph, a PPO iteration completes, and all three heads take finite
+non-zero gradients. E1's 3 seeds x ~100 epochs has not been started.
+
+## 6. Not tested / not assumed
 
 * Whether Transform2Act's design head can see role or opponent at all. Its
   hopper task is single-agent, so the question does not arise there and has not
   been asked. **E4 depends on the answer.**
-* Whether their `Robot` XML dialect can express our ant's two-segment legs
-  without loss. E1's gate exists to answer this.
+* ~~Whether their `Robot` XML dialect can express our ant's two-segment legs
+  without loss.~~ **Answered 2026-08-29: it can, exactly** (section 5). What is
+  still open is the *engine*: E1 trains under mujoco-py 2.1, whose capsules are
+  3.5% lighter and whose contact solver is not 3.12's.
 * Whether the GNN controller matches the MLP on a fixed body (E2).
 * Any claim that E0's result on *their* ant transfers to *our* ant. Per §0c they
   are different creatures.

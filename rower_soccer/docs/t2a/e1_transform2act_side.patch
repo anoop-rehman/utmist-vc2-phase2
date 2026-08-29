@@ -1,0 +1,39 @@
+diff --git a/design_opt/envs/ant.py b/design_opt/envs/ant.py
+index 323f787..c56460f 100644
+--- a/design_opt/envs/ant.py
++++ b/design_opt/envs/ant.py
+@@ -15,7 +15,10 @@ class AntEnv(MujocoEnv, utils.EzPickle):
+         self.cfg = cfg
+         self.env_specs = cfg.env_specs
+         self.agent = agent
+-        self.model_xml_file = 'assets/mujoco_envs/ant.xml'
++        # D3 M3 E1: default unchanged; `env_specs.model_xml_file` lets a cfg
++        # point the same task at another body (the converted CompetEvo ant).
++        self.model_xml_file = self.env_specs.get(
++            'model_xml_file', 'assets/mujoco_envs/ant.xml')
+         # robot xml
+         self.robot = Robot(cfg.robot_cfg, xml=self.model_xml_file)
+         self.init_xml_str = self.robot.export_xml_string()
+diff --git a/khrylib/robot/xml_robot.py b/khrylib/robot/xml_robot.py
+index 49d9bdf..55902aa 100644
+--- a/khrylib/robot/xml_robot.py
++++ b/khrylib/robot/xml_robot.py
+@@ -473,6 +473,18 @@ class Body:
+ 
+         for joint in self.joints:
+             params = joint.set_params(params, pad_zeros)
++        # D3 M3 E1 (utmist-vc2-phase2). `get_params` above pads ONE zero for a
++        # body with no joints; without the matching consume here, `set_params`
++        # reads that pad as the geom's `size` and every subsequent field one
++        # slot early. No robot shipped with Transform2Act has a jointless body
++        # -- hopper/swimmer/gap have a 3-joint root and a hinged child, their
++        # ant has a free root and four hinged children -- so the asymmetry is
++        # latent there. The CompetEvo/DeepMind ant has four (the leg stubs
++        # between the torso and the hip), and without this line ONE attribute
++        # transform silently reset each stub capsule to radius 0.065 and
++        # ext_start 0.143. Gated by `t2a_port/gate_competevo_ant.py` phase C.
++        if pad_zeros and len(self.joints) == 0:
++            params = params[1:]
+         for geom in self.geoms:
+             params = geom.set_params(params, pad_zeros)
+         # rebuild bone, geom, joint

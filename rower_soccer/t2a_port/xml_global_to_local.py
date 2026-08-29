@@ -209,6 +209,38 @@ def _apply_legacy_inertial(root, default_density=1000.0):
     return n
 
 
+def _default_density(root, fallback=1000.0):
+    """The `<default><geom density>` a geom without its own density inherits.
+
+    Both legacy passes below need a density, and both used to assume MuJoCo's
+    own 1000. That is right for `assets/mujoco_envs/hopper.xml`, which sets no
+    density anywhere -- and wrong by a factor of 200 for
+    `assets/mujoco_envs/ant.xml` and for the converted CompetEvo ant, whose
+    `<default><geom>` says `density="5.0"`. Reading it makes the passes correct
+    for every Transform2Act asset instead of only for the one they were written
+    against.
+
+    A class-scoped density would need per-geom resolution, so it raises rather
+    than being silently ignored.
+    """
+    top = root.find("default")
+    if top is None:
+        return fallback
+    for d in top.iter("default"):
+        if d is top:
+            continue
+        g = d.find("geom")
+        if g is not None and g.get("density") is not None:
+            raise NotImplementedError(
+                f"<default class=\"{d.get('class')}\"> sets its own geom "
+                "density; per-class resolution is not implemented and assuming "
+                "the top-level value would be a silently wrong mass")
+    g = top.find("geom")
+    if g is None or g.get("density") is None:
+        return fallback
+    return float(g.get("density"))
+
+
 def convert(xml_str, legacy_capsule_mass=False, legacy_inertial=False):
     """Global-coordinate morphology XML -> local-coordinate equivalent.
 
@@ -216,27 +248,35 @@ def convert(xml_str, legacy_capsule_mass=False, legacy_inertial=False):
     mass, which is what Transform2Act actually trained against.
     """
     root = ET.fromstring(xml_str)
+    rho0 = _default_density(root)
     comp = root.find("compiler")
     out = copy.deepcopy(root)
+    is_global = comp is not None and comp.get("coordinate") == "global"
     if legacy_inertial:
         # Must run on LOCAL geometry, so it is applied after the shift below.
         pass
     elif legacy_capsule_mass:
-        _apply_legacy_capsule_mass(out)
-    if comp is None or comp.get("coordinate") != "global":
-        return ET.tostring(out, encoding="unicode")
-    assert_no_rotation(root)
-    comp_out = out.find("compiler")
-    del comp_out.attrib["coordinate"]
+        _apply_legacy_capsule_mass(out, rho0)
+    # D3 M3 E1: this used to `return` here for a non-global input, which
+    # silently dropped `legacy_inertial` on any XML that was ALREADY local.
+    # That was harmless while every Transform2Act asset was global, and stopped
+    # being harmless with `assets/mujoco_envs/ant_competevo.xml`, which is local
+    # by construction (`competevo_to_t2a.py`) precisely so modern MuJoCo can
+    # load its designs without this module. The coordinate shift is now
+    # conditional; the legacy-inertial pass runs either way.
+    if is_global:
+        assert_no_rotation(root)
+        comp_out = out.find("compiler")
+        del comp_out.attrib["coordinate"]
 
-    world = out.find("worldbody")
-    if world is not None:
-        # Direct children of worldbody are already in the world frame.
-        for body in list(world):
-            if body.tag == "body":
-                _recurse(body, [0.0, 0.0, 0.0])
+        world = out.find("worldbody")
+        if world is not None:
+            # Direct children of worldbody are already in the world frame.
+            for body in list(world):
+                if body.tag == "body":
+                    _recurse(body, [0.0, 0.0, 0.0])
     if legacy_inertial:
-        n = _apply_legacy_inertial(out)
+        n = _apply_legacy_inertial(out, rho0)
         # WITHOUT THIS THE <inertial> ELEMENTS ARE SILENTLY IGNORED.
         # Their compiler line says inertiafromgeom="true", which tells MuJoCo
         # to derive inertia from geoms ALWAYS, overriding an explicit

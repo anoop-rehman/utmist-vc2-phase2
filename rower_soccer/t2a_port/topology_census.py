@@ -60,6 +60,22 @@ def topo_key(env):
 
 
 def census(agent, episodes, mean_action):
+    """CENSUS RUNS IN TEST MODE. `khrylib/rl/agents/agent.py:111` wraps their
+    whole sampler in `to_test(*self.sample_modules)`, and the policy's three
+    `RunningNorm` layers (`transform2act_policy.py:33, 59, 87`) UPDATE their
+    mean/var buffers on every forward while `self.training` is true
+    (`running_norm.py:32-34`). Sampling in train mode therefore normalises each
+    design against statistics the previous designs just moved, so the 200th
+    draw comes from a different policy than the 1st -- and the checkpoint's own
+    statistics are never the ones used. `nn.Module` defaults to train mode and
+    `Transform2ActAgent(training=False)` does not change that, so this line is
+    load-bearing. Added 2026-08-29; every census taken before that date was in
+    train mode.
+
+    Measured cost of the bug on `hopper_gpu` epoch 100, 200 sampled designs:
+    see `rower_soccer/docs/D3_E0_ANT.md` section 3.
+    """
+    to_test(agent.policy_net)                                     # noqa: F405
     env = agent.env
     topos = collections.Counter()
     n_bodies = collections.Counter()

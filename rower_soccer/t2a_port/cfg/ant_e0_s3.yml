@@ -3,6 +3,14 @@
 # the topology-convergence and seed-variability questions and does NOT
 # produce a converged body), and save_model_interval (10, so the census
 # has a checkpoint every ten epochs). Diff against ant.yml to check.
+#
+# SEED 3 ONLY: save_model_interval is 5, not 10. Seed 3 was stopped at
+# epoch 8 to get GPU memory back under budget and relaunched from
+# scratch afterwards, so unlike seeds 1 and 2 it could still be given
+# the ~15-minute video cadence the user asked for. The field is read in
+# exactly one place -- `transform2act_agent.save_checkpoint` -- and
+# cannot affect training. Censuses are still taken at 10,20,...,100 on
+# all three seeds so the cross-seed comparison stays symmetric.
 env_name: ant
 agent_specs:
   batch_design: true
@@ -64,7 +72,7 @@ mini_batch_size: 2048
 num_optim_epoch: 10
 max_epoch_num: 100
 seed: 3
-save_model_interval: 10
+save_model_interval: 5
 
 
 robot_param_scale: 1

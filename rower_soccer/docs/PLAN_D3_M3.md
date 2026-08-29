@@ -165,16 +165,18 @@ the environment* -- if our PPO-in-their-env lands nowhere near the literature
 after adjusting for the reward difference, the env is the suspect -- but they
 are not the comparison.
 
-**Open decision: how to null the stages.** Two readings, and they are not
-equivalent:
-* *Skip* the design stages entirely -- the episode is execution only. Changes
-  episode length and removes the stage flag's meaning from the observation.
-* *Run* them but force a zero/identity action. Keeps the episode structure and
-  the observation layout, costs 6 steps per episode, and is closer to "the same
-  agent with evolution switched off".
-The second is the better control for "does the GNN control well", because it
-holds everything except the design action constant. Worth gating that the body
-really is unchanged across the episode either way.
+**SETTLED 2026-08-29 (user).** The design stages are **run but forced to an
+identity action**, not skipped. Skipping would change episode length and strip
+the stage flag's meaning from the observation, altering the task as well as the
+policy; forcing identity holds everything constant except the one thing under
+test. Gate that the body is genuinely unchanged from the first step to the last
+-- an "identity" transform that quietly perturbs a length would make this a
+comparison of two different bodies.
+
+**SETTLED 2026-08-29 (user).** The baseline is plain-MLP PPO run **inside the
+Transform2Act ant env**, same reward, same episode structure, same budget, with
+only the policy architecture differing. Published Ant numbers are a sanity
+check on the environment, never the baseline.
 
 **What would falsify.** If the GNN materially underperforms a plain MLP on the
 same body, same reward and same budget, then every design+control result rests

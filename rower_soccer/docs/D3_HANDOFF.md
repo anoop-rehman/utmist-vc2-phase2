@@ -118,7 +118,7 @@ These are settled; do not re-litigate them without new evidence.
 
 ## An observation about the method, not the port
 
-**[CORRECTED 2026-08-29 — see `D3_E0_ANT.md` section 3.** Re-measured with the census fixed to sample in TEST mode, `hopper_gpu` at epoch 100 is **3 distinct topologies with the most common at 89.0%**, and `hopper_gpu_s2` is 5 at 91.0% — heavy convergence, but not the near-unanimity stated here. The original figure was never reproduced.]**
+**[CORRECTED 2026-08-29 — see `D3_E0_ANT.md` section 3.** The "199 of 200" below is an **epoch-1000** figure attached to the wrong epoch, not a wrong measurement: re-measured with the census fixed to sample in TEST mode, `hopper_gpu` is **3 distinct topologies at 89.0%** at epoch 100 and **99.0%** by epoch 1000, which is the 198/200 the original sentence describes. My first attempt at this correction said the figure "never reproduced"; that was wrong, and is why the epoch label matters more than the count.]**
 
 By epoch 100 the skeleton stage has largely **stopped exploring** — 3 distinct
 topologies among 200 sampled designs, the most common holding 89.0%, and every
@@ -1327,8 +1327,9 @@ same probe, same seed —
 | their `hopper_gpu_s2` epoch 1000 | **2** | 7 exactly |
 
 with both collapsing to 1 under mean actions. Their `topology_census.py` found
-1 topology in 89% of 200 designs by **epoch 100** (3 distinct; the
-"199 of 200" written here earlier did not reproduce). The port's skeleton
+1 topology in 89% of 200 designs by **epoch 100**, rising to 99% by epoch
+1000 (the "199 of 200" written here earlier was an epoch-1000 figure
+mislabelled as epoch 100, not a wrong number). The port's skeleton
 distribution is still wide at epoch 400 — which is what a design tower taking
 15x the Adam steps on a seventeenth of the data would look like, and is the
 observable to watch in the next experiment.

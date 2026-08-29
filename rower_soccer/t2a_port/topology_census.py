@@ -85,6 +85,12 @@ def census(agent, episodes, mean_action):
     # say what the winning body plan actually is. Filled here so E0's analysis
     # reuses this function rather than reimplementing the sampling loop.
     names_of = {}
+    # Every sampled design's attribute genome, one row per body. E0 uses the
+    # spread of THIS population as the standardiser for its cross-seed design
+    # distance -- a per-column std taken over three mean-action designs is
+    # degenerate whenever a column has barely moved, and divides a 2e-4
+    # numerical difference by a 1.6e-4 std.
+    genomes = []
 
     for _ in range(episodes):
         state = env.reset()
@@ -103,14 +109,17 @@ def census(agent, episodes, mean_action):
         names_of[key] = names
         topos[key] += 1
         n_bodies[len(names)] += 1
+        genomes.append(np.asarray(env.get_attr_design()))
         idx = set(env.get_body_index().tolist())
         per_episode_indices.append(len(idx))
         all_indices |= idx
 
-    return topos, n_bodies, per_episode_indices, all_indices, names_of
+    return (topos, n_bodies, per_episode_indices, all_indices, names_of,
+            genomes)
 
 
-def report(tag, episodes, topos, n_bodies, per_ep_idx, all_idx, names_of=None):
+def report(tag, episodes, topos, n_bodies, per_ep_idx, all_idx, names_of=None,
+           genomes=None):
     print(f"\n=== {tag}: {episodes} designs ===")
     print(f"distinct topologies      {len(topos):4d}  "
           f"({100 * len(topos) / episodes:.1f}% of designs are unique)")

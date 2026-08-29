@@ -109,8 +109,11 @@ def analyse(cfg_id, epochs, episodes):
     rows = []
     for ep in epochs:
         agent = build_agent(cfg_id, ep)
-        topos, n_bodies, per_ep, all_idx, names_of = census(
+        topos, n_bodies, per_ep, all_idx, names_of, genomes = census(
             agent, episodes, mean_action=False)
+        # Pool every body of every sampled design. The root row is dropped: it
+        # pads three of the five columns with zeros and would deflate them.
+        pop = np.concatenate([g[1:] for g in genomes if len(g) > 1], axis=0)
         top_key, top_n = topos.most_common(1)[0]
         ma = mean_action_design(agent)
         row = {
@@ -122,6 +125,8 @@ def analyse(cfg_id, epochs, episodes):
             "top5": [[k, c] for k, c in topos.most_common(5)],
             "body_count_hist": {str(k): v for k, v in sorted(n_bodies.items())},
             "mean_action": ma,
+            "sampled_genome_std": pop.std(axis=0, ddof=1).tolist(),
+            "sampled_genome_rows": int(pop.shape[0]),
         }
         rows.append(row)
         json.dump(row, open(f"{OUT}/{cfg_id}_e{ep:04d}.json", "w"), indent=1)
@@ -137,18 +142,24 @@ def load(cfg_id, epoch):
     return json.load(open(f"{OUT}/{cfg_id}_e{epoch:04d}.json"))
 
 
-def genome_matrix(rows_by_seed):
-    """Pooled per-column std over every body of every seed's mean-action
-    design, used to standardise the cross-seed difference. Standardising by a
-    pooled std rather than by the parameter's own bound is what makes a
-    difference in `gear` comparable to a difference in `size`."""
-    vals = []
-    for r in rows_by_seed:
-        for name, g in r["mean_action"]["genome"].items():
-            if name != "0":            # the root has no gear and pads zeros
-                vals.append(g)
-    v = np.asarray(vals)
-    return v.std(axis=0, ddof=1) if len(v) > 1 else np.ones(v.shape[-1])
+def genome_std(rows_by_seed):
+    """The standardiser for the cross-seed design distance: the per-column
+    standard deviation of the attribute genome over the SAMPLED population --
+    every non-root body of every one of the ~200 designs each seed drew at this
+    epoch, pooled across seeds by averaging variances.
+
+    Not the std of the three mean-action designs. That was the first version
+    and it is degenerate: at epoch 0 the attribute stage has barely moved
+    `gear`, so its std across three designs is 1.6e-4 and a 2e-4 numerical
+    difference between two seeds' identical limbs reads as a distance of 1.25.
+    The sampled population is a real distribution (thousands of body rows) and
+    is what "how different, in units of how much this search varies" means.
+
+    Floored at 1e-3 -- one twentieth of a percent of a column's [-1, 1] range --
+    so a column the search genuinely never touches cannot divide by zero."""
+    var = np.mean([np.square(r["sampled_genome_std"]) for r in rows_by_seed],
+                  axis=0)
+    return np.maximum(np.sqrt(var), 1e-3)
 
 
 def compare(cfgs, epoch):
@@ -158,10 +169,10 @@ def compare(cfgs, epoch):
         ma = r["mean_action"]
         print(f"  {c}: topo {ma['topo']}  {ma['n_bodies']} bodies "
               f"{ma['n_motors']} motors  names [{','.join(ma['names'])}]")
-    sd = genome_matrix(rows)
-    sd = np.where(sd > 0, sd, 1.0)
-    print(f"\n  pooled per-column std (standardiser): " +
-          ", ".join(f"{n} {s:.3f}" for n, s in zip(GENOME_COLS, sd)))
+    sd = genome_std(rows)
+    print(f"\n  standardiser = per-column std of the SAMPLED genome "
+          f"population ({rows[0]['sampled_genome_rows']} body rows/seed): " +
+          ", ".join(f"{n} {s:.4f}" for n, s in zip(GENOME_COLS, sd)))
 
     n = len(cfgs)
     print("\n  topology identity matrix (SAME / DIFF):")
@@ -170,8 +181,12 @@ def compare(cfgs, epoch):
             ("SAME" if rows[i]["mean_action"]["topo"]
              == rows[j]["mean_action"]["topo"] else "DIFF") for j in range(n)))
 
-    print("\n  attribute distance = mean over SHARED bodies and 5 columns of "
-          "|delta| / pooled_std")
+    print("\n  attribute distance, TWO definitions, both over the body names "
+          "the two designs SHARE:")
+    print("   SMD   = mean |delta| / sampled-population std   (how different, "
+          "in units of how much this search varies)")
+    print("   range = mean |delta| / 2                        (fraction of a "
+          "column's full [-1, 1] demapped range; never degenerate)")
     print("   (n_shared bodies in brackets; '-' where no body name is shared)")
     for i in range(n):
         cells = []
@@ -182,10 +197,11 @@ def compare(cfgs, epoch):
             if not shared:
                 cells.append("    -    ")
                 continue
-            d = np.abs(np.asarray([gi[k] for k in shared])
-                       - np.asarray([gj[k] for k in shared])) / sd
-            cells.append(f"{d.mean():.3f}[{len(shared)}]")
-        print(f"   {cfgs[i]:<12} " + " ".join(f"{c:>10}" for c in cells))
+            raw = np.abs(np.asarray([gi[k] for k in shared])
+                         - np.asarray([gj[k] for k in shared]))
+            cells.append(f"{(raw / sd).mean():.2f}/{(raw / 2).mean():.3f}"
+                         f"[{len(shared)}]")
+        print(f"   {cfgs[i]:<12} " + " ".join(f"{c:>16}" for c in cells))
 
     print("\n  physical summary of each mean-action design:")
     for c, r in zip(cfgs, rows):

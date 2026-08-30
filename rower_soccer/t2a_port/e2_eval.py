@@ -92,10 +92,13 @@ def roll(env, act, wrap, seed, max_steps=1000, render=False,
             break
     xs = np.asarray(xs)
     path = float(np.abs(np.diff(np.concatenate([[x0], xs]))).sum())
-    return dict(R=R, n=n, reached=bool(info.get("reached", False)),
+    return dict(R=R, n=n, x0=x0, max_fwd=float(xs.max() - x0),
+                reached=bool(info.get("reached", False)),
                 opp_reached=bool(info.get("opp_reached", False)),
                 fell=bool(info.get("fell", False)),
                 net_dx=float(xs[-1] - x0), max_x=float(xs.max()),
+                needs=float(env.goal_x - x0),
+                frac_of_goal=float((xs.max() - x0) / (env.goal_x - x0)),
                 path=path, net_over_path=float((xs[-1] - x0) / path)
                 if path else 0.0,
                 max_abs_y=float(np.abs(ys).max()), bodies=nb, frames=frames)
@@ -120,6 +123,10 @@ def evaluate(env, act, wrap, episodes=20, seed_base=1000, max_steps=1000):
                 fall_rate=float(g("fell").mean()),
                 net_dx=float(g("net_dx").mean()),
                 max_x=float(g("max_x").mean()),
+                max_fwd=float(g("max_fwd").mean()),
+                max_fwd_best=float(g("max_fwd").max()),
+                frac_of_goal=float(g("frac_of_goal").mean()),
+                frac_of_goal_best=float(g("frac_of_goal").max()),
                 net_over_path=float(g("net_over_path").mean()),
                 max_abs_y=float(g("max_abs_y").mean()),
                 speed=float((g("net_dx") / (g("n") * env.dt)).mean()),

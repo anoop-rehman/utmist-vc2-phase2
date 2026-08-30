@@ -38,8 +38,8 @@ def main():
     runs.sort(key=key)
 
     print(f"\n{'arm':<22} {'seed cfg':<14} {'mean-action R':>14} {'sd':>8} "
-          f"{'goal':>6} {'lost':>6} {'fell':>6} {'len':>7} {'dx m':>7} "
-          f"{'m/s':>7} {'std':>7} | {'stochastic R':>13} {'goal':>6}")
+          f"{'goal':>6} {'lost':>6} {'fell':>6} {'len':>7} {'fwd m':>7} "
+          f"{'/goal':>6} {'m/s':>7} {'std':>7} | {'stochastic R':>13} {'goal':>6}")
     print("-" * 132)
     for r in runs:
         m, s = r["results"]["mean_action"], r["results"]["stochastic"]
@@ -49,7 +49,8 @@ def main():
             arm = "IDLE (neg. control)"
         print(f"{arm:<22} {r['cfg']:<14} {m['R_mean']:14.1f} {m['R_sd']:8.1f} "
               f"{m['goal_rate']:6.2f} {m['loss_rate']:6.2f} {m['fall_rate']:6.2f} "
-              f"{m['ep_len']:7.1f} {m['net_dx']:7.2f} {m['speed']:7.3f} "
+              f"{m['ep_len']:7.1f} {m.get('max_fwd', float('nan')):7.2f} "
+              f"{m.get('frac_of_goal', float('nan')):6.3f} {m['speed']:7.3f} "
               f"{r['action_std']:7.4f} | {s['R_mean']:13.1f} {s['goal_rate']:6.2f}")
 
     groups = {}

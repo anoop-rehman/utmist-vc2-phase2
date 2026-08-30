@@ -360,3 +360,96 @@ whether to keep it — the two obvious alternatives are to pay the loser its
 episode ends on a fall for both sides (keeping CompetEvo's rule and accepting
 the incentive).
 
+---
+
+## 7. THE RESULT: neither controller learns the task, and the return difference is a mixture effect
+
+```
+./runs/d3_e2_rtg/collect.sh          # e2_posthoc.py per arm, then e2_compare.py
+```
+
+**One instrument, 20 episodes per arm, identical episode seeds, the same frozen
+13-body / 8-motor ant, the same scripted opponent, the same reward, the same
+5.0M-step budget.** Body freezing re-verified per arm under each arm's OWN
+trained policy: **134 mjModel arrays identical on all four trained arms.**
+
+| arm | mean-action R | sd | **goal** | lost | fell | ep len | furthest forward | of the 5.0 m | action std | stochastic R |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **GNN** s1 | −655.1 | 225.0 | **0.00** | 0.95 | 0.05 | 490.9 | 0.22 m | 4.4% | 0.551 | −972.7 |
+| **GNN** s2 | −536.8 | 345.0 | **0.00** | 0.85 | 0.15 | 479.6 | 0.30 m | 6.0% | 0.559 | −1116.1 |
+| **MLP matched** s1 | −194.5 | 423.3 | **0.00** | 0.30 | 0.70 | 240.8 | 0.46 m | 9.1% | 0.633 | −597.7 |
+| **MLP matched** s2 | −203.9 | 392.1 | **0.00** | 0.40 | 0.60 | 334.4 | 0.60 m | 11.9% | 0.624 | −514.0 |
+| *idle, zero torque* | −523.7 | 307.0 | **0.00** | 0.85 | 0.15 | 465.2 | 0.08 m | 1.5% | 0 | −523.7 |
+
+Seed means (mean-action): **GNN −595.9, MLP-matched −199.2**, idle −523.7.
+
+### 7a. The headline is the goal column, and it is zero everywhere
+
+**Neither architecture reaches the goal in a single one of 40 evaluation
+episodes.** The best episode any arm produced went **1.95 m of the 5.00 m
+required** (MLP s2); the GNN's best was 1.29 m. Averaged, the furthest either
+ever got from its own start line is 0.22-0.60 m. At 5.0M steps, on CompetEvo's
+reward, on this body, **neither controller learns to run**.
+
+That was pre-registered as the budget risk in §1 and it fired: D2 needed roughly
+**77M** environment steps for 98.3% on the same body, reward, distance and
+clock, and E2 spent **5.0M** per arm to stay matched to E1.1. This is a
+statement about the budget, not about either architecture — but it means E2's
+intended question ("does E1.1's 18% GNN deficit persist on a task with an
+opponent and a goal line?") **cannot be answered on goal rate**, because
+neither arm can do the task.
+
+### 7b. The GNN is statistically indistinguishable from doing nothing
+
+GNN −595.9 against the zero-torque control's −523.7: **episode-level
+Welch t = 0.87** (n 20 vs 40). After 5.0M steps the Transform2Act controller has
+not separated itself from a policy that emits no torque at all. It does move
+slightly further forward than idle (0.22-0.30 m against 0.08 m), and it does so
+while paying control cost, which is why its return is if anything *worse*.
+
+### 7c. The MLP "wins" by 3.0x, and the mechanism is falling over
+
+MLP-matched −199.2 against GNN −595.9: **+396.7 per episode, Welch t = 5.03**
+(n 40 vs 40), seed ranges non-overlapping. Quoted alone that reads like a
+repeat of E1.1's verdict. **It is not, and the decomposition says why.**
+Splitting every arm's episodes by how they ended:
+
+| arm | fell: n | fell: mean R | fell: len | lost: n | lost: mean R | lost: len |
+|---|---|---|---|---|---|---|
+| GNN s1 | 1 | **+279.6** | 488 | 19 | −704.3 | 491 |
+| GNN s2 | 3 | **+250.6** | 415 | 17 | −675.7 | 491 |
+| MLP s1 | 14 | **+74.0** | 134 | 6 | −821.1 | 491 |
+| MLP s2 | 12 | **+99.5** | 230 | 8 | −658.9 | 491 |
+| idle | 3 | **+178.2** | 319 | 17 | −647.6 | 491 |
+
+Within **every** arm, ending on a fall is worth roughly **+750 to +900** over
+surviving to the opponent's goal, because a fall stops the episode before step
+491 and so never pays the −1000 (§6). And **conditional on the ending, the GNN
+scores HIGHER than the MLP on falls** (+280/+251 against +74/+100 — it survives
+longer before falling, so it banks more of the +1.0/step). The entire 3.0x
+return gap is therefore the **mixture**: the MLP falls in 60-70% of episodes and
+the GNN in 5-15%.
+
+**So the correct sentence is not "the MLP controller is better on this task".
+It is: neither controller solves the task, and the MLP found the degenerate
+optimum the task's own termination rule offers while the GNN did not.** Reading
+the return column alone would have produced the wrong sentence, which is the
+same failure mode E1.1 recorded and the reason the success metric was required
+beside the return.
+
+### 7d. The two protocols disagree, in opposite directions per arm
+
+Mean-action is the headline; the stochastic column moves each arm differently
+because each learns its own noise (GNN 0.551/0.559, MLP 0.633/0.624):
+
+* the **GNN gets much worse** stochastically (−595.9 → −1044.4), because sampled
+  actions do not buy it the early fall and it still pays the noise;
+* the **MLP gets worse too but less** (−199.2 → −555.9), and its fall rate goes
+  *up* (0.60-0.70 → 0.75-0.80);
+* **idle is identical by construction** (no distribution), which is the check
+  that the two protocols are the same code path.
+
+The MLP still leads on both protocols, so the ordering is protocol-independent
+here — but the 3.0x becomes 1.9x, and neither number means what it looks like
+without §7c.
+

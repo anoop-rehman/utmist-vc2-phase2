@@ -325,6 +325,42 @@ opponent and a goal line rather than open-field locomotion.
 what it does, how fast, whether it reacts -- because it is now part of the task
 definition and every later rung inherits it.
 
+#### E2 BUILD DONE, 2026-08-30. See [`D3_E2_RTG.md`](D3_E2_RTG.md).
+
+**The scripted opponent, which E3-E5 inherit**: our ant, all 8 motors at zero
+torque, its ENTIRE state overwritten after every control step to
+`x = +1.0 - 0.68*dt*k`, `y = 0`, `z = 0.5347`, yaw 180 deg, root velocity
+`(-0.68, 0, 0)`, hinges at the stance it settles into at zero torque (hips 0,
+ankles 51.87 deg). **Rigid, non-reactive, constant-speed** -- its trajectory is
+a function of the step index alone, bit-identical in every episode of every
+seed of every arm, and no contact can slow it, push it or knock it over.
+
+**0.68 m/s is not a free choice**: 5.0 m (x=-1 to the goal at x=+4) inside
+500 control steps x 0.015 s = 7.5 s is the 0.667 m/s the task's own clock
+already demands, and 0.68 is that advanced 2% so that running out of time is
+realised as a **loss to a visible opponent** rather than as a silent
+truncation. It crosses x=-4 at control step **491 of 500**. Beating the
+opponent and beating the clock are therefore the same requirement, which makes
+E2's goal rate directly comparable to D2's.
+
+**Beatable, and not trivially**: D2 measured the same ant under the same reward
+over the same 5.0 m in 7.5 s at **98.3% goal, 1.114 m/s** after unopposed
+training, and **33.0% at 0.554 m/s** after the 2h sweep -- 0.68 m/s sits inside
+the band this body's policies span. A zero-torque agent scores 0% and is
+bulldozed backwards to x = -3.22.
+
+**Gated**: `gate_e2.py`, 41 checks, 0 failed, 7 phases each with a negative
+control -- including the body-freeze gate the rung requires (134 mjModel arrays
+identical across 20 episodes of destructive random design actions; 96 change
+without the flag) and a check that E1/E1.1's arms are untouched by the two
+shared-file edits.
+
+The `exec_R_eps` trap is now designed out of the artefacts as well as the
+analysis: the two arms' wandb keys are named `..._MEANACTION_eval` and
+`..._STOCHASTIC`, and the comparable curve is `e2/eval_*`, produced by one
+shared instrument (`e2_eval.evaluate`) that both trainers and the post-hoc
+table call.
+
 ### E3 — Evolving ant vs a FIXED opponent, run-to-goal
 
 The first adversarial rung, deliberately without self-play so there is only one

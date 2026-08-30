@@ -279,3 +279,29 @@ shows **gait and tactics** — how it starts, whether it dodges the scripted
 opponent, whether it crosses the line — and **not** design variation, which is
 what the same clip meant in E0 and E1.
 
+**Verified through the wandb API, not by an exit code**
+(`rower_soccer/t2a_port/e2_wandb_verify.py`, run from `/workspace` because the
+repo's own `wandb/` artefact directory shadows the package):
+
+```
+[OK] d3_e2_mlp_s1  state=finished  metric rows=2  video/best_median_worst rows=1
+     video-in-summary=True  last epoch=9
+```
+
+— metrics and the video in **one run's history**, from one training process,
+with no `_media` split. That check is run again on every arm at the end.
+
+**One book-keeping fact, recorded rather than hidden.** The six arms were
+launched once, run 3-36 epochs, and stopped cleanly by stop-file so that two
+wandb keys could be renamed: both trainers were logging a key called
+`exec_R_eps`, and it means a **mean-action evaluation** in the GNN arm and a
+**stochastic training return** in the MLP arm — precisely the confusion that
+nearly produced a wrong answer in E1.1. They are now
+`e2/exec_R_eps_MEANACTION_eval` and `e2/train_R_eps_STOCHASTIC`, and the
+comparable curve is `e2/eval_*` from the shared instrument. The aborted
+attempt's logs are quarantined in
+`runs/d3_e2_rtg/logs/aborted_keyrename/`; **no wandb run was deleted** — the
+same run ids were resumed, so each arm's history carries ~3-36 rows from the
+aborted attempt before the real run's epoch 0. Nothing in the results below
+comes from a wandb series.
+

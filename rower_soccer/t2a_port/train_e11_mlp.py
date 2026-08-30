@@ -468,7 +468,14 @@ class Trainer:
                 best = row["exec_R_eps"]
                 self.save("best")
 
-            payload = {f"e2/{k}": v for k, v in row.items() if k != "epoch"}
+            # See `train_e2_gnn.py`: this arm's `exec_R_eps` is the
+            # STOCHASTIC training return over the sampling batch, NOT a
+            # mean-action evaluation, and must never be read against the GNN
+            # arm's `exec_R_eps`. The comparable curve is `e2/eval_*`.
+            _rename = {"exec_R_eps": "train_R_eps_STOCHASTIC",
+                       "exec_R_eps_max": "train_R_eps_STOCHASTIC_max"}
+            payload = {f"e2/{_rename.get(k, k)}": v for k, v in row.items()
+                       if k != "epoch"}
             if args.eval_every and (epoch + 1) % args.eval_every == 0:
                 payload.update(self.inline_eval())
             video = None

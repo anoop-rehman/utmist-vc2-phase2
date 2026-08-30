@@ -116,11 +116,19 @@ def main():
 
         log, log_eval = info["log"], info["log_eval"]
         total_steps += int(log.num_steps)
+        # KEY NAMES CARRY THEIR PROTOCOL. E1.1's near-miss was reading
+        # Transform2Act's `exec_R_eps` (a separate MEAN-ACTION evaluation pass,
+        # transform2act_agent.py:214) against the MLP trainer's `exec_R_eps`
+        # (a STOCHASTIC training return) as if they were the same statistic;
+        # that flatters the GNN by ~1.3x. Neither is the E2 result -- the
+        # comparable curve is `e2/eval_*`, from the shared instrument -- but
+        # the names must not invite the mistake.
         payload = {
-            "e2/train_R": float(log.avg_reward),
-            "e2/train_R_eps": float(log.avg_episode_reward),
-            "e2/exec_R": float(log_eval.avg_exec_reward),
-            "e2/exec_R_eps": float(log_eval.avg_exec_episode_reward),
+            "e2/train_R_STOCHASTIC": float(log.avg_reward),
+            "e2/train_R_eps_STOCHASTIC": float(log.avg_episode_reward),
+            "e2/exec_R_MEANACTION_eval": float(log_eval.avg_exec_reward),
+            "e2/exec_R_eps_MEANACTION_eval":
+                float(log_eval.avg_exec_episode_reward),
             "e2/ep_len": float(log.avg_episode_len),
             "e2/num_episodes": int(log.num_episodes),
             "e2/total_steps": total_steps,

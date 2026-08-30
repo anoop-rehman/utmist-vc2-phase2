@@ -25,7 +25,7 @@ def main():
     p.add_argument("--entity", default=None)
     p.add_argument("--project", default="creature-soccer")
     p.add_argument("--video-key", default="video/best_median_worst")
-    p.add_argument("--metric-key", default="e2/exec_R_eps")
+    p.add_argument("--metric-key", default="e2/eval_R_mean")
     a = p.parse_args()
     os.environ.setdefault("WANDB_SILENT", "true")
     import wandb

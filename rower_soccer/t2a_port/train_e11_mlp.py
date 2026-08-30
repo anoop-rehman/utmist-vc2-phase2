@@ -1,4 +1,11 @@
-"""D3 M3 E1.1: plain-MLP PPO **inside the Transform2Act ant env**.
+"""D3 M3 E1.1 / E2: plain-MLP PPO **inside a Transform2Act env**.
+
+E2 (2026-08-30) generalised this file from `AntEnv` to `env_dict[cfg.env_name]`
+so the SAME baseline implementation runs E1.1's locomotion arm and E2's
+run-to-goal arm. `ant_e11_mlp_s{1,2}.yml` say `env_name: ant`, so E1.1's arm is
+byte-for-byte the code it was, and its numbers are unchanged. E2 also added
+inline wandb metrics + video and an inline mean-action evaluation; both are
+off unless `--wandb` / `--video-every` are passed, so again E1.1 is untouched.
 
 The baseline for "is the GNN controller as good as ordinary PPO". Published
 Ant numbers are NOT the baseline: `gym/envs/mujoco/ant.py` pays a +1.0/step
@@ -63,10 +70,22 @@ import json
 import math
 import multiprocessing
 import os
+import subprocess
 import sys
 import time
 
+# wandb lives beside `.venv-gpu` (which has none) and needs protobuf >= 4,
+# while the venv pins 3.x and tensorboardX's generated code needs 3.x's C
+# extension. Both are settled BEFORE any import that could pull protobuf in:
+# the path goes first so protobuf 6 wins, and the pure-Python protobuf
+# implementation is forced so tensorboardX still loads. Setting either after
+# `google.protobuf` is imported is a no-op -- measured, it silently disabled
+# wandb on the first E2 GNN smoke.
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+if os.path.isdir("/workspace/t2a_pylibs"):
+    sys.path.insert(0, "/workspace/t2a_pylibs")
 sys.path.append("/workspace/Transform2Act")
+sys.path.append("/workspace/utmist-vc2-phase2")
 os.chdir("/workspace/Transform2Act")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
@@ -181,7 +200,7 @@ class Critic(nn.Module):
 # --------------------------------------------------------------------------
 class Trainer:
     def __init__(self, args):
-        from design_opt.envs.ant import AntEnv
+        from design_opt.envs import env_dict
         from design_opt.utils.config import Config
 
         self.args = args
@@ -193,7 +212,7 @@ class Trainer:
             "some steps and not others.")
         np.random.seed(self.cfg.seed)
         torch.manual_seed(self.cfg.seed)
-        self.env = AntEnv(self.cfg, agent=None)
+        self.env = env_dict[self.cfg.env_name](self.cfg, agent=None)
         self.nbody = len(self.env.robot.bodies)
         self.act_width = self.env.control_action_dim + self.env.attr_design_dim + 1
 
@@ -202,11 +221,15 @@ class Trainer:
         names = list(self.env.model.actuator_names)
         self.act_rows = [i for i, b in enumerate(self.env.robot.bodies)
                          if i > 0 and b.get_actuator_name() in names]
-        assert len(self.act_rows) == self.env.model.nu
+        # NOT `model.nu`: the run-to-goal scene also carries the scripted
+        # opponent's 8 motors, which this policy never writes. What must hold
+        # is that the rows found are exactly the model's non-opponent motors.
+        ours = [n for n in names if not n.startswith("opp_")]
+        assert len(self.act_rows) == len(ours), (len(self.act_rows), len(ours))
 
         obs_dim = flat_obs(self.env.reset()).shape[0]
         self.obs_dim = obs_dim
-        self.act_dim = self.env.model.nu
+        self.act_dim = len(self.act_rows)
         hdims = [int(x) for x in args.hdims.split(",")]
         self.actor = Actor(obs_dim, self.act_dim, hdims, args.log_std)
         self.critic = Critic(obs_dim, hdims)
@@ -245,7 +268,7 @@ class Trainer:
             self.env.np_random.seed((self.cfg.seed * 131 + pid * 977
                                      + self.epoch * 31) % (2 ** 31 - 1))
         obs_b, act_b, lp_b, rew_b, mask_b = [], [], [], [], []
-        ep_rets, ep_lens = [], []
+        ep_rets, ep_lens, ep_goal, ep_loss, ep_fell, ep_dx = [], [], [], [], [], []
         raw_n, raw_s, raw_ss = 0, np.zeros(self.obs_dim), np.zeros(self.obs_dim)
         design_steps = 0
         with torch.no_grad():
@@ -256,6 +279,7 @@ class Trainer:
                 if state is None:
                     continue
                 ret, n = 0.0, 0
+                x0, info = None, {}
                 while True:
                     raw = flat_obs(state)
                     raw_n += 1
@@ -268,6 +292,8 @@ class Trainer:
                     full = np.zeros((self.nbody, self.act_width))
                     full[self.act_rows, 0] = a
                     state, r, done, info = self.env.step(full)
+                    if x0 is None:
+                        x0 = float(info.get("com_x", 0.0))
                     obs_b.append(o)
                     act_b.append(a)
                     lp_b.append(float(lp.item()))
@@ -279,9 +305,15 @@ class Trainer:
                         break
                 ep_rets.append(ret)
                 ep_lens.append(n)
+                ep_goal.append(float(info.get("reached", 0.0)))
+                ep_loss.append(float(info.get("opp_reached", 0.0)))
+                ep_fell.append(float(info.get("fell", 0.0)))
+                ep_dx.append(float(info.get("com_x", 0.0)) - float(x0 or 0.0))
         out = dict(obs=np.asarray(obs_b), act=np.asarray(act_b),
                    lp=np.asarray(lp_b), rew=np.asarray(rew_b),
                    mask=np.asarray(mask_b), ep_rets=ep_rets, ep_lens=ep_lens,
+                   ep_goal=ep_goal, ep_loss=ep_loss, ep_fell=ep_fell,
+                   ep_dx=ep_dx,
                    raw=(raw_n, raw_s, raw_ss), design_steps=design_steps)
         if queue is not None:
             queue.put([pid, out])
@@ -374,6 +406,16 @@ class Trainer:
         best = -1e18
         n_epochs = (args.max_epoch if args.max_epoch is not None
                     else self.cfg.max_epoch_num)
+        from rower_soccer.t2a_port.e2_wandb import Run
+        wb = Run(args.wandb_name or f"d3_e2_{args.cfg}",
+                 project=args.wandb_project, enabled=args.wandb,
+                 tags=["d3", "e2", "mlp", "run-to-goal"],
+                 config=dict(arm="mlp", cfg=args.cfg, tag=args.tag or "",
+                             seed=self.cfg.seed, batch=self.batch,
+                             mini_batch=self.mini,
+                             policy_lr=args.policy_lr,
+                             value_lr=args.value_lr, hdims=args.hdims,
+                             env_name=self.cfg.env_name))
         for epoch in range(n_epochs):
             self.epoch = epoch
             if args.anneal_lr:
@@ -394,6 +436,10 @@ class Trainer:
             total_steps += exec_steps + design_steps
             rets = [r for o in outs for r in o["ep_rets"]]
             lens = [l for o in outs for l in o["ep_lens"]]
+            goal = [v for o in outs for v in o.get("ep_goal", [])]
+            lost = [v for o in outs for v in o.get("ep_loss", [])]
+            fell = [v for o in outs for v in o.get("ep_fell", [])]
+            dxs = [v for o in outs for v in o.get("ep_dx", [])]
             for o in outs:
                 self.norm.update_from(*o["raw"])
 
@@ -404,6 +450,11 @@ class Trainer:
                        total_steps=total_steps, loss_v=loss_v,
                        log_std=float(self.actor.log_std.mean().item()),
                        T_sample=t_sample, T_update=t_update)
+            if goal:
+                row.update(train_goal_rate=float(np.mean(goal)),
+                           train_loss_rate=float(np.mean(lost)),
+                           train_fall_rate=float(np.mean(fell)),
+                           train_net_dx=float(np.mean(dxs)))
             with open(self.log_path, "a") as f:
                 f.write(json.dumps(row) + "\n")
             print(f"{epoch}\tT_sample {t_sample:.2f}\tT_update {t_update:.2f}"
@@ -416,11 +467,72 @@ class Trainer:
             if row["exec_R_eps"] > best:
                 best = row["exec_R_eps"]
                 self.save("best")
+
+            payload = {f"e2/{k}": v for k, v in row.items() if k != "epoch"}
+            if args.eval_every and (epoch + 1) % args.eval_every == 0:
+                payload.update(self.inline_eval())
+            video = None
+            if args.video_every and (epoch + 1) % args.video_every == 0:
+                video, sc = self.inline_video(epoch)
+                payload.update(sc)
+            wb.log_epoch(epoch, payload, video=video)
+
             if args.stop_file and os.path.exists(args.stop_file):
                 print(f"stop file present -- stopping after epoch {epoch}",
                       flush=True)
                 self.save(epoch)
                 break
+        wb.finish()
+
+    # ---- one instrument, shared with the GNN arm and the post-hoc table --
+    def inline_eval(self):
+        from rower_soccer.t2a_port import e2_eval
+        W = self.env.control_action_dim + self.env.attr_design_dim + 1
+        act, wrap = e2_eval.mlp_actor(self.actor, self.norm, self.act_rows,
+                                      self.nbody, W, True)
+        self.actor.eval()
+        ev = e2_eval.evaluate(
+            self.env, act, wrap, episodes=self.args.eval_episodes,
+            seed_base=1000,
+            max_steps=self.cfg.done_condition.get("max_nsteps", 1000) + 5)
+        self.actor.train()
+        if ev:
+            print(f"  eval: R {ev['R_mean']:.1f} goal {ev['goal_rate']:.2f} "
+                  f"lost {ev['loss_rate']:.2f} fell {ev['fall_rate']:.2f} "
+                  f"dx {ev['net_dx']:.2f} m speed {ev['speed']:.3f} m/s",
+                  flush=True)
+        return {f"e2/eval_{k}": v for k, v in ev.items() if k != "episodes"}
+
+    def inline_video(self, epoch):
+        """Rendered in a SUBPROCESS: this process forks sampler workers every
+        epoch and an offscreen GL context in the parent is a way to lose the
+        run. The mp4 comes back and is logged into THIS wandb run at THIS
+        epoch, so metrics and media never separate."""
+        self.save(epoch)
+        out = ("/workspace/utmist-vc2-phase2/runs/d3_e2_rtg/renders/"
+               f"{self.args.cfg}{'_' + self.args.tag if self.args.tag else ''}"
+               f"_e{epoch:04d}_bmw.mp4")
+        cmd = [sys.executable,
+               "/workspace/utmist-vc2-phase2/rower_soccer/t2a_port/e2_video.py",
+               "--arm", "mlp", "--cfg", self.args.cfg, "--epoch", str(epoch),
+               "--out", out, "--json", "--episodes",
+               str(self.args.video_episodes)]
+        if self.args.tag:
+            cmd += ["--tag", self.args.tag]
+        env2 = dict(os.environ, MUJOCO_GL="osmesa", CUDA_VISIBLE_DEVICES="")
+        try:
+            r = subprocess.run(cmd, env=env2, capture_output=True, text=True,
+                               timeout=3600)
+            line = [l for l in r.stdout.splitlines() if l.startswith("E2VIDEO ")]
+            if line:
+                d = json.loads(line[0][len("E2VIDEO "):])
+                print(f"  video {d['mp4']}", flush=True)
+                return d["mp4"], d["scalars"]
+            print(f"  video FAILED rc={r.returncode} "
+                  f"{r.stderr.strip()[-400:]}", flush=True)
+        except Exception as e:
+            print(f"  video FAILED ({e!r})", flush=True)
+        return None, {}
 
     def save(self, tag):
         name = (f"epoch_{tag:04d}.p" if isinstance(tag, int) else f"{tag}.p")
@@ -456,6 +568,16 @@ def main():
     p.add_argument("--tag", default=None,
                    help="suffix for the results directory, so two "
                         "hyperparameter settings of one cfg do not collide.")
+    p.add_argument("--wandb", action="store_true")
+    p.add_argument("--wandb-name", default=None)
+    p.add_argument("--wandb-project", default="creature-soccer")
+    p.add_argument("--eval-every", type=int, default=0,
+                   help="epochs between mean-action evaluations "
+                        "(`e2_eval.evaluate`); 0 disables, which is E1.1's "
+                        "behaviour.")
+    p.add_argument("--eval-episodes", type=int, default=10)
+    p.add_argument("--video-every", type=int, default=0)
+    p.add_argument("--video-episodes", type=int, default=9)
     p.add_argument("--batch", type=int, default=None,
                    help="override min_batch_size. FOR SMOKE TESTS ONLY -- the "
                         "real run must use the cfg's 50,000 so the step "

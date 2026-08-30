@@ -1,0 +1,68 @@
+diff --git a/design_opt/envs/__init__.py b/design_opt/envs/__init__.py
+index 9a94441..e101dd7 100644
+--- a/design_opt/envs/__init__.py
++++ b/design_opt/envs/__init__.py
+@@ -1,6 +1,7 @@
+ from .hopper import HopperEnv
+ from .swimmer import SwimmerEnv
+ from .ant import AntEnv
++from .run_to_goal import RunToGoalEnv
+ from .gap import GapEnv
+ 
+ 
+@@ -8,5 +9,6 @@ env_dict = {
+     'hopper': HopperEnv,
+     'swimmer': SwimmerEnv,
+     'ant': AntEnv,
++    'run_to_goal': RunToGoalEnv,
+     'gap': GapEnv
+ }
+\ No newline at end of file
+diff --git a/design_opt/envs/ant.py b/design_opt/envs/ant.py
+index 323f787..dbea780 100644
+--- a/design_opt/envs/ant.py
++++ b/design_opt/envs/ant.py
+@@ -15,7 +15,10 @@ class AntEnv(MujocoEnv, utils.EzPickle):
+         self.cfg = cfg
+         self.env_specs = cfg.env_specs
+         self.agent = agent
+-        self.model_xml_file = 'assets/mujoco_envs/ant.xml'
++        # D3 M3 E1: default unchanged; `env_specs.model_xml_file` lets a cfg
++        # point the same task at another body (the converted CompetEvo ant).
++        self.model_xml_file = self.env_specs.get(
++            'model_xml_file', 'assets/mujoco_envs/ant.xml')
+         # robot xml
+         self.robot = Robot(cfg.robot_cfg, xml=self.model_xml_file)
+         self.init_xml_str = self.robot.export_xml_string()
+@@ -34,7 +37,11 @@ class AntEnv(MujocoEnv, utils.EzPickle):
+         self.control_nsteps = 0
+         self.sim_specs = set(cfg.obs_specs.get('sim', []))
+         self.attr_specs = set(cfg.obs_specs.get('attr', []))
+-        MujocoEnv.__init__(self, self.model_xml_file, 4)
++        # D3 M3 E2: frame_skip is 4 for E0/E1/E1.1 (Transform2Act's own
++        # value, unchanged); `env_specs.frame_skip` lets the run-to-goal
++        # cfg take CompetEvo's 5 without a second copy of this file.
++        MujocoEnv.__init__(self, self.model_xml_file,
++                           int(self.env_specs.get('frame_skip', 4)))
+         utils.EzPickle.__init__(self)
+         self.control_action_dim = 1
+         self.skel_num_action = 3 if cfg.enable_remove else 2
+@@ -106,6 +113,18 @@ class AntEnv(MujocoEnv, utils.EzPickle):
+         if not self.is_inited:
+             return self._get_obs(), 0, False, {'use_transform_action': False, 'stage': 'execution'}
+ 
++        # D3 M3 E1.1: run the design stages but force them to the IDENTITY
++        # action, so episode length, the stage flag in the observation and the
++        # reward structure are all unchanged while the body is not edited at
++        # all. Default False, so E0/E1 and their own tasks are untouched.
++        # A zero skeleton action is "no add, no remove" (`apply_skel_action`
++        # only acts on 1 and 2); a zero attribute action is a zero DELTA and
++        # `abs_design` is false in every cfg here, so `design_params =
++        # design_cur_params + 0`.
++        if (self.env_specs.get('force_identity_design', False)
++                and self.stage != 'execution'):
++            a = np.zeros_like(a)
++
+         self.cur_t += 1
+         # skeleton transform stage
+         if self.stage == 'skeleton_transform':

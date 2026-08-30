@@ -1,0 +1,58 @@
+
+PHASE 1 -- the merged scene
+  [PASS] 27 bodies (world + 13 + 13)  nbody 27
+  [PASS] 16 motors (8 ours + 8 the opponent's)  nu 16
+  [PASS] our 9 joints keep their unprefixed names  ['0_joint', '11_joint', '111_joint', '12_joint', '112_joint', '13_joint', '113_joint', '14_joint', '114_joint']
+  [PASS] Robot parses exactly our 13 bodies and none of the opponent's  ['0', '1', '11', '111', '2', '12', '112', '3', '13', '113', '4', '14', '114']
+  [PASS] our 13 bodies have the same names in both assets
+  [PASS] our mass/inertia/ipos unchanged by the merge  max |delta| 0.000e+00
+  [PASS] our geom sizes unchanged
+  [PASS] our gears unchanged
+  [PASS] agent 0 spawns at CompetEvo's (-1, 0, 0.75)  [-1.    0.    0.75]
+  [PASS] agent 1 spawns at CompetEvo's (+1, 0, 0.75)  [1.   0.   0.75]
+  [PASS] agent 1 is yawed 180 deg (quat 0,0,0,1)  [6.123234e-17 0.000000e+00 0.000000e+00 1.000000e+00]
+  [PASS] goal lines at x = +/- 4  {'rightgoal': 4.0, 'leftgoal': -4.0}
+  [PASS] CompetEvo's option block (RK4, 0.003, PGS, 1000)  ts 0.003 int 1 solver 0 iter 1000
+  [PASS] agent 0 geoms contype 1 / conaffinity 0 (CompetEvo's agent 0)  {1} {0}
+  [PASS] agent 1 geoms contype 0 / conaffinity 1 (CompetEvo's agent 1)  {0} {1}
+  [PASS] NEG: the two ants DO collide with each other
+
+PHASE 2 -- the scripted opponent
+  [PASS] opponent root x follows 1 - v*dt*k EXACTLY  max |err| 0.000e+00
+  [PASS] opponent is NON-REACTIVE: identical trajectory under a passive and a thrashing agent
+  [PASS] opponent COM x == its root x to float precision (symmetric stance)  max 7.55e-09
+  [PASS] opponent crosses x = -4 at control step 491  step 491
+  [PASS] both episodes end on the opponent's goal
+  [PASS] opponent stance is a rest state: z 0.5347, hips 0, ankles 51.87 deg  z 0.5347 hips [ 1.e-05  0.e+00  0.e+00 -1.e-05] ankles [51.8746 51.8745 51.8746 51.8745]
+  [PASS] NEG: opponent_speed 1.0 moves the crossing to step 334  step 334
+  (documented consequence) a PASSIVE agent is bulldozed from x=-1 to x=-3.22; a thrashing one to x=-3.85
+
+PHASE 3 -- the body is frozen under destructive design actions
+  [PASS] all 134 mjModel arrays identical after 20 episodes of destructive design actions  []
+  [PASS] XML byte-identical
+  [PASS] still 13 bodies / 8 of our motors
+  [PASS] stage sequence is 5 skeleton + 1 attribute, every episode  {('skeleton_transform', 'skeleton_transform', 'skeleton_transform', 'skeleton_transform', 'skeleton_transform', 'attribute_transform')}
+  [PASS] NEG: without force_identity_design the SAME actions change the body  96 arrays changed, body counts [17, 17, 15, 12, 18]
+
+PHASE 4 -- the reward is CompetEvo's, term by term
+  [PASS] reward == forward - 0.5*sum(a^2) + 1.0 (+/- 1000 on a goal)  max |err| 4.441e-16
+  [PASS] contact cost is a constant 0, as in every CompetEvo run  max |cfrc_ext| 0.000e+00
+  [PASS] NEG: a zero-action step with zero displacement would score ~+1.0
+
+PHASE 5 -- termination
+  [PASS] with a stationary opponent a standing agent truncates at 500  500 steps, info {'reached': False, 'opp_reached': False, 'fell': False}
+  [PASS] crossing x=+4 ends the episode with +1000  r 1001.0 done True
+  [PASS] root z < 0.28 ends the episode as a fall
+  [PASS] NEG: the opponent's stance (z 0.5347) never triggers the fall rule, and the rule is applied to OUR root only
+
+PHASE 6 -- the observation
+  [PASS] appended columns == (opp_dx, opp_dy, goal_dx), exactly  max |err| 0.000e+00
+  [PASS] they are identical on every node row, and the first 13 columns are E1's sim_obs untouched
+  [PASS] node row width 25 = 4 attr_fixed + 16 sim + 5 design  sim 16 row (13, 25)
+
+PHASE 7 -- E1.1's arms are unchanged by E2's edits
+  [PASS] E1.1's ant env still has frame_skip 4 and dt 0.04  frame_skip 4 dt 0.04
+  [PASS] E1.1's sim_obs_dim is still 13 and its node row still 22 wide  13 (13, 22)
+  [PASS] E1.1's env is AntEnv, not the run-to-goal subclass  AntEnv
+
+41 passed, 0 failed

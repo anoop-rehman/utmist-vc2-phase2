@@ -45,6 +45,8 @@ def main():
         m, s = r["results"]["mean_action"], r["results"]["stochastic"]
         arm = r["arm"].upper() + (f" ({r['tag']})" if r.get("tag") else
                                   (" (matched)" if r["arm"] == "mlp" else ""))
+        if r["arm"] == "idle":
+            arm = "IDLE (neg. control)"
         print(f"{arm:<22} {r['cfg']:<14} {m['R_mean']:14.1f} {m['R_sd']:8.1f} "
               f"{m['goal_rate']:6.2f} {m['loss_rate']:6.2f} {m['fall_rate']:6.2f} "
               f"{m['ep_len']:7.1f} {m['net_dx']:7.2f} {m['speed']:7.3f} "

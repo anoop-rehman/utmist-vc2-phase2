@@ -32,13 +32,27 @@ import torch  # noqa: E402
 def load_arm(arm, cfg_id, epoch, tag=None, device="cpu"):
     """Return (cfg, env, make_actor, action_std). `make_actor(mean_action)`
     gives the (act, wrap) pair `e2_eval` drives, so one load serves both the
-    mean-action and the stochastic protocol."""
+    mean-action and the stochastic protocol.
+
+    `arm="idle"` is the task's negative control: zero torque on every motor,
+    no checkpoint. It is what "not won by standing still" is measured with,
+    through exactly the same instrument as the trained arms."""
     from design_opt.utils.config import Config
     from design_opt.envs import env_dict
     from rower_soccer.t2a_port import e2_eval
     cfg = Config(cfg_id, tmp=False)
     np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
+    if arm == "idle":
+        env = env_dict[cfg.env_name](cfg, agent=None)
+        W = env.control_action_dim + env.attr_design_dim + 1
+        nb = len(env.robot.bodies)
+        zero = np.zeros((nb, W))
+
+        def make(mean=True):
+            return (lambda state, stage: zero), (lambda s: s)
+        return cfg, env, make, 0.0
+
     if arm == "gnn":
         from design_opt.agents.transform2act_agent import Transform2ActAgent
         from khrylib.utils.torch import to_test
@@ -78,7 +92,7 @@ def load_arm(arm, cfg_id, epoch, tag=None, device="cpu"):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--arm", choices=["gnn", "mlp"], required=True)
+    p.add_argument("--arm", choices=["gnn", "mlp", "idle"], required=True)
     p.add_argument("--cfg", required=True)
     p.add_argument("--tag", default=None)
     p.add_argument("--epoch", required=True)

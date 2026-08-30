@@ -25,5 +25,6 @@ ARMS=${1:-all}
 [ "$ARMS" = all ] || [ "$ARMS" = mlp_s2 ] && run mlp rtg_mlp_s2 99 "" mlp_s2
 [ "$ARMS" = all ] || [ "$ARMS" = pub_s1 ] && run mlp rtg_mlp_s1 2399 pub pub_s1
 [ "$ARMS" = all ] || [ "$ARMS" = pub_s2 ] && run mlp rtg_mlp_s2 2399 pub pub_s2
+run idle rtg_mlp_s1 0 "" idle
 echo "=== comparison"
 /workspace/utmist-vc2-phase2/.venv/bin/python $T/e2_compare.py $O/*.json

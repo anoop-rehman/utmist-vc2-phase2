@@ -45,7 +45,7 @@ def arrays(m):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--arm", choices=["gnn", "mlp"], required=True)
+    p.add_argument("--arm", choices=["gnn", "mlp", "idle"], required=True)
     p.add_argument("--cfg", required=True)
     p.add_argument("--tag", default=None)
     p.add_argument("--epoch", required=True)

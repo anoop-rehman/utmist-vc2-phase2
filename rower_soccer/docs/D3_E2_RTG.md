@@ -239,6 +239,26 @@ MLP's batching — the GNN won 2.1-2.6× against published PPO-MuJoCo batching a
 lost 1.18× against Transform2Act's own. The matched batching is therefore the
 baseline here, as E1.1 established.
 
+**Three differences between the arms that are NOT "architecture" in the narrow
+sense**, carried over from E1.1 and stated so they are not mistaken for it:
+
+1. **The MLP normalises its observations and the GNN does not.**
+   `transform2act_agent.py:109` sets `running_state = None` — Transform2Act
+   applies no observation normalisation at all — while the MLP arm carries the
+   Welford normaliser the published PPO recipe uses. That is each
+   architecture's own published configuration, not a handicap chosen here. It
+   matters slightly more in E2 than in E1.1 because the three appended columns
+   are distances: they span about ±8 m, which is inside the ±10 the
+   `clip_qvel: true` velocity columns already span, so they are not out of
+   family with what the GNN already sees unnormalised — but the GNN sees them
+   raw and the MLP sees them standardised.
+2. **The action spaces differ.** The MLP writes the 8 actuators directly; the
+   GNN emits one scalar per node over 13 nodes and discards 5.
+3. **The GNN carries skeleton and attribute heads that take gradients from
+   actions the env throws away**, which is inherent to "run but forced to
+   identity". Whether SKIPPING the design stages would close any gap is
+   untested here, exactly as in E1.1.
+
 **Protocol** (`e2_eval.evaluate`, called from all three places):
 
 * **mean-action is the headline**, stochastic reported beside it, and each

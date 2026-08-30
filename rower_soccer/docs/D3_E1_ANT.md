@@ -513,3 +513,215 @@ needs changing before morphology search is pointed at soccer.**
   pass-2 returns can diverge substantially. Panels are labelled with their own
   pass-2 return, so on-screen numbers are right, but the best/median/worst
   *ordering* can be marginal.
+
+---
+
+# D3 M3 E1.1 — is the GNN controller as good as plain PPO?
+
+*Same document because E1.1 shares E1's creature, task and apparatus. E1.1
+nulls the design stages so only the execution stage does anything, and asks how
+good Transform2Act's **controller** is against ordinary PPO on the same body.*
+
+## 13. The two settled design decisions, and how each is gated
+
+**1. The design stages are RUN but forced to an IDENTITY action**, not skipped.
+Implemented as `env_specs.force_identity_design` in `design_opt/envs/ant.py`
+(mirrored as `rower_soccer/docs/t2a/e11_identity_design.patch`), which replaces
+the action with zeros whenever `stage != 'execution'`. Episode length, the stage
+flag in the observation and the reward structure are therefore exactly E1's.
+
+Gated **twice**, before and after training:
+
+* `rower_soccer/t2a_port/gate_e11_identity.py`, run before: 20 episodes driven
+  by **destructive random design actions** (every body told to add or remove, a
+  full-range attribute kick). All **134 mjModel arrays identical**, XML string
+  byte-identical, 13 bodies / 8 motors throughout, and the stage sequence
+  exactly 5 skeleton + 1 attribute + N execution. Negative control: the same
+  actions **without** the flag change 96 arrays and give body counts
+  9/14/15/16/20, so the gate is not vacuous.
+* `rower_soccer/t2a_port/e11_posthoc_check.py`, run after: the same array
+  comparison driven by **each arm's own trained policy**, because a gate that
+  only ever saw random actions could miss a policy that learned some other
+  path. **All 134 arrays identical on all five arms**, capsule radii still
+  exactly 0.080-0.250 m — the values the ant started with.
+
+The gate found and named one real thing: `Body.set_params`
+(`khrylib/robot/xml_robot.py:444-446`) bumps a zero bone offset by 1e-8 to
+avoid a zero-length bone, and our root's `bone_offset` is exactly [0,0,0], so
+`Robot.get_params()` moves in exactly one entry. It is **inert** —
+`no_root_offset: true` makes `Body.rebuild` set `bone_end = bone_start`, so the
+root's offset places no geom — which is why the compiled model and the XML are
+exactly unchanged, and it fires identically on **their** ant, so it is their
+code and not the conversion's.
+
+**2. The baseline is plain-MLP PPO run INSIDE the Transform2Act ant env**
+(`rower_soccer/t2a_port/train_e11_mlp.py`), not published Ant numbers. Same env,
+same reward, same `done_condition`, same episode structure, same body, same
+gamma 0.995 / GAE lambda 0.95 / clip 0.2 read from the shared cfg. The cfgs of
+the two arms differ **only in their name and seed**. The MLP is fed the same
+per-body observation matrix the GNN receives, flattened, plus the one-hot stage
+flag; its action space is the 8 actuators directly.
+
+## 14. THE MEASUREMENT TRAP, which nearly produced a wrong answer
+
+**`exec_R_eps` in Transform2Act's training log is NOT a training return. It is a
+separate mean-action EVALUATION pass**, `transform2act_agent.py:214`:
+
+```python
+_, log_eval = self.sample(self.cfg.eval_batch_size, mean_action=True)
+```
+
+`train_e11_mlp.py`'s `exec_R_eps`, by contrast, is the **stochastic training**
+return over the sampling batch. Reading the two logs side by side compares a
+deterministic eval against a noisy training average and **flatters the GNN by
+roughly 1.3x**. The first draft of this comparison made exactly that error.
+
+Both arms are therefore measured with **one instrument**
+(`e11_posthoc_check.py`), which loads a checkpoint, drives the design stages to
+identity, rolls N episodes and reports return, length, displacement and the
+learned action std. It reports the same statistic for both architectures, and
+it is the only number quoted below.
+
+The learned action noise is what makes the two protocols disagree, and it
+differs enormously between arms — so a stochastic protocol is not comparable
+across them either:
+
+| arm | learned control action std |
+|---|---|
+| GNN | **0.778** |
+| MLP, matched batching | 0.606 |
+| MLP, published batching | **0.016** (collapsed) |
+
+## 15. Sanity check against published PPO-on-Ant — a check on the ENV, not a baseline
+
+The user asked for published reference numbers, and they are useful for exactly
+one thing: deciding whether our in-env PPO is competently tuned and whether the
+environment is broken. They are **not** the baseline, because the objectives
+differ (`PLAN_D3_M3.md` E1.1: gym pays +1.0/step survive, charges
+`0.5*sum(a^2)` control and a contact cost; the Transform2Act ant pays none of
+these and charges `1e-4*mean(a^2)`).
+
+| source | env | steps | mean reward |
+|---|---|---|---|
+| [rl-baselines3-zoo benchmark](https://github.com/DLR-RM/rl-baselines3-zoo/blob/master/benchmark.md) | `Ant-v3` | 1M | **1327 ± 452** |
+| [sb3/ppo-Ant-v3 model card](https://huggingface.co/sb3/ppo-Ant-v3) | `Ant-v3` | 1M | **1480 ± 407** |
+
+Those runs use `MlpPolicy` with observation normalisation on and reward
+normalisation off, per the model card's hyperparameter block.
+
+**Converting to a common physical unit, because the reward scales differ.**
+Our reward is `dx/dt` with `dt = frame_skip(4) x timestep(0.01) = 0.04`, so an
+episode return is `25 x` net displacement in metres — checked against our own
+numbers: the matched MLP travels 123.6 m and scores 3091, and `25 x 123.6 =
+3090`. Gym's Ant has `dt = 0.05`, so its forward term is `20 x` displacement.
+Stripping the ~1,000 of survive bonus from a ~1,327 published score leaves
+roughly ~330 of forward-minus-costs, i.e. **very roughly 16-25 m per episode**.
+
+| | net displacement per episode |
+|---|---|
+| published PPO, `Ant-v3`, 1M steps (inferred) | ~16-25 m |
+| **our MLP baseline, matched batching, 5M steps** | **114-124 m** |
+| **our GNN arm, 5M steps** | **105 m** |
+| our MLP baseline, published batching, 5M steps | 41-47 m |
+
+**Reading**: our in-env PPO travels several times further than a published PPO
+Ant, which is what should happen — this environment removes the contact cost,
+removes the survive bonus that rewards standing still, and cuts the control cost
+by ~40,000x, so nothing penalises maximum-torque sprinting. **The environment is
+not broken and the baseline is not a strawman**; if anything our task is
+*easier to score highly in* than gym's. The inference is order-of-magnitude
+only: it assumes the published score's non-survive remainder is mostly forward
+reward, which is not separable from the published aggregate.
+
+## 16. THE RESULT: the GNN controller loses to a plain MLP
+
+```
+.venv-gpu/bin/python .../t2a_port/e11_posthoc_check.py --arm gnn \
+    --cfg ant_e11_gnn_s$S --epoch 100 --episodes 20
+.venv-gpu/bin/python .../t2a_port/e11_posthoc_check.py --arm mlp \
+    --cfg ant_e11_mlp_s$S [--tag pub] --epoch 99|2399 --episodes 20
+```
+
+**One instrument, mean-action, 20 episodes per arm, the same frozen 13-body /
+8-motor ant, the same reward, the same episode structure, the same 5.0M-step
+budget.** Body freezing verified per arm by the array comparison of §13.
+
+| arm | seed | mean return | sd | ep len | net dx | action std |
+|---|---|---|---|---|---|---|
+| **GNN** | s1 | **2621.8** | 276.1 | 977 | 104.9 m | 0.778 |
+| **GNN** | s2 | **2430.4** | — | 1000 | 97.2 m | 0.750 |
+| **MLP, matched batching** | s1 | **3090.7** | 142.6 | 1000 | 123.6 m | 0.606 |
+| **MLP, matched batching** | s2 | **2854.9** | 305.4 | 989 | 114.2 m | 0.604 |
+| MLP, published batching | s1 | 1179.5 | 619.0 | 707 | 47.2 m | 0.016 |
+| MLP, published batching | s2 | 1016.1 | 471.9 | 759 | 40.7 m | 0.016 |
+
+**Seed means: GNN 2526, MLP-matched 2973. The MLP is 1.18x the GNN, and the two
+arms' seed ranges do not overlap** — GNN [2430, 2622] against MLP [2855, 3091].
+At the episode level, GNN s1 against the pooled matched-MLP episodes is
+`+351.1, ratio 1.134, Welch t = 4.70` (n = 20 vs 40).
+
+**The falsification condition E1.1 was written to test has fired.** From
+`PLAN_D3_M3.md`: *"If the GNN materially underperforms a plain MLP on the same
+body, same reward and same budget, then every design+control result rests on a
+weaker controller than the task allows, and that is a bigger problem than any
+morphology finding."* On this body, this reward and this budget, it does, by
+~18% on seed means with no overlap.
+
+### The three qualifications that must travel with that sentence
+
+1. **It depends on the baseline being well-configured, and that was not free.**
+   Against the *published* PPO-MuJoCo batching the GNN **wins comfortably**, by
+   2.1-2.6x (2526 vs 1016-1180). The MLP only beats the GNN when given
+   Transform2Act's own batching — batch 50,000, minibatch 2048 — which is 24x
+   more environment steps per gradient step than the literature default. Had
+   only the published configuration been run, this section would have concluded
+   the opposite. **Running both batchings is the only reason the answer is
+   right**, and it is why "make the baseline a fair fight" was the load-bearing
+   instruction.
+2. **n = 2 seeds per arm.** The ranges do not overlap and the episode-level
+   separation is large, but four runs cannot characterise seed variance.
+3. **The MLP has a structural advantage that is not "architecture" in the
+   narrow sense**: its action space is the 8 actuators directly, while the GNN
+   emits one scalar per node over 13 nodes and discards 5. The GNN also carries
+   skeleton and attribute heads that receive gradients from actions the env
+   throws away, which is inherent to "run but forced to identity" and may be a
+   handicap the design-enabled setting would not impose. **Whether skipping the
+   design stages entirely would close the gap has NOT been tested** — the user
+   settled on forcing identity precisely to hold episode structure constant, and
+   that decision was honoured rather than second-guessed.
+
+### What it means for M3
+
+E1's design+control numbers (`exec_R_eps` 3346 and 2704) were produced by this
+controller. If a plain MLP is ~18% better on a fixed body, then E1's evolved
+bodies were being scored by a controller that is not the best available for the
+task, and **part of what the skeleton stage was compensating for may be
+controller weakness rather than morphological gain**. That does not invalidate
+E1's topology findings — those are about the *search*, not about returns — but
+it does mean **`exec_R_eps` comparisons across E-rungs should not be read as
+morphology quality**. The honest next step before E3+ is to find out whether the
+GNN's deficit is architectural or an artefact of the nulled design heads.
+
+## 17. E1.1 — not tested / not claimed
+
+* **Only the control stage was compared.** E1.1 says nothing about whether the
+  GNN's *design* heads are good; they were deliberately nulled.
+* **Skipping the design stages** (as opposed to forcing identity) is untested,
+  and is the most plausible mechanism for the GNN's deficit.
+* **n=2 per arm**, one budget (5.0M steps), one body, one task.
+* **Hyperparameters were not tuned for either arm.** Both take gamma, GAE
+  lambda, clip and the PPO epoch count from the shared cfg; the MLP uses the
+  published 3e-4 learning rate and a 64x64 tanh net. **Nothing was swept.** A
+  tuned GNN or a tuned MLP could move this result either way.
+* The GNN arm's two seeds report `exec_R_eps` **2544.75 and 2544.74** at epoch
+  99 — a coincidence to 0.01 across genuinely independent runs (different seeds,
+  distinct logs, clearly divergent trajectories at epochs 95-98: 2445/2456/2439
+  against 1981/2223/2482). **Unexplained.** It does not affect the result above,
+  which comes from an independent instrument, but it is recorded rather than
+  smoothed over.
+* **MLP arm step budgets overran** by 1.07x (matched, 5.37M) and 1.22x
+  (published, 6.08M) because a worker finishes the episode in flight after
+  reaching its step quota. Budget-matched values at exactly 5.0M steps were
+  extracted from the logs and are within noise of the final ones (matched: 1667
+  and 1451 stochastic-training return at 5.0M against 1756 and 1619 at the end).
+  The §16 table is evaluated at the final checkpoint for all arms.

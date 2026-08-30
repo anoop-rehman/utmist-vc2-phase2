@@ -256,6 +256,42 @@ same body, same reward and same budget, then every design+control result rests
 on a weaker controller than the task allows, and that is a bigger problem than
 any morphology finding.
 
+#### E1.1 RESULT, 2026-08-30 — IT FIRED. See [`D3_E1_ANT.md`](D3_E1_ANT.md) sections 13-17.
+
+**The GNN controller loses to a plain MLP on the same frozen body, same reward,
+same 5.0M-step budget.** One instrument, mean-action, 20 episodes per arm, body
+freezing verified array-by-array under each arm's own trained policy:
+
+| arm | seed means | ratio |
+|---|---|---|
+| GNN (Transform2Act, design heads nulled) | 2622, 2430 -> **2526** | — |
+| MLP PPO, batching matched to the GNN | 3091, 2855 -> **2973** | **1.18x the GNN** |
+| MLP PPO, published PPO-MuJoCo batching | 1180, 1016 -> 1098 | 0.43x the GNN |
+
+Seed ranges do not overlap; episode-level Welch t = 4.70.
+
+**Three qualifications that must travel with that**: (1) it depends entirely on
+the baseline being well-configured -- against *published* PPO batching the GNN
+wins by 2.1-2.6x, and only Transform2Act's own 50,000/2048 batching makes the
+MLP win, so running both batchings is the only reason the answer is right;
+(2) n=2 seeds per arm; (3) the MLP acts on the 8 actuators directly while the
+GNN emits one scalar per node over 13 and discards 5, and the GNN carries design
+heads taking gradients from discarded actions -- **whether SKIPPING the design
+stages rather than forcing identity would close the gap is untested.**
+
+**Consequence for the ladder**: E1's `exec_R_eps` (3346, 2704) came from this
+controller. `exec_R_eps` comparisons across rungs should NOT be read as
+morphology quality, and part of what the skeleton stage appears to gain may be
+compensation for controller weakness. E2 is now partly answered and partly
+sharpened: the GNN *can* learn this task well (105 m per episode, net/path
+0.998) but is not the best controller available for it.
+
+**A measurement trap worth carrying forward**: Transform2Act's `exec_R_eps` is a
+separate **mean-action evaluation** pass (`transform2act_agent.py:214`), not a
+training return. Comparing it against a trainer that logs stochastic training
+returns flatters the GNN by ~1.3x. The first draft of this comparison made that
+error.
+
 ### E2 — GNN control only, morphology frozen, on run-to-goal
 
 The sanity rung, and the user's own suggestion. We know the CompetEvo ant can

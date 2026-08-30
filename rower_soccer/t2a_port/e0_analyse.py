@@ -44,6 +44,8 @@ import torch  # noqa: E402
 from rower_soccer.t2a_port.topology_census import census, topo_key  # noqa: E402
 
 OUT = "/workspace/utmist-vc2-phase2/runs/d3_e0_ant/census"
+# `--out` overrides it; E1 writes to runs/d3_e1_ant/census so the two
+# experiments' JSON never share a directory.
 
 # The five attribute-genome columns, in the order `Body.get_params` emits them
 # for a non-root body on ant.yml (`offset_x, offset_y, gear, size, ext_start`),
@@ -227,6 +229,7 @@ def compare(cfgs, epoch):
 
 
 def main():
+    global OUT
     p = argparse.ArgumentParser()
     p.add_argument("--cfg")
     p.add_argument("--epochs", default="10,20,30,40,50,60,70,80,90,100")
@@ -234,7 +237,12 @@ def main():
     p.add_argument("--compare", action="store_true")
     p.add_argument("--cfgs", default="ant_e0_s1,ant_e0_s2,ant_e0_s3")
     p.add_argument("--epoch", type=int, default=100)
+    p.add_argument("--out", default=None,
+                   help="directory for the per-(cfg,epoch) census JSON. "
+                        f"Default {OUT}.")
     args = p.parse_args()
+    if args.out:
+        OUT = args.out
     torch.set_default_dtype(torch.float64)
     if args.compare:
         compare(args.cfgs.split(","), args.epoch)

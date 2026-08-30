@@ -149,12 +149,58 @@ Our `dev_ant_body.xml` is a different dialect.
   ranges and actuator gears equal to the CompetEvo ant to tolerance, and one
   rendered clip looked at. **DONE 2026-08-29 —
   [`D3_M3_E1_ANT_CONVERTER.md`](D3_M3_E1_ANT_CONVERTER.md).**
-* **Run**: their ant task with our ant as the initial design, 3 seeds, ~100
+* **Run**: their ant task with our ant as the initial design. **DONE 2026-08-30 on TWO seeds x 100 epochs — [`D3_E1_ANT.md`](D3_E1_ANT.md).** Originally 3 seeds, ~100
   epochs.
 * **Question**: does it evolve, and into what? Same variability measurement as
   E0, now on the creature that actually matters.
 * **Note**: this is on the critical path regardless of E0's outcome — every rung
   from E3 onward needs our ant in their representation.
+
+#### E1 RESULT, 2026-08-30 — run on TWO seeds. See [`D3_E1_ANT.md`](D3_E1_ANT.md).
+
+**Two seeds x 100 epochs, not three.** Seed 3 was stopped at epoch 62 by user
+decision to free the GPU for E1.1 and is excluded from every number; an earlier
+seed-3 attempt aborted at 39 epochs on a full disk and is quarantined. **n=2 is
+the central limitation: two points cannot establish a spread**, so the contrasts
+with E0's three seeds below are suggestive only.
+
+* **The skeleton stage explores here too, and converges more slowly.** Epoch 20:
+  190 and 187 distinct topologies of 200, indistinguishable from their ant's
+  187/188/187. Epoch 100: **63 and 101 distinct, most-common share 5.5-7.0%**,
+  against their ant's 34/20/27 at 20-41% and the hopper's 3 at 89%. On
+  concentration our ant at epoch 100 sits where their ant was at epoch 40-50.
+  The mean-action design changed at 10 of 11 censuses on both seeds.
+* **But the reachable space is much smaller, and this was established before
+  running.** `min_body_depth: 1` (not `max_nchild`) is what forbids a fifth leg,
+  and it binds their ant identically. The real constraint is that
+  `add_child_to_body` clones the parent and our depth-1 leg stubs are
+  **jointless**: our ant can gain **at most 4 actuators** (8→12) against their
+  24 (4→28), 12 of its 16 possible additions are passive dead weight, and it can
+  erode to a **0-motor** blob theirs cannot reach.
+* **`done_condition.max_ang: 60` was flagged as possibly ending a rolling
+  quadruped early. It does — for THEIR ant, not ours.** Untrained episodes:
+  ours mean 509 steps with 43% running the full 1000; theirs mean **26** with
+  97% ending on tilt.
+* **The evolved creature stops being a quadruped.** Settled torso height halves
+  (0.561 → 0.270 on both seeds), mass nearly doubles, and four knee-up walking
+  legs become long splayed limbs that are **airborne 71-76%** of the episode.
+  `exec_R_eps` final-10 3192 and 2721; 33.3 m in 222 steps and 119.5 m in 1000;
+  net/path 0.999-1.000. Their ant *gained* a stance; ours *lost* one.
+* **The design box is no longer pristine.** 7.2% of one seed's capsules at the
+  MAXIMUM radius and 7.5% of the other's gears at the minimum, where their ant
+  had 0.0% everywhere. Still far from the hopper's 44%/34%. Floor penetration is
+  *better* than their ant's (0.049-0.053 m vs 0.110).
+* **Cross-seed:** Jaccard 0.75, SMD 0.58 for the one pair — marginally more
+  divergent than any of E0's three pairs, on one measurement.
+
+**The consequence for M3**: on a task whose reward is `dx/dt` with no energy
+term, morphology search converts the soccer creature into a straight-line
+bounder with its belly near the floor. Before morphology search is pointed at
+soccer, **the task needs changing, not the design space**.
+
+**GPU budget correction, learned expensively**: E0's "3 concurrent = 19.2 GB"
+does NOT transfer. **Two of ours peaked at 19.95 GB of 20.475** and OOM-ed the
+live D1 run off the card. One E1-class run at a time alongside D1.
 
 ### E1.1 — Is the GNN controller as good as plain PPO? (added 2026-08-29, user)
 

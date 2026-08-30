@@ -1,0 +1,152 @@
+# D3 M3 E1.1 MLP arm, seed 2. `ant_competevo.yml` with
+# `env_specs.force_identity_design: true` added and seed / max_epoch_num /
+# save_model_interval set. The controller under test here is
+# a plain MLP policy trained by `train_e11_mlp.py`; only `env_name`, `done_condition`, `env_specs`, `gamma`, `tau`, `clip_epsilon`, `min_batch_size`, `mini_batch_size`, `num_optim_epoch`, `max_epoch_num` and `seed` are read -- the `policy_specs`/`value_specs` blocks are inert for this arm and are left in place only so the two cfgs diff to nothing but their name.
+#
+# The two arms share this file byte for byte except for the name and the
+# seed, so the env, the reward, the episode structure, gamma, GAE lambda,
+# the batch size, the minibatch size, the PPO epoch count, the clip epsilon
+# and the step budget are identical by construction.
+# D3 M3 E1: Transform2Act's ant task, run on OUR ant.
+#
+# Identical to `ant.yml` except for `env_specs`. Everything else is left alone
+# on purpose: E1's question is what the design+control loop does to the
+# CompetEvo ant, and changing the optimiser at the same time as the creature
+# would make the answer uninterpretable.
+#
+#   model_xml_file  the converted ant, produced and gated by
+#                   `rower_soccer/t2a_port/competevo_to_t2a.py` +
+#                   `gate_competevo_ant.py`. Regenerate with:
+#                     PYTHONPATH=. .venv/bin/python -m \
+#                       rower_soccer.t2a_port.competevo_to_t2a \
+#                       --out assets/mujoco_envs/ant_competevo.xml
+#
+#   init_height     THEIR ant is reset to z=0.4 (`AntEnv.reset_state`), which
+#                   is right for a torso of radius 0.25 with flat single-segment
+#                   limbs. Ours is the gym/DeepMind ant and both gym and
+#                   CompetEvo start it at z=0.75; at 0.4 it starts already
+#                   interpenetrating the floor. So `init_height: false`, which
+#                   makes reset use the model's own qpos0 -- 0.75, the value
+#                   `scene.INIT_POS` uses for D1/D2.
+#
+# NOT TUNED, and flagged rather than quietly inherited: `done_condition.max_ang`
+# is theirs (60 deg) and no one has checked it is right for a quadruped that
+# rolls; `robot_param_scale`, the annealing and the batch size are all theirs.
+
+env_name: ant
+agent_specs:
+  batch_design: true
+# training parameters
+gamma: 0.995
+tau: 0.95
+policy_specs:
+  name: v5
+  htype: tanh
+  skel_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  skel_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  control_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  attr_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  attr_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_log_std: 0
+  attr_log_std: -2.3
+  fix_control_std: false
+  fix_attr_std: false
+policy_optimizer: 'Adam'
+policy_lr: 5.e-5
+policy_momentum: 0.0
+policy_weightdecay: 0.0
+value_specs:
+  htype: tanh
+  design_flag_in_state: true
+  onehot_design_flag: true
+  mlp: [512, 256]
+  gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+value_optimizer: 'Adam'
+value_lr: 3.e-4
+value_momentum: 0.0
+value_weightdecay: 0.0
+clip_epsilon: 0.2
+min_batch_size: 50000
+mini_batch_size: 2048
+num_optim_epoch: 10
+max_epoch_num: 100
+seed: 2
+save_model_interval: 10
+
+
+robot_param_scale: 1
+skel_transform_nsteps: 5
+
+env_specs:
+  model_xml_file: 'assets/mujoco_envs/ant_competevo.xml'
+  init_height: false
+  # D3 M3 E1.1: the design stages are STEPPED but forced to the identity
+  # action (`design_opt/envs/ant.py:112-122`), so the episode length, the
+  # stage flag in the observation and the reward structure are exactly E1's
+  # while the body is never edited. Gated by `gate_e11_identity.py`.
+  force_identity_design: true
+
+done_condition:
+  max_ang: 60
+
+obs_specs:
+  attr: ['depth']
+  sim: []
+  design: true
+  clip_qvel: true
+  use_projected_params: true
+  use_body_ind: true
+max_body_depth: 4
+
+add_body_condition:
+  max_nchild: 2
+
+robot:
+  param_mapping: sin
+  no_root_offset: true
+  
+  body_params:
+    offset:
+      type: 'xy'
+      lb: [-0.5, -0.5]
+      ub: [0.5, 0.5]
+
+  joint_params: {}
+
+  geom_params:
+    size:
+      lb: 0.03
+      ub: 0.10
+    ext_start:
+      lb: 0.0
+      ub: 0.2
+
+  actuator_params:
+    gear:
+      lb: 20
+      ub: 400
+  
+

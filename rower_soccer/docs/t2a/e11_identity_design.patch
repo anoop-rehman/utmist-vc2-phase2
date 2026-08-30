@@ -1,0 +1,35 @@
+diff --git a/design_opt/envs/ant.py b/design_opt/envs/ant.py
+index 323f787..9b9441d 100644
+--- a/design_opt/envs/ant.py
++++ b/design_opt/envs/ant.py
+@@ -15,7 +15,10 @@ class AntEnv(MujocoEnv, utils.EzPickle):
+         self.cfg = cfg
+         self.env_specs = cfg.env_specs
+         self.agent = agent
+-        self.model_xml_file = 'assets/mujoco_envs/ant.xml'
++        # D3 M3 E1: default unchanged; `env_specs.model_xml_file` lets a cfg
++        # point the same task at another body (the converted CompetEvo ant).
++        self.model_xml_file = self.env_specs.get(
++            'model_xml_file', 'assets/mujoco_envs/ant.xml')
+         # robot xml
+         self.robot = Robot(cfg.robot_cfg, xml=self.model_xml_file)
+         self.init_xml_str = self.robot.export_xml_string()
+@@ -106,6 +109,18 @@ class AntEnv(MujocoEnv, utils.EzPickle):
+         if not self.is_inited:
+             return self._get_obs(), 0, False, {'use_transform_action': False, 'stage': 'execution'}
+ 
++        # D3 M3 E1.1: run the design stages but force them to the IDENTITY
++        # action, so episode length, the stage flag in the observation and the
++        # reward structure are all unchanged while the body is not edited at
++        # all. Default False, so E0/E1 and their own tasks are untouched.
++        # A zero skeleton action is "no add, no remove" (`apply_skel_action`
++        # only acts on 1 and 2); a zero attribute action is a zero DELTA and
++        # `abs_design` is false in every cfg here, so `design_params =
++        # design_cur_params + 0`.
++        if (self.env_specs.get('force_identity_design', False)
++                and self.stage != 'execution'):
++            a = np.zeros_like(a)
++
+         self.cur_t += 1
+         # skeleton transform stage
+         if self.stage == 'skeleton_transform':

@@ -325,3 +325,38 @@ same run ids were resumed, so each arm's history carries ~3-36 rows from the
 aborted attempt before the real run's epoch 0. Nothing in the results below
 comes from a wandb series.
 
+---
+
+## 6. A hazard in the task, found before the results and measured
+
+**A fall is worth ~+826 more than a loss, so "fall before step 491" is a local
+optimum.** Measured on the idle negative control's own 20 episodes
+(`runs/d3_e2_rtg/posthoc/idle.json`):
+
+| ending | n | mean return | mean length |
+|---|---|---|---|
+| our agent falls | 3 | **+178.2** | 319 |
+| the opponent scores | 17 | **−647.6** | 491 |
+
+An episode that ends on a fall never reaches step 491, so it never pays the
+−1000; it keeps the +1.0/step survive bonus it has already banked and stops.
+An episode that survives to 491 pays the −1000 in full.
+
+**This is CompetEvo's own rule set, not something E2 introduced**: their
+`_get_done` ends the episode on a fall and `goal_rewards` pays nobody in that
+case, so "fall rather than lose" is available in their task too. What the
+*scripted* opponent changes is that its goal is **certain** rather than
+contingent — it scores at step 491 in every episode unless our agent has
+already crossed — which sharpens a contingent incentive into a reliable one.
+D2 never saw it because D2 trained against an **idle** opponent that never
+scores, so the −1000 never fired; that is part of why D2's 98.3% is not a
+number E2 can inherit.
+
+It is stated here rather than fixed, because changing the termination rule
+after the arms were launched would make E2 uninterpretable. **Every later rung
+inherits it along with the opponent**, and E3 should decide deliberately
+whether to keep it — the two obvious alternatives are to pay the loser its
+−1000 on a fall as well (removing the dodge) or to drop the sparse term when an
+episode ends on a fall for both sides (keeping CompetEvo's rule and accepting
+the incentive).
+

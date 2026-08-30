@@ -292,18 +292,38 @@ training return. Comparing it against a trainer that logs stochastic training
 returns flatters the GNN by ~1.3x. The first draft of this comparison made that
 error.
 
-### E2 — GNN control only, morphology frozen, on run-to-goal
+### E2 — GNN control, frozen morphology, 1v1 run-to-goal vs a SCRIPTED opponent
 
-The sanity rung, and the user's own suggestion. We know the CompetEvo ant can
-learn run-to-goal with CompetEvo's own MLP policy. Can Transform2Act's **GNN**
-controller learn the same task on the same fixed body?
+**Spec settled by the user 2026-08-30.** Frozen morphology, GNN control,
+**1v1 run-to-goal**, **both agents our DeepMind ant**, opponent **scripted**
+(not learned, not self-play). Design stages run but forced to identity, exactly
+as E1.1 settled.
 
-* **Run**: run-to-goal, our ant, skeleton and attribute stages disabled (or
-  emitting no-ops), execution stage only.
-* **Baseline**: D2's own run-to-goal numbers on the same body.
-* **Falsifies**: if the GNN cannot match the MLP on a fixed body, nothing above
-  it is interpretable, and the problem is the controller, not the evolution.
-* **Cheap**: no design search, so it converges faster than a full run.
+This is the first rung where the Transform2Act machinery meets OUR task rather
+than the paper's locomotion task, so it is the real integration step toward
+soccer.
+
+* **Falsifies**: if the GNN cannot learn this task on a fixed body, nothing
+  above it is interpretable and the problem is the controller, not the
+  evolution.
+
+**The comparison has to be built, not borrowed.** D2's run-to-goal numbers are
+from *self-play* with CompetEvo's own MLP. A GNN-vs-scripted result is not
+comparable to an MLP-vs-self-play one -- different opponents make different
+tasks. So E2 needs its own **matched MLP arm on the identical setup**: same
+scripted opponent, same body, same reward, same budget, only the policy
+architecture differing. E1.1 is the precedent and the reason: there, the answer
+*flipped* depending on whether the MLP baseline used published or matched
+batching.
+
+**Prior from E1.1**: on a frozen body the GNN came in **18% below** a
+well-configured MLP (2,526 vs 2,973). So the expectation is that the GNN is
+workable but behind. What E2 adds is whether that gap holds on a task with an
+opponent and a goal line rather than open-field locomotion.
+
+**The scripted opponent must be specified, not improvised.** Write it down --
+what it does, how fast, whether it reacts -- because it is now part of the task
+definition and every later rung inherits it.
 
 ### E3 — Evolving ant vs a FIXED opponent, run-to-goal
 

@@ -41,14 +41,26 @@ def main():
             bad += 1
             continue
         keys = set(r.summary.keys()) if r.summary else set()
-        hist_metric = [row for row in r.scan_history(keys=["epoch",
-                                                           a.metric_key])]
-        try:
-            hist_vid = [row for row in r.scan_history(keys=["epoch",
-                                                            a.video_key])]
-        except Exception:
-            hist_vid = []
-        n_vid = sum(1 for row in hist_vid if row.get(a.video_key) is not None)
+
+        def count(key):
+            """`scan_history` raises "Step column '_step' not found in schema"
+            on some runs (seen on the 2441-epoch published arms), so fall back
+            to the sampled `history` before concluding a key is absent."""
+            for fn in (lambda: r.scan_history(keys=["epoch", key]),
+                       lambda: r.history(keys=[key], pandas=False,
+                                         samples=100000)):
+                try:
+                    rows = list(fn())
+                except Exception as exc:
+                    last = exc
+                    continue
+                return sum(1 for row in rows if row.get(key) is not None)
+            print(f"    (both history APIs failed for {key}: {last!r})")
+            return 0
+
+        n_metric = count(a.metric_key)
+        n_vid = count(a.video_key)
+        hist_metric = range(n_metric)
         ok = len(hist_metric) > 0 and n_vid > 0
         bad += 0 if ok else 1
         print(f"[{'OK' if ok else 'FAIL'}] {name}  state={r.state}  "

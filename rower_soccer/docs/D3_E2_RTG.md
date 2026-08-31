@@ -453,3 +453,112 @@ The MLP still leads on both protocols, so the ordering is protocol-independent
 here — but the 3.0x becomes 1.9x, and neither number means what it looks like
 without §7c.
 
+### 7e. The published-batching arm settles it: return here measures FALLING, not running
+
+E1.1's precedent said to run the MLP baseline at **both** batchings, because
+there the verdict flipped. Run here as well (`--batch 2048 --mini-batch 64
+--optim-epochs 10 --anneal-lr --num-threads 1`, 2441 x 2048 = 5.0M steps, the
+configuration read back out of E1.1's own stored args):
+
+| arm | mean-action R | goal | lost | fell | furthest forward | action std |
+|---|---|---|---|---|---|---|
+| MLP published s1 | **+174.9** ± 4.9 | 0.00 | 0.00 | **1.00** | 0.14 m | 0.039 |
+| MLP published s2 | −111.0 ± 424.3 | 0.00 | 0.25 | 0.75 | 0.07 m | 0.052 |
+
+**The published-batching arm has the BEST return of any arm in E2 (+32.0 seed
+mean) and is the most degenerate policy in it.** Seed 1 falls over in
+**every one of 20 episodes**, with a return standard deviation of 4.9 — it has
+collapsed its action std to 0.039 (E1.1 measured 0.016 for the same
+configuration) and executes one near-deterministic tip-over. Its furthest
+forward is 0.14 m of the 5.00 m needed, less than the GNN's.
+
+Rank all seven rows by mean-action return and the ordering is:
+
+| rank | arm | R | fall rate | goal | furthest forward |
+|---|---|---|---|---|---|
+| 1 | MLP pub s1 | +174.9 | 1.00 | 0.00 | 0.14 m |
+| 2 | MLP pub s2 | −111.0 | 0.75 | 0.00 | 0.07 m |
+| 3 | MLP matched s1 | −194.5 | 0.70 | 0.00 | 0.46 m |
+| 4 | MLP matched s2 | −203.9 | 0.60 | 0.00 | 0.60 m |
+| 5 | idle, zero torque | −523.7 | 0.15 | 0.00 | 0.08 m |
+| 6 | GNN s2 | −536.8 | 0.15 | 0.00 | 0.30 m |
+| 7 | GNN s1 | −655.1 | 0.05 | 0.00 | 0.22 m |
+
+**The return ranking IS the fall-rate ranking.** Across the seven rows,
+Pearson **r(fall rate, return) = +0.989**, while
+**r(forward progress, return) = +0.019**. Return on this task, at this budget,
+measures how reliably an arm falls over and is uncorrelated with how far it
+gets toward the goal.
+
+That is E2's real finding, and it is a finding about the **task**, not about
+either architecture:
+
+> **On CompetEvo run-to-goal against a scripted opponent that always scores, at
+> 5.0M steps, episode return is not a measure of competence.** Any comparison
+> of controllers that ranks them by return here — including the one E2 was
+> commissioned to make — ranks them by their exploitation of the fall-dodge.
+
+E1.1's verdict does **not** flip with batching here the way it did there; the
+MLP leads the GNN at both batchings. But it leads for a reason that makes the
+lead meaningless, and running both batchings is again what exposed it.
+
+---
+
+## 8. Cost, and what the clip shows
+
+| | |
+|---|---|
+| GNN, per epoch | 135 s alone → ~237 s with 5 co-tenants → ~85 s once the MLP arms finished |
+| GNN, wall clock | ~4 h per seed, **both seeds concurrent** |
+| MLP matched | ~25-45 s/epoch, ~75 min per seed |
+| MLP published | ~6-8 s/epoch, ~5 h per seed (2441 epochs at 1 sampler thread) |
+| **GPU, 2 GNN seeds + D1** | **peak 8.5 GB of 20.475** — far below E1's 19.95 GB, because E2's episodes are capped at 500 steps where E1's ran to 1000 |
+| CPU | 14 threads per GNN seed, 10 per matched MLP, 1 per published MLP; peak load ~33 of 48 cores |
+| disk | 1.7 GB per GNN seed (10 checkpoints); `/workspace` went 12 GB → 7.8 GB free |
+| **D1** | `soccer2v2_1f_walls` finished **cleanly on its own 1440-minute limit** at 22:52 (25,212 iters, 8.26 B env steps, end-of-run checkpoint archived). **Not an OOM and not caused by E2** — the liveness watch fired on the stale log and the cause was checked before anything was concluded. |
+
+**The clips** (`runs/d3_e2_rtg/renders/*.mp4`, and in each wandb run under
+`video/best_median_worst`, 10-11 per arm at every tenth epoch): three panels,
+best / median / worst by return, each labelled with its own return,
+displacement, step count and outcome. **With morphology frozen all three panels
+are the same creature**, so what they show is gait and tactics — the start, the
+head-on meeting with the opponent, and in the MLP and published arms the
+tip-over — and **not** design variation, which is what the same clip meant in
+E0 and E1.
+
+---
+
+## 9. Not tested / not claimed
+
+* **The question E2 was commissioned to answer is NOT answered.** "Does E1.1's
+  18% GNN deficit persist on a task with an opponent and a goal line?" requires
+  both arms to do the task; neither does. What E2 establishes instead is that
+  the task as specified is not learnable at this budget and that its return
+  signal is dominated by a degenerate ending.
+* **Budget.** 5.0M steps per arm, chosen to match E1.1. D2 reached 98.3% on the
+  same body, reward, distance and clock with roughly 77M. **E2 has not been run
+  at a budget where the task is solvable**, and no claim here should be read as
+  "the GNN cannot learn run-to-goal".
+* **n = 2 seeds per arm.** Four training runs per architecture family cannot
+  characterise seed variance. The published arm's two seeds differ by 286
+  return points (+174.9 vs −111.0), which is a warning against reading its
+  seed mean.
+* **No hyperparameter was swept**, for either architecture. Both take gamma,
+  GAE lambda, clip and PPO epochs from the same cfg; the MLP uses the published
+  3e-4 and a 64x64 tanh net; the GNN uses Transform2Act's 5e-5. A tuned arm
+  could move any of these numbers.
+* **The reward was not changed** to make the task learnable (no curriculum, no
+  reward shaping, no reduced control cost, no idle-opponent warm start). D2
+  reached its 98.3% against an **idle** opponent, which is a different task
+  from this one and is why its number was used only as a feasibility bound.
+* **Whether skipping the design stages rather than forcing identity would
+  change the GNN arm** is untested, exactly as in E1.1.
+* **Engine.** E2 runs mujoco-py 2.1 with CompetEvo's own `PGS`/1000; D1/D2 run
+  mujoco_warp with Newton/100. The creature is identical to 0.000e+00 on every
+  compiled array (§3), but contact behaviour is not, so D2's speeds transfer as
+  evidence and not as proof.
+* **The opponent has only ever been run at 0.68 m/s.** `opponent_speed` is a
+  cfg field and the gate checks that 1.0 moves the crossing step to 334, but no
+  training run has used any other value.
+* **Nothing here says anything about morphology.** The body was frozen and
+  verified frozen; E2 tests controllers, not designs.

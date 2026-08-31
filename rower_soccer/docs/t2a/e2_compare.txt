@@ -1,0 +1,25 @@
+
+arm                    seed cfg        mean-action R       sd   goal   lost   fell     len   fwd m  /goal     m/s     std |  stochastic R   goal
+------------------------------------------------------------------------------------------------------------------------------------
+GNN                    rtg_gnn_s1             -655.1    225.0   0.00   0.95   0.05   490.9    0.22  0.044  -0.345  0.5511 |        -972.7   0.00
+GNN                    rtg_gnn_s2             -536.8    345.0   0.00   0.85   0.15   479.6    0.30  0.060  -0.264  0.5586 |       -1116.1   0.00
+IDLE (neg. control)    rtg_mlp_s1             -523.7    307.0   0.00   0.85   0.15   465.2    0.08  0.015  -0.306  0.0000 |        -523.7   0.00
+MLP (matched)          rtg_mlp_s1             -194.5    423.3   0.00   0.30   0.70   240.8    0.46  0.091  -0.086  0.6326 |        -597.7   0.00
+MLP (matched)          rtg_mlp_s2             -203.9    392.1   0.00   0.40   0.60   334.4    0.60  0.119  -0.165  0.6242 |        -514.0   0.00
+MLP (pub)              rtg_mlp_s1              174.9      4.9   0.00   0.00   1.00   317.5    0.14  0.029  -0.405  0.0393 |         116.6   0.00
+MLP (pub)              rtg_mlp_s2             -111.0    424.3   0.00   0.25   0.75   284.1    0.07  0.013  -0.302  0.0519 |         -21.2   0.00
+
+seed means (mean-action protocol)
+  gnn              R    -595.9  seeds [-655.1, -536.8]   goal rate 0.000  seeds [0.0, 0.0]
+  idle             R    -523.7  seeds [-523.7]   goal rate 0.000  seeds [0.0]
+  mlp_matched      R    -199.2  seeds [-194.5, -203.9]   goal rate 0.000  seeds [0.0, 0.0]
+  mlp_pub          R      32.0  seeds [174.9, -111.0]   goal rate 0.000  seeds [0.0, 0.0]
+
+  idle vs gnn: seed-mean ratio +0.879x, episode-level diff +72.2, Welch t = 0.87 (df 36.6, n 20 vs 40)
+    NOTE: a ratio computed from returns that are dominated by the +/-1000 goal term is a ratio of MIXTURES, not of speeds -- read the goal rate beside it.
+
+  mlp_matched vs gnn: seed-mean ratio +0.334x, episode-level diff +396.7, Welch t = 5.03 (df 71.3, n 40 vs 40)
+    NOTE: a ratio computed from returns that are dominated by the +/-1000 goal term is a ratio of MIXTURES, not of speeds -- read the goal rate beside it.
+
+  mlp_pub vs gnn: seed-mean ratio -0.054x, episode-level diff +627.9, Welch t = 9.00 (df 77.0, n 40 vs 40)
+    NOTE: a ratio computed from returns that are dominated by the +/-1000 goal term is a ratio of MIXTURES, not of speeds -- read the goal rate beside it.

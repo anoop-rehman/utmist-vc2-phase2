@@ -361,6 +361,59 @@ analysis: the two arms' wandb keys are named `..._MEANACTION_eval` and
 shared instrument (`e2_eval.evaluate`) that both trainers and the post-hoc
 table call.
 
+#### E2 RESULT, 2026-08-30 — the task is NOT learned at this budget, by either
+architecture. See [`D3_E2_RTG.md`](D3_E2_RTG.md) sections 6-7.
+
+One instrument, mean-action, 20 episodes per arm, body frozen under each arm's
+own trained policy (134 mjModel arrays identical on all four trained arms).
+
+| arm | mean-action R | **goal** | fell | furthest forward | of the 5.0 m |
+|---|---|---|---|---|---|
+| GNN s1 / s2 | −655 / −537 | **0.00** | 0.05 / 0.15 | 0.22 / 0.30 m | 4.4% / 6.0% |
+| MLP matched s1 / s2 | −195 / −204 | **0.00** | 0.70 / 0.60 | 0.46 / 0.60 m | 9.1% / 11.9% |
+| idle, zero torque | −524 | **0.00** | 0.15 | 0.08 m | 1.5% |
+
+* **Goal rate is 0.00 for both arms across 40 episodes each.** The best single
+  episode covered **1.95 m of the 5.00 m** required. E2's intended question --
+  does E1.1's 18% GNN deficit persist on a task with an opponent and a goal
+  line -- **cannot be answered on goal rate**, because neither arm can do the
+  task at 5.0M steps. Pre-registered: D2 needed ~**77M** steps for 98.3% on the
+  same body, reward, distance and clock; E2 spent 5.0M to stay matched to E1.1.
+* **The GNN is statistically indistinguishable from ZERO TORQUE**: −595.9
+  against the idle control's −523.7, episode-level Welch t = **0.87**.
+* **The MLP leads on return by 3.0x (Welch t = 5.03) and the mechanism is
+  FALLING OVER.** A fall ends the episode before the opponent's certain goal at
+  step 491 and so never pays the −1000, which is worth **+750 to +900** inside
+  every arm; conditional on the ending the GNN actually scores HIGHER than the
+  MLP (+280/+251 against +74/+100). The whole gap is the mixture -- the MLP
+  falls in 60-70% of episodes, the GNN in 5-15%. **"The MLP controller is
+  better on this task" would be the wrong sentence**, and the return column
+  alone would have produced it.
+
+* **The published-batching MLP settles it.** Run as E1.1's precedent demands
+  (batch 2048 / minibatch 64 / lr anneal, 5.0M steps), it has the **best return
+  of any arm** (+32.0 seed mean; seed 1 at **+174.9 ± 4.9**) and is the **most
+  degenerate policy in E2** -- it falls over in **every one of 20 episodes**,
+  action std collapsed to 0.039, furthest forward 0.14 m of 5.00. Rank all seven
+  rows by return and the ordering IS the fall-rate ordering:
+  **Pearson r(fall rate, return) = +0.989**, while
+  **r(forward progress, return) = +0.019**.
+
+**So E2's real finding is about the TASK, not either architecture**: on
+CompetEvo run-to-goal against a scripted opponent that always scores, at 5.0M
+steps, **episode return is not a measure of competence** -- any controller
+comparison that ranks by return here ranks by exploitation of the fall-dodge.
+
+**The consequence for E3, which inherits this opponent**: the scripted
+opponent's goal is *certain*, so "fall before step 491" is a reliable local
+optimum worth ~+826 (measured on the idle control). CompetEvo's own rule set
+creates it -- a fall ends the episode and `goal_rewards` pays nobody -- but a
+learned or idle opponent makes it contingent, and a scripted one that always
+scores makes it reliable. **E3 must decide deliberately whether to keep it.**
+The second consequence is budget: on this reward, 5.0M steps is not enough for
+this body to locomote, and no architecture comparison on this task means much
+until it is.
+
 ### E3 — Evolving ant vs a FIXED opponent, run-to-goal
 
 The first adversarial rung, deliberately without self-play so there is only one
@@ -511,6 +564,13 @@ non-zero gradients. E1's 3 seeds x ~100 epochs has not been started.
   without loss.~~ **Answered 2026-08-29: it can, exactly** (section 5). What is
   still open is the *engine*: E1 trains under mujoco-py 2.1, whose capsules are
   3.5% lighter and whose contact solver is not 3.12's.
-* Whether the GNN controller matches the MLP on a fixed body (E2).
+* ~~Whether the GNN controller matches the MLP on a fixed body (E2).~~
+  **Partly answered 2026-08-30, and the answer is that the question was
+  the wrong shape**: on run-to-goal at 5.0M steps neither controller
+  learns the task (goal rate 0.00 both), the GNN is indistinguishable
+  from zero torque, and the MLP's 3.0x return lead is entirely the rate
+  at which it exploits a degenerate fall. E1.1 answered the locomotion
+  version of this on Transform2Act's own task; E2 could not answer the
+  run-to-goal version because the task was not learned.
 * Any claim that E0's result on *their* ant transfers to *our* ant. Per §0c they
   are different creatures.

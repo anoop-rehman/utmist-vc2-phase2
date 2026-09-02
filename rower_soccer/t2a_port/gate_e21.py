@@ -116,6 +116,25 @@ def main():
     chk("E2.1's own setting: 4M steps -> alpha 0 at epoch 80",
         t4.alpha(0) == 1.0 and t4.alpha(40) == 0.5 and t4.alpha(80) == 0.0,
         f"a(0)={t4.alpha(0)} a(40)={t4.alpha(40)} a(80)={t4.alpha(80)}")
+    # E2.1's THIRD condition. D2 never completed its anneal: it took the dev
+    # default `DEV_CURRICULUM_STEPS = 1000 x 50,000` while its learners
+    # accumulated `T*n_ego*L*iters = 100*128*2*600 = 15,360,000` steps against
+    # a denominator of `A*cs = 2*50e6`, so it completed exactly
+    # 15.36e6/100e6 = 0.1536 of the schedule and its alpha ran 1.000 -> 0.8464.
+    # 130,208,333 is the value that makes a 400 x 50,000 = 20M-step run
+    # complete the SAME 0.1536 fraction, i.e. reproduce D2's alpha TRAJECTORY
+    # (a linear ramp cut short) and not merely its endpoint.
+    td = Trainer(mk_args(curriculum_steps=130_208_333))
+    chk("D2-replication setting: alpha runs 1.0 -> 0.8464 over 400 epochs",
+        td.alpha(0) == 1.0 and abs(td.alpha(400) - 0.8464) < 1e-9
+        and td.alpha(400) > td.alpha(401),
+        f"a(0)={td.alpha(0):.6f} a(200)={td.alpha(200):.6f} "
+        f"a(400)={td.alpha(400):.6f}; D2's own end was "
+        f"{1 - 100 * 128 * 2 * 600 / (2 * 1000 * 50000):.6f}")
+    chk("D2-replication: the sparse term never exceeds 15.36% weight, so the "
+        "fall-dodge is worth at most 153.6 and not 1000",
+        (1 - td.alpha(400)) * 1000 < 154.0,
+        f"max premium = {(1 - td.alpha(400)) * 1000:.1f}")
     chk("NEG: curriculum_steps = 0 returns None, not 1.0",
         tr.alpha(0) is None and tr.alpha(500) is None)
 

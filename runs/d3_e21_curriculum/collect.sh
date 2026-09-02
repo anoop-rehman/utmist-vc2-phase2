@@ -21,6 +21,8 @@ A=${1:-all}
 [ "$A" = all ] || [ "$A" = cur_s2 ]  && run mlp rtg_mlp_s2 $E cur  cur_s2
 [ "$A" = all ] || [ "$A" = flat_s1 ] && run mlp rtg_mlp_s1 $E flat flat_s1
 [ "$A" = all ] || [ "$A" = flat_s2 ] && run mlp rtg_mlp_s2 $E flat flat_s2
+[ "$A" = all ] || [ "$A" = d2rep_s1 ] && run mlp rtg_mlp_s1 $E d2rep d2rep_s1
+[ "$A" = all ] || [ "$A" = d2rep_s2 ] && run mlp rtg_mlp_s2 $E d2rep d2rep_s2
 # the floor, measured through the SAME instrument. `--arm idle` ignores the
 # checkpoint and emits zero torque.
 [ "$A" = all ] || [ "$A" = idle ]    && run idle rtg_mlp_s1 0 "" idle

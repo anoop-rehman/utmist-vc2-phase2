@@ -12,6 +12,8 @@
   [ok ] alpha hits exactly 0 at curriculum_steps
   [ok ] alpha is pinned at 0 after
   [ok ] E2.1's own setting: 4M steps -> alpha 0 at epoch 80   a(0)=1.0 a(40)=0.5 a(80)=0.0
+  [ok ] D2-replication setting: alpha runs 1.0 -> 0.8464 over 400 epochs   a(0)=1.000000 a(200)=0.923200 a(400)=0.846400; D2's own end was 0.846400
+  [ok ] D2-replication: the sparse term never exceeds 15.36% weight, so the fall-dodge is worth at most 153.6 and not 1000   max premium = 153.6
   [ok ] NEG: curriculum_steps = 0 returns None, not 1.0
 
 === phase 3: what lands in the PPO buffer ===
@@ -36,4 +38,4 @@
   [ok ] ep_rets are the RAW env return in both conditions   [-1516.988, -2708.748]
   [ok ] NEG: past the schedule's end the BUFFER is not the env reward
 
-26 checks passed, 0 FAILED
+28 checks passed, 0 FAILED

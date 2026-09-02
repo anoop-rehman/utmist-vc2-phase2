@@ -24,7 +24,9 @@ Two candidate explanations, and E2 could not separate them:
    falling attractive from step 0.
 
 E2.1 runs the MLP arm — the stronger of E2's two baselines — at **20.0M steps**
-in two conditions that differ in exactly one argument.
+in **three** conditions that differ in exactly one argument. The third
+condition exists because of §0b: D2's curriculum never annealed away, so a
+faithful port of the *nominal* schedule tests something D2 never experienced.
 
 ---
 
@@ -150,13 +152,13 @@ cd /workspace/Transform2Act && source env-gpu.sh
 .venv-gpu/bin/python /workspace/utmist-vc2-phase2/rower_soccer/t2a_port/gate_e21.py
 ```
 
-`runs/d3_e21_curriculum/logs/gate_e21.log` — **26 checks, 0 failed**, five
+`runs/d3_e21_curriculum/logs/gate_e21.log` — **28 checks, 0 failed**, five
 phases, each with at least one negative control.
 
 | phase | what it establishes | headline |
 |---|---|---|
 | 1 env terms | the split is exact and the reward is unchanged | over 2,000 random-action steps `dense + parse == reward` to **0.000e+00**; `dense == forward − ctrl_cost − contact + survive` to **0.000e+00**; `parse ∈ {0, ±1000}`; 4 sparse events seen. NEG: on a sparse step `dense` alone is 1000.0 off the reward |
-| 2 alpha | it is CompetEvo's schedule | `alpha(e) == max((200−e)/200, 0)` for e = 0..399 at max error **0.000e+00**; 1.0 at the start, exactly 0 at `curriculum_steps`, pinned after. NEG: `curriculum_steps = 0` returns `None`, not 1.0 |
+| 2 alpha | it is CompetEvo's schedule, and both E2.1 settings are what they claim | `alpha(e) == max((200−e)/200, 0)` for e = 0..399 at max error **0.000e+00**; 1.0 at the start, exactly 0 at `curriculum_steps`, pinned after; `cur` gives 1.0 / 0.5 / 0.0 at epochs 0 / 40 / 80; **`d2rep` gives 1.000000 → 0.846400, matching D2's own endpoint to 3.9e-10, with the sparse weight capped at 15.36% so the fall-dodge is worth at most +153.6**. NEG: `curriculum_steps = 0` returns `None`, not 1.0 |
 | 3 the buffer | only the buffer changes | one seed → **bit-identical trajectory and bit-identical episode returns** at alpha ∈ {off, 1, 0.5, 0}; `buffer(a=1) + buffer(a=0) == buffer(flat)` to **0.000e+00**; a=0.5 is the exact half-and-half. **THE MECHANISM: at alpha=1 not one ±1000 reaches the buffer**, where the flat buffer has 3. NEG: at alpha=0 the buffer is the sparse term alone |
 | 4 the fall-dodge | the premium that is removed, measured | `flat objective − alpha=1 objective == the sparse term`, exactly, per episode, and it is a whole number of ±1000s. On the **idle** policy: stopping early is worth **+998.7 to +1010.9** per episode under the flat reward and **0.00 to 10.91** under alpha=1 — the two distributions do not overlap, a factor of **422** on the means |
 | 5 the flat arm | the control is E2's arm | default `alpha_now` is `None`; `ep_rets` are the raw env return in both conditions. NEG: past the schedule's end the buffer is *not* the env reward |
@@ -182,38 +184,83 @@ termination, observation and E1.1 regression are all untouched by this work.
 
 ---
 
-## 2. `curriculum_steps` = 4,000,000, and why that number
+## 2. Three conditions, and why the third one had to be added
+
+The ablation was launched two-way and became three-way once §0b was read. The
+reason, stated plainly because it is a design error caught mid-flight rather
+than a plan:
+
+**`curriculum_steps = 4M` on a 20M run means alpha anneals 1.0 → 0.0 over the
+first 80 epochs and then sits at 0.0 — the SPARSE TERM ALONE — for the
+remaining 16M steps.** But D2 sat at alpha ≈ 0.85 for its entire run, and with
+an idle opponent its −1000 never fired at all. So the anneal arm spends 80% of
+its training in exactly the regime under suspicion. If the ±1000 against a
+*certain* opposing goal at step 491 is the real blocker, that arm fails for the
+same reason the control does, and the ablation cannot separate "the curriculum
+helps" from "the sparse regime is unlearnable here". A third arm that holds
+alpha high throughout is what localises the cause.
+
+### 2a. `cur` — CompetEvo's nominal schedule, scaled: 4,000,000
 
 Three candidate anchors, all read out of source rather than assumed:
 
 | anchor | value | as a fraction of a 20M run |
 |---|---|---|
 | CompetEvo's own run-to-goal config | 10M (200 epochs × 50k) of a **50M** run | 20% of theirs |
-| D2's realised setting | 50M, over a 15.36M run — alpha ends at **0.846** | the anneal never completes |
-| **chosen** | **4M (80 epochs × 50k) of a 20M run** | **20%, CompetEvo's own ratio** |
+| D2's realised setting | 50M over a 15.36M run — alpha ends at **0.846** | the anneal never completes |
+| **chosen for `cur`** | **4M (80 epochs × 50k) of a 20M run** | **20%, CompetEvo's own ratio** |
 
-**Copying the absolute 10M would put the crossover at the halfway mark of a
-20M-step run** — a schedule twice as slow, in run-relative terms, as CompetEvo
-ever used. **Copying D2's 50M** would end at alpha = 0.6 and make the arm a
-"dense reward only" test rather than a curriculum test. Preserving CompetEvo's
-own **20% ratio** is the scaling that keeps the thing being ported the same
-thing, and it is what the brief asked for ("scale it sensibly to a 20M-step
-run rather than copying a number tuned for 77M").
+Copying the absolute 10M would put the crossover at the halfway mark of a
+20M-step run — a schedule twice as slow, in run-relative terms, as CompetEvo
+ever used. Copying D2's 50M would end at alpha = 0.6 and make the arm a
+"mostly dense" test rather than a curriculum test. Preserving CompetEvo's own
+**20% ratio** keeps the thing being ported the same thing.
 
-The consequence, stated before the results: **epochs 0-79 anneal 1.0 → 0.0, and
-epochs 80-399 run at alpha = 0, i.e. on the sparse term alone.** 80% of the
-curriculum arm is *not* dense-shaped. If the arm learns to run and then
-un-learns it, that is a fact about CompetEvo's curriculum at this budget, and
-the per-epoch evaluation curve (every 5 epochs, the shared instrument) is what
-will show it. The **final** checkpoint is the headline because it is the one
-comparable to the control; the trajectory is reported beside it.
+**Alpha trajectory**: `1.000` at epoch 0 → `0.000` at epoch 80, then **0.000
+for epochs 80-399**. 80% of this arm is *not* dense-shaped.
 
----
+### 2b. `d2rep` — D2's REALISED condition: 130,208,333
 
-## 3. The two conditions
+D2's alpha was not a designed schedule; it was the arithmetic consequence of an
+unset default (§0b). What it produced was a **linear ramp cut short at 15.36%
+of itself**: `alpha = 1 − total_steps/(A·cs)` with `total_steps = 15.36M` and
+`A·cs = 100M`, so `1.000 → 0.8464`, monotone, never plateauing.
+
+`curriculum_steps = 130,208,333` is the value that makes a 400 × 50,000 = 20M
+run complete **that same 0.1536 fraction**:
 
 ```
-runs/d3_e21_curriculum/launch.sh cur_s1 | cur_s2 | flat_s1 | flat_s2
+20,000,000 / 130,208,333 = 0.15360000    ->  alpha(400) = 0.84640000
+D2's own                                      alpha_end  = 0.84640000   (differ by 3.9e-10)
+```
+
+**Why this mechanism and not an alpha floor.** An explicit `--alpha-floor` was
+the other option and was rejected for two reasons. First, it is **new code**,
+and E2.1's whole gate rests on the claim that the only thing that changes is
+the contents of the PPO buffer; reusing the already-gated `--curriculum-steps`
+argument adds nothing to audit. Second, a floor produces a **ramp-then-plateau**,
+which is a shape D2 never had — D2's alpha decayed linearly for its whole run.
+Matching the trajectory rather than only the endpoint is what makes this a
+replication.
+
+**Alpha trajectory**: `1.0000` at epoch 0, `0.9693` at 80, `0.9232` at 200,
+`0.8464` at 400 — monotone, linear, never below 0.8464. The sparse term's
+weight therefore runs `0.000 → 0.1536`, so **the fall-dodge is worth at most
++153.6 in this arm against +1000 in the control** (gated).
+
+**What this arm is NOT.** It is not D2. D2 trained against an **idle** opponent
+that never scores, so its `parse` was 0 on every step except its own goals;
+here the opponent scores with certainty at step 491, so `parse` is −1000 on the
+last step of almost every episode and enters the objective at up to 15.4%
+weight. That difference is the point: the arm asks whether D2's *reward regime*
+transfers to a scripted, non-idle opponent, not whether D2's run reproduces.
+
+## 3. The three conditions
+
+```
+runs/d3_e21_curriculum/launch.sh cur_s1   | cur_s2      # anneal to 0
+runs/d3_e21_curriculum/launch.sh flat_s1  | flat_s2     # the control
+runs/d3_e21_curriculum/launch.sh d2rep_s1 | d2rep_s2    # alpha held high
 ```
 
 They differ in **one argument**. Everything else — cfg, seed, batch (50,000),
@@ -221,16 +268,24 @@ minibatch (2,048), 10 optim epochs, lr 3e-4/3e-4, hdims 64,64, log_std 0,
 10 sampler threads, eval every 5 epochs on 10 episodes, video every 40 — is
 identical between conditions **and identical to E2's `mlp_s{1,2}` arm**.
 
-* **curriculum-on**: `--curriculum-steps 4000000 --tag cur`
-* **curriculum-off**: `--curriculum-steps 0 --tag flat` — the control, and a
-  **genuine re-run**, not a comparison against E2's stored numbers. (E2's
-  matched MLP is the same code at 100 epochs instead of 400; the flat arm is
-  therefore also a 4x-budget replication of E2 in its own right.)
+| arm | argument | alpha over epochs 0 → 399 | what it asks |
+|---|---|---|---|
+| **flat** (control) | `--curriculum-steps 0` | — (raw env reward) | does 4x the budget alone fix E2? |
+| **cur** | `--curriculum-steps 4000000` | 1.000 → 0.000 by epoch 80, then 0 | does early dense shaping alone suffice? |
+| **d2rep** | `--curriculum-steps 130208333` | 1.000 → 0.846, monotone | does D2's realised regime transfer to a *scripted, non-idle* opponent? |
 
-**2 seeds per condition**, seeds 1 and 2, the same two E2 used, so the four
-runs pair up seed-for-seed. Four concurrent arms at 10 sampler threads is 40
-of 48 cores with the live D1 run as the other tenant; a third seed would have
-oversubscribed the box and slowed all four.
+The control is a **genuine re-run**, not a comparison against E2's stored
+numbers. (E2's matched MLP is the same code at 100 epochs instead of 400, so
+the flat arm is also a 4x-budget replication of E2 in its own right.)
+
+**2 seeds per condition**, seeds 1 and 2 — the same two E2 used — so all six
+runs pair up seed-for-seed. **The third condition was added ~15 minutes after
+the first four launched and runs concurrently**; the four were not restarted.
+Measured headroom at the moment of that decision: load 11.5 of 48 cores, 78%
+CPU idle with four arms live, so six arms at 10 sampler threads fit without
+starving each other or the D1 tenant. A third *seed* was not run; a third
+*condition* was judged worth more than a third seed, and n = 2 stays the
+central statistical limitation (see "Not tested").
 
 **Budget**: `--max-epoch 400` × `min_batch_size` 50,000 = **20.0M env steps per
 arm**, 4x E2's and 1.30x D2's per-learner 15.36M (§0c).

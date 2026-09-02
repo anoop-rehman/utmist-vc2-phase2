@@ -290,3 +290,23 @@ central statistical limitation (see "Not tested").
 **Budget**: `--max-epoch 400` × `min_batch_size` 50,000 = **20.0M env steps per
 arm**, 4x E2's and 1.30x D2's per-learner 15.36M (§0c).
 
+**6 arms x 20.0M = 120M env steps in total.**
+
+**Two book-keeping facts, recorded rather than hidden.**
+
+1. **The headroom estimate that justified running six arms concurrently was
+   optimistic.** It was taken as "load 11.5 of 48, 78% CPU idle" with four arms
+   live — but that snapshot caught several arms in their single-threaded update
+   phase. With six arms the sampler contention is real: `cur_s1`'s `T_sample`
+   went 31 s → 41 s → 83 s as the two `d2rep` arms came online, and the
+   per-epoch cost settled near **75-85 s** against the ~45 s four arms were
+   running at. Six arms therefore took **~9 h** rather than the ~5.5 h two
+   conditions would have. Running `d2rep` afterwards instead would have been
+   ~11 h in total, so concurrency was still the faster route to all six — but
+   the estimate that made the call was not a good one and is recorded as such.
+2. **`inline_video`'s output directory is hardcoded to
+   `runs/d3_e2_rtg/renders/`**, so E2.1's clips land in E2's render directory.
+   Filenames carry the tag (`rtg_mlp_s1_cur_e0039_bmw.mp4` against E2's
+   `rtg_mlp_s1_e0090_bmw.mp4`), so **nothing of E2's was overwritten** —
+   checked. The path was left alone rather than changed, because editing a file
+   E2's reproducibility depends on, for no gain, is not worth the risk.

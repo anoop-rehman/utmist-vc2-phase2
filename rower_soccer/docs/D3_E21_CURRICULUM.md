@@ -310,3 +310,22 @@ arm**, 4x E2's and 1.30x D2's per-learner 15.36M (§0c).
    `rtg_mlp_s1_e0090_bmw.mp4`), so **nothing of E2's was overwritten** —
    checked. The path was left alone rather than changed, because editing a file
    E2's reproducibility depends on, for no gain, is not worth the risk.
+3. **Disk, and whose it is.** `/workspace` went from 6.1 GB free at launch to
+   13 GB during the run, and **none of that was E2.1**. A concurrent
+   housekeeping pass (not this experiment) removed 596 stale local `wandb/run-*`
+   directories (1.26 GB, each verified present in the cloud first), deleted the
+   disposable `rtg_gnn_smoke` (450 MB), and archived 36 intermediate GNN
+   checkpoints from `rtg_gnn_s{1,2}` and `ant_e11_gnn_s{1,2}` to
+   `gs://vc2-2026-checkpoints/_t2a_archive/` (5.40 GB, byte-verified before
+   deletion), **keeping `epoch_0100.p` and `best.p` for every run** — checked
+   here directly, so E2's post-hoc at epoch 100 remains reproducible.
+   **E2.1's own footprint is ~135 MB**: six results directories of ~11 MB each
+   at 41 checkpoints x 419 KB, plus ~15 MB of clips. Because two agents were
+   writing and pruning the same filesystem, **no disk delta in this document is
+   evidence about E2.1's own usage** — the footprint above was measured on
+   E2.1's own paths, not inferred from `df`.
+
+   *One gotcha worth carrying forward, found by that pass and recorded here
+   because it nearly cost the live D1 run: wandb writes into files inside a
+   `run-*` directory without updating the DIRECTORY's mtime, so a
+   `find -maxdepth 1 -mmin` filter marks a live run's directory as stale.*

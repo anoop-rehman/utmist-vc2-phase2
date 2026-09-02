@@ -63,6 +63,31 @@ steps of ~500-1000 is under 1%.
 **CPU only.** The MLP is ~90k parameters; a CUDA context would cost more than
 it saves and would take VRAM from the GNN arm. `--device` exists but defaults
 to cpu.
+
+E2.1 (2026-09-02): `--curriculum-steps` ports CompetEvo's EXPLORATION
+CURRICULUM, which is what D2's trainer optimises and E2's did not. It is off
+by default (0), so E1.1 and E2 are byte-for-byte the runs they were.
+
+    r_train = alpha * dense + (1 - alpha) * parse
+    alpha   = max(1 - epoch * min_batch_size / curriculum_steps, 0)
+
+verbatim from `competevo/runner/multi_agent_runner.py:150-167`
+(`alpha = max((termination_epoch - epoch) / termination_epoch, 0)`) with the
+schedule expressed in AGENT-STEPS rather than iterations, exactly as
+`rower_soccer/competevo_port/ppo.py:211` does, so that a different batch size
+cannot silently change the schedule. Their epoch IS `min_batch_size` steps,
+so at this arm's 50,000 the two forms coincide epoch for epoch.
+
+TWO things this deliberately does NOT do:
+  * it does not change what the env returns. `info["dense"] + info["parse"]`
+    is identically the env reward, and the EPISODE RETURN this trainer logs
+    and every number `e2_eval.evaluate` produces stay the raw env return, so
+    a curriculum arm is measured on exactly the instrument a flat arm is.
+  * it does not "fix" the tail. At alpha = 0 their curriculum reward is the
+    SPARSE TERM ALONE -- no forward term, no survive bonus, no control cost.
+    That is their rule and it is ported rather than improved, because an
+    improved version would not answer whether THEIR curriculum is what D2
+    had.
 """
 
 import argparse
@@ -247,6 +272,36 @@ class Trainer:
                     + (f"_{args.tag}" if args.tag else ""))
         os.makedirs(self.out, exist_ok=True)
         self.log_path = os.path.join(self.out, "log.jsonl")
+        # set per epoch in `train()`; defined here so a caller that samples
+        # without the training loop (a smoke, a gate) gets the flat reward.
+        self.alpha_now = None
+
+    # ---- the exploration curriculum --------------------------------------
+    def alpha(self, epoch):
+        """CompetEvo's dense-weight, 1 at epoch 0 falling linearly to 0.
+
+        `multi_agent_runner.custom_reward`:
+            alpha = max((termination_epoch - epoch) / termination_epoch, 0)
+        Expressed in AGENT-STEPS (`competevo_port/ppo.py:211`) so a change of
+        batch size cannot silently rescale the schedule. `self.batch` is this
+        arm's `min_batch_size`, which is their epoch, so at 50,000 the two
+        forms agree epoch for epoch.
+
+        Returns None -- not 1.0 -- when the curriculum is OFF, and that None
+        is what routes `sample_worker` down the untouched flat-reward path.
+        """
+        cs = self.args.curriculum_steps
+        if not cs:
+            return None
+        # `(cs - done) / cs`, NOT `1 - done/cs`. Algebraically the same and
+        # NOT the same in float64: the second form rounds twice and lands
+        # 1.1e-16 off their `(termination_epoch - epoch)/termination_epoch`
+        # at most epochs, which `gate_e21.py` phase 2 caught. Both numerator
+        # and denominator here are exact integers below 2^53, so IEEE's
+        # correctly-rounded division makes this form BIT-IDENTICAL to theirs
+        # whenever `curriculum_steps` is a whole number of batches -- gated
+        # to 0.000e+00 over 400 epochs.
+        return max((cs - epoch * self.batch) / cs, 0.0)
 
     # ---- rollout ---------------------------------------------------------
     def run_design_stages(self, state):
@@ -267,8 +322,10 @@ class Trainer:
             torch.manual_seed(self.cfg.seed * 7919 + pid * 104729 + self.epoch)
             self.env.np_random.seed((self.cfg.seed * 131 + pid * 977
                                      + self.epoch * 31) % (2 ** 31 - 1))
+        alpha = self.alpha_now
         obs_b, act_b, lp_b, rew_b, mask_b = [], [], [], [], []
         ep_rets, ep_lens, ep_goal, ep_loss, ep_fell, ep_dx = [], [], [], [], [], []
+        ep_cur = []
         raw_n, raw_s, raw_ss = 0, np.zeros(self.obs_dim), np.zeros(self.obs_dim)
         design_steps = 0
         with torch.no_grad():
@@ -278,7 +335,7 @@ class Trainer:
                 design_steps += nd
                 if state is None:
                     continue
-                ret, n = 0.0, 0
+                ret, n, cur = 0.0, 0, 0.0
                 x0, info = None, {}
                 while True:
                     raw = flat_obs(state)
@@ -297,13 +354,27 @@ class Trainer:
                     obs_b.append(o)
                     act_b.append(a)
                     lp_b.append(float(lp.item()))
-                    rew_b.append(float(r))
+                    # THE ONLY PLACE THE CURRICULUM ACTS. `alpha is None` is
+                    # the flat control and puts the raw env reward in the
+                    # buffer, unchanged. The episode return `ret` below is
+                    # ALWAYS the raw env reward, in both conditions, because
+                    # it is a measurement and not an objective.
+                    if alpha is None:
+                        rew_b.append(float(r))
+                    else:
+                        # the exception path in `RunToGoalEnv.step` returns
+                        # r = 0 and no terms; dense + parse == r on every path.
+                        dn = float(info.get("dense", r))
+                        pa = float(info.get("parse", 0.0))
+                        rew_b.append(alpha * dn + (1.0 - alpha) * pa)
+                        cur += alpha * dn + (1.0 - alpha) * pa
                     mask_b.append(0.0 if done else 1.0)
                     ret += r
                     n += 1
                     if done:
                         break
                 ep_rets.append(ret)
+                ep_cur.append(cur)
                 ep_lens.append(n)
                 ep_goal.append(float(info.get("reached", 0.0)))
                 ep_loss.append(float(info.get("opp_reached", 0.0)))
@@ -313,7 +384,7 @@ class Trainer:
                    lp=np.asarray(lp_b), rew=np.asarray(rew_b),
                    mask=np.asarray(mask_b), ep_rets=ep_rets, ep_lens=ep_lens,
                    ep_goal=ep_goal, ep_loss=ep_loss, ep_fell=ep_fell,
-                   ep_dx=ep_dx,
+                   ep_dx=ep_dx, ep_cur=ep_cur,
                    raw=(raw_n, raw_s, raw_ss), design_steps=design_steps)
         if queue is not None:
             queue.put([pid, out])
@@ -424,6 +495,11 @@ class Trainer:
                     g["lr"] = args.policy_lr * frac
                 for g in self.opt_v.param_groups:
                     g["lr"] = args.value_lr * frac
+            # read BEFORE sampling, and used by every worker of this epoch:
+            # their `optimize(epoch)` samples, updates and evaluates at one
+            # alpha, so a value that moved mid-rollout would make the PPO
+            # ratio a ratio of two different objectives.
+            self.alpha_now = self.alpha(epoch)
             t0 = time.time()
             outs = self.sample(args.num_threads)
             t_sample = time.time() - t0
@@ -440,6 +516,7 @@ class Trainer:
             lost = [v for o in outs for v in o.get("ep_loss", [])]
             fell = [v for o in outs for v in o.get("ep_fell", [])]
             dxs = [v for o in outs for v in o.get("ep_dx", [])]
+            curs = [v for o in outs for v in o.get("ep_cur", [])]
             for o in outs:
                 self.norm.update_from(*o["raw"])
 
@@ -450,6 +527,13 @@ class Trainer:
                        total_steps=total_steps, loss_v=loss_v,
                        log_std=float(self.actor.log_std.mean().item()),
                        T_sample=t_sample, T_update=t_update)
+            if self.alpha_now is not None:
+                # `alpha` is what the rollout was optimised at; `R_curriculum`
+                # is the objective it actually maximised. `exec_R_eps` beside
+                # it stays the RAW env return, so the two conditions' logged
+                # returns mean the same thing.
+                row.update(alpha=float(self.alpha_now),
+                           train_R_curriculum=float(np.mean(curs)))
             if goal:
                 row.update(train_goal_rate=float(np.mean(goal)),
                            train_loss_rate=float(np.mean(lost)),
@@ -569,6 +653,16 @@ def main():
                    help="override mini_batch_size. The GNN arm uses the "
                         "cfg's 2048; published PPO-MuJoCo uses 64.")
     p.add_argument("--optim-epochs", type=int, default=None)
+    p.add_argument("--curriculum-steps", type=int, default=0,
+                   help="CompetEvo's exploration curriculum: the PPO buffer "
+                        "gets `alpha*dense + (1-alpha)*parse` with alpha "
+                        "falling 1->0 linearly over this many agent-steps, "
+                        "then pinned at 0. 0 (the default) is OFF and puts "
+                        "the raw env reward in the buffer, which is what "
+                        "E1.1 and E2 ran. Their run-to-goal config is "
+                        "`termination_epoch: 200` of `max_epoch_num: 1000` "
+                        "at `min_batch_size: 50000`, i.e. 10M agent-steps "
+                        "over the first 20%% of a 50M-step run.")
     p.add_argument("--anneal-lr", action="store_true",
                    help="linear decay to 0 over the run, as CleanRL's "
                         "ppo_continuous_action.py does by default.")

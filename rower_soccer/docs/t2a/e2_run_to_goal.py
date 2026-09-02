@@ -214,15 +214,27 @@ class RunToGoalEnv(AntEnv):
         # over the whole vector IS `0.5 * sum(a^2)` over our raw action.
         ctrl_cost = CTRL_COST_COEF * float(np.square(ctrl).sum())
         contact_cost = 0.0
-        reward = forward_r - ctrl_cost - contact_cost + SURVIVE_BONUS
+        dense = forward_r - ctrl_cost - contact_cost + SURVIVE_BONUS
 
         # -- CompetEvo's sparse reward ------------------------------------
         opp_com_x = float(self.data.subtree_com[opp_id][0])
         reached = com_after > self.goal_x
         opp_reached = opp_com_x < -self.goal_x
         n_reached = int(reached) + int(opp_reached)
+        # `parse` is CompetEvo's name for the sparse term
+        # (`competevo/evo_envs/multi_agent_env.py` -> `info['reward_parse']`);
+        # `dense` is `info['reward_dense']`. They are returned SEPARATELY as
+        # well as summed because their exploration curriculum optimises
+        # `alpha * dense + (1 - alpha) * parse` rather than the env reward
+        # (`runner/multi_agent_runner.py:150-167`, ported in
+        # `rower_soccer/competevo_port/ppo.py:211-234`). D3 E2.1 needs both
+        # halves to reproduce that mix. The reward this method RETURNS is
+        # unchanged -- `dense + parse` is exactly the expression that was here
+        # before -- so every E2 number remains reproducible from this file.
+        parse = 0.0
         if n_reached == 1:
-            reward += GOAL_REWARD if reached else -GOAL_REWARD
+            parse = GOAL_REWARD if reached else -GOAL_REWARD
+        reward = dense + parse
 
         s = self.state_vector()
         bad = not np.isfinite(s).all()
@@ -234,7 +246,7 @@ class RunToGoalEnv(AntEnv):
                  "reached": bool(reached), "opp_reached": bool(opp_reached),
                  "fell": bool(fell), "com_x": com_after,
                  "opp_com_x": opp_com_x, "forward": forward_r,
-                 "ctrl_cost": ctrl_cost})
+                 "ctrl_cost": ctrl_cost, "dense": dense, "parse": parse})
 
     # -------------------------------------------------------------- reset --
     def transit_execution(self):

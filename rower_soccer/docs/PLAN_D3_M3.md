@@ -414,6 +414,20 @@ The second consequence is budget: on this reward, 5.0M steps is not enough for
 this body to locomote, and no architecture comparison on this task means much
 until it is.
 
+### E2.1 — the curriculum ablation: was D2's competence the curriculum or the budget?
+
+E2 left exactly one question dividing two explanations for "D2 could and E2
+could not": D2's much larger budget, or the fact that **D2's trainer does not
+optimise the env reward at all** (`CoEvoPPO.collect` mixes
+`alpha*dense + (1-alpha)*parse`, so early training barely feels the −1000 that
+makes falling attractive). E2.1 runs E2's matched MLP arm at **20.0M steps**
+(4x E2's) in two conditions differing in one argument — CompetEvo's curriculum
+ported in, versus E2's flat reward re-run under identical conditions — 2 seeds
+each, measured on E2's own instrument with **forward progress as the headline
+rather than return**.
+
+**RESULT: see [`D3_E21_CURRICULUM.md`](D3_E21_CURRICULUM.md).**
+
 ### E3 — Evolving ant vs a FIXED opponent, run-to-goal
 
 The first adversarial rung, deliberately without self-play so there is only one

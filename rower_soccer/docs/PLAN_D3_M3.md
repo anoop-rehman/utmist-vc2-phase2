@@ -426,7 +426,42 @@ ported in, versus E2's flat reward re-run under identical conditions — 2 seeds
 each, measured on E2's own instrument with **forward progress as the headline
 rather than return**.
 
-**RESULT: see [`D3_E21_CURRICULUM.md`](D3_E21_CURRICULUM.md).**
+#### E2.1 RESULT, 2026-09-03 — the reward mix, decisively. See [`D3_E21_CURRICULUM.md`](D3_E21_CURRICULUM.md).
+
+Three conditions x 2 seeds x 20.0M steps, MLP arm, one mean-action instrument,
+20 episodes each. **Body frozen on all six (134 mjModel arrays identical).**
+
+| condition | alpha 0 -> 399 | **goal** | fell | **furthest forward** | speed |
+|---|---|---|---|---|---|
+| **d2rep** (D2's realised regime) | 1.000 -> 0.847 | **0.95 / 1.00** | **0.00 / 0.00** | **5.00 / 5.00 m** | 1.37 / 1.33 m/s |
+| **flat** (control, E2's reward) | -- | 0.15 / 0.35 | 0.85 / 0.65 | 3.44 / 4.35 m | 1.34 / 1.97 m/s |
+| **cur** (CompetEvo's nominal anneal) | 1.000 -> 0.000 by ep 80 | 0.05 / 0.15 | 0.80 / 0.85 | 2.33 / 2.05 m | 0.60 / 0.54 m/s |
+| *idle, zero torque* | -- | 0.00 | 0.15 | 0.08 m | -0.31 m/s |
+
+* **The task IS solvable on this body, and the blocker was the reward mix, not
+  the budget.** `d2rep` reaches **0.95 goal at 4.0M steps** -- 80% of E2's own
+  budget and 26% of D2's -- and 39 of 40 episodes at 20M, with **not one fall
+  in 40**. The planned 15x scale-up was unnecessary.
+* **Budget alone is not enough.** The flat control at 4x E2's budget reaches
+  only 0.25 goal; at E2's own 5.0M it reproduces E2's null (goal 0.00).
+* **CompetEvo's NOMINAL curriculum is worse than no curriculum** (0.10 vs 0.25
+  goal). Two reasons, both from the reward constants: below a **critical alpha
+  of 0.739** the fall-dodge outweighs everything a full episode can bank
+  (+352.4 measured), and `cur` crosses it at epoch 21 while `d2rep` never does;
+  and at alpha = 0 the objective is the sparse term ALONE, so 80% of `cur`'s
+  run has no locomotion gradient at all.
+* **E2's correlation structure inverts.** Over the same seven-arm statistic,
+  `r(fall rate, return)` goes **+0.989 -> -0.517** and
+  `r(forward progress, return)` **+0.019 -> +0.947**. Return becomes a measure
+  of competence. The idle floor still shows E2's structure (+0.985), so it is
+  the policies that changed, not the instrument.
+
+**Consequence for E3**: run-to-goal against this scripted opponent is a
+solvable task once the sparse term is held under ~26% weight for the whole run.
+The fall-dodge hazard is NOT fixed -- `d2rep` avoids it rather than removing
+it -- so E3 still has to decide about the termination rule. And E2's
+architecture question is now answerable: `d2rep` is a regime where a
+GNN-vs-MLP comparison would compare two controllers that can both do the task.
 
 ### E3 — Evolving ant vs a FIXED opponent, run-to-goal
 

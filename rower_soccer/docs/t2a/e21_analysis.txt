@@ -1,0 +1,39 @@
+
+=== mean-action headline (stochastic in the last column) ===
+arm                   R       sd     goal     lost     fell      len    fwd m    %goal   best m   net dx    a.std  stoch R
+cur_s1           -128.4    570.3     0.05     0.15     0.80    252.7     2.33     46.5     4.99     1.44    0.328   -253.5
+cur_s2             49.4    480.4     0.15     0.00     0.85    194.1     2.05     41.0     5.02     1.40    0.321    -91.9
+d2rep_s1         1479.8    405.4     0.95     0.05     0.00    274.6     5.00    100.0     5.10     5.00    0.088   1414.5
+d2rep_s2         1599.2    114.6     1.00     0.00     0.00    293.3     5.00    100.1     5.11     5.00    0.086   1565.8
+flat_s1           463.9    436.4     0.15     0.00     0.85    170.2     3.44     68.6     5.09     3.13    0.172    429.5
+flat_s2           719.1    523.4     0.35     0.00     0.65    158.2     4.35     86.9     5.12     4.18    0.173    761.4
+idle             -523.7    307.0     0.00     0.85     0.15    465.2     0.08      1.5     0.18    -2.08    0.000   -523.7
+
+=== body frozen under each arm's OWN trained policy ===
+  cur_s1         YES
+  cur_s2         YES
+  d2rep_s1       YES
+  d2rep_s2       YES
+  flat_s1        YES
+  flat_s2        YES
+  idle           YES
+
+=== EPISODE-LEVEL correlations, within each condition ===
+condition       n   r(fell,R)    r(fwd,R)    r(len,R)  mean fwd  fall rate   goal
+cur            40      -0.179       0.680      -0.428      2.19       0.82   0.10
+d2rep          40         nan      -0.051       0.032      5.00       0.00   0.97
+flat           40      -0.979       0.679      -0.056      3.89       0.75   0.25
+idle           20       0.985      -0.120      -0.981      0.08       0.15   0.00
+
+=== ARM-LEVEL correlations (E2's own statistic) ===
+  over 7 arms:  r(fall rate, R) = -0.517   r(forward progress, R) = +0.947
+
+=== decomposition by how the episode ended (mean-action) ===
+arm             fell n    fell R  fell len  lost n    lost R  lost len  goal n
+cur_s1              16     -28.3     215.4       3   -1126.1     491.0       1
+cur_s2              17    -133.5     176.7       0         -         -       3
+d2rep_s1             0         -         -       1    -200.9     491.0      19
+d2rep_s2             0         -         -       0         -         -      20
+flat_s1             17     292.9     171.6       0         -         -       3
+flat_s2             13     347.6     170.3       0         -         -       7
+idle                 3     178.2     319.0      17    -647.6     491.0       0

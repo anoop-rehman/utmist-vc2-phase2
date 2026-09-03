@@ -329,3 +329,241 @@ arm**, 4x E2's and 1.30x D2's per-learner 15.36M (§0c).
    because it nearly cost the live D1 run: wandb writes into files inside a
    `run-*` directory without updating the DIRECTORY's mtime, so a
    `find -maxdepth 1 -mmin` filter marks a live run's directory as stale.*
+
+---
+
+## 5. THE RESULT: the curriculum, in D2's realised form, solves the task — in 4.0M steps, less than E2 spent
+
+```
+runs/d3_e21_curriculum/collect.sh          # e2_posthoc.py per arm, then e21_analyse.py
+```
+
+**One instrument, 20 episodes per arm, identical episode seeds, the same frozen
+13-body / 8-motor ant, the same scripted opponent, the same raw env reward for
+every measurement.** Body freezing re-verified per arm under each arm's OWN
+trained policy: **134 mjModel arrays identical on all six trained arms.**
+
+### 5a. The headline table — mean-action, 20.0M steps
+
+| arm | mean-action R | sd | **goal** | lost | fell | ep len | **furthest forward** | **of the 5.0 m** | net dx | speed | action std | stochastic R |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **d2rep** s1 | +1479.8 | 405.4 | **0.95** | 0.05 | **0.00** | 274.6 | **5.00 m** | **100.0%** | +5.00 | +1.371 | 0.088 | +1414.5 |
+| **d2rep** s2 | +1599.2 | 114.6 | **1.00** | 0.00 | **0.00** | 293.3 | **5.00 m** | **100.1%** | +5.00 | +1.334 | 0.086 | +1565.8 |
+| **flat** s2 | +719.1 | 523.4 | 0.35 | 0.00 | 0.65 | 158.2 | 4.35 m | 86.9% | +4.18 | +1.969 | 0.173 | +761.4 |
+| **flat** s1 | +463.9 | 436.4 | 0.15 | 0.00 | 0.85 | 170.2 | 3.44 m | 68.6% | +3.13 | +1.344 | 0.172 | +429.5 |
+| **cur** s2 | +49.4 | 480.4 | 0.15 | 0.00 | 0.85 | 194.1 | 2.05 m | 41.0% | +1.40 | +0.538 | 0.321 | −91.9 |
+| **cur** s1 | −128.4 | 570.3 | 0.05 | 0.15 | 0.80 | 252.7 | 2.33 m | 46.5% | +1.44 | +0.598 | 0.328 | −253.5 |
+| *idle, zero torque* | −523.7 | 307.0 | 0.00 | 0.85 | 0.15 | 465.2 | 0.08 m | 1.5% | −2.08 | −0.306 | 0 | −523.7 |
+
+Condition means (mean-action goal rate): **d2rep 0.975, flat 0.25, cur 0.10,
+idle 0.00.** The ordering is identical on both protocols and on forward
+progress, so nothing here depends on the mean-action/stochastic choice that
+nearly inverted E1.1.
+
+**`d2rep` solves the task.** 39 of 40 evaluation episodes reach the goal line,
+**not one episode of 40 ends in a fall**, mean furthest-forward is the full
+5.00 m, and `net/path` is 0.988-0.990 — it runs essentially straight at
+1.33-1.37 m/s against a requirement of 0.68. For scale, D2's own ant managed
+1.114 m/s in its front slot against an **idle** opponent
+(`D2_MORPHOLOGY_COMPETENCE.md`); this is faster, against an opponent that
+scores.
+
+### 5b. The budget was never the blocker — d2rep had already solved it at 4.0M steps
+
+Every arm re-scored on the **same** mean-action instrument at epoch 79
+(4.0M steps), which is also the exact epoch `cur`'s alpha reaches 0:
+
+| arm | | R | goal | fell | furthest forward |
+|---|---|---|---|---|---|
+| d2rep s1 | **@4.0M** | +1542.8 | **0.95** | 0.05 | **4.98 m** |
+| d2rep s2 | **@4.0M** | +977.1 | **0.65** | 0.00 | **4.51 m** |
+| flat s1 | @4.0M | −515.1 | 0.00 | 0.30 | 0.19 m |
+| flat s2 | @4.0M | −562.8 | 0.00 | 0.25 | 0.20 m |
+| cur s1 | @4.0M | −696.7 | 0.00 | 0.05 | 0.14 m |
+| cur s2 | @4.0M | −641.2 | 0.00 | 0.15 | 0.12 m |
+
+**`d2rep` reaches a 0.95 goal rate at 4.0M environment steps — 80% of E2's own
+5.0M budget, and 26% of D2's 15.36M.** At that same 4.0M, the flat control and
+the annealing curriculum are both at goal 0.00 and under 0.20 m of forward
+progress, which is E2's null result reproduced.
+
+So the answer to "curriculum or budget" is not a split decision. **The reward
+mix is the mechanism, and it wins at a budget smaller than the one E2 already
+spent failing.** A 77M-step run on the flat reward would have been ~19 h spent
+learning nothing that 4.0M on the right reward mix does not show.
+
+### 5c. But the budget is not nothing either — the flat control at 20M is far from E2 at 5M
+
+The control was re-run rather than quoted, and at 4x E2's budget the flat
+reward alone does move:
+
+| | goal | fell | furthest forward | action std |
+|---|---|---|---|---|
+| E2 matched MLP s1/s2 @5.0M (stored) | 0.00 / 0.00 | 0.70 / 0.60 | 0.46 / 0.60 m | 0.633 / 0.624 |
+| **E2.1 flat s1/s2 @5.0M** (`posthoc/e2_budget/`) | 0.00 / 0.00 | 0.50 / 0.55 | 0.25 / 0.25 m | 0.624 / 0.618 |
+| **E2.1 flat s1/s2 @20.0M** | 0.15 / 0.35 | 0.85 / 0.65 | **3.44 / 4.35 m** | 0.172 / 0.173 |
+
+**The control reproduces E2 at matched budget** — goal 0.00 in both seeds,
+majority-fall, sub-metre forward progress, action std 0.62 against E2's
+0.62-0.63. It is **not a bitwise replication**: E2 rendered video every 10
+epochs and E2.1 every 40, and `e2_eval.roll` reseeds the global RNG per
+episode, so the parent process's random stream diverges. That is my
+explanation for the residual gap (fall 0.50-0.55 vs 0.60-0.70, forward
+0.25 m vs 0.46-0.60 m) and **it is an inference I did not test** — confirming
+it would need a 100-epoch re-run at `--video-every 10`. The conditions
+compared against each other are unaffected: all six E2.1 arms share one video
+cadence and differ only in `--curriculum-steps`.
+
+At 20M the flat arm reaches 0.15-0.35 goal and 3.4-4.4 m. So **4x the budget on
+the flat reward is a large improvement over E2 and still does not solve the
+task**, while the right reward mix solves it in a fifth of that.
+
+### 5d. `cur` is WORSE than no curriculum at all, and the reason is arithmetic
+
+This is the counterintuitive number and it is not smoothed over: **annealing to
+alpha = 0 is worse than never having a curriculum** — 0.10 goal against 0.25,
+2.19 m against 3.89 m, and the highest fall rates in the experiment (0.80-0.85).
+
+Two mechanisms, both derivable from the reward constants rather than guessed.
+
+**(i) There is a critical alpha of 0.739, and `cur` falls below it at epoch 21.**
+Measured on the idle floor's own 17 lost episodes, the dense return a full
+491-step episode can bank is **+352.4**. The fall-dodge is worth
+`(1 − alpha) × 1000`. Setting them equal:
+
+```
+(1 - a) * 1000 = a * 352.4     ->     a_crit = 0.739
+```
+
+Below alpha = 0.739, **ending the episode early outweighs everything a
+full-length episode can possibly bank**, so falling is the optimum. Then:
+
+| arm | alpha(0) | alpha(79) | alpha(399) | crosses 0.739 at |
+|---|---|---|---|---|
+| **d2rep** | 1.000 | 0.970 | 0.847 | **never** |
+| cur | 1.000 | 0.013 | 0.000 | **epoch 21 (1.05M steps)** |
+| flat | — | — | — | permanently below (sparse at full weight) |
+
+`cur` crosses the threshold at 1.05M steps — long before any arm in this
+experiment learns to locomote (`d2rep` takes off between epochs 44 and 84).
+**D2's accidental schedule never crosses it.** That is the whole difference
+between the two curriculum arms, and D2's setting was safe by accident, not by
+design.
+
+**(ii) At alpha = 0 there is no locomotion gradient at all.** CompetEvo's
+curriculum reward at alpha = 0 is the sparse term **alone** — no forward term,
+no survive bonus, no control cost (§1). A policy that cannot yet reach the goal
+sees `0` on every step except a `−1000` it can dodge by falling. So for epochs
+80-399 — **80% of the run** — `cur` has no gradient pointing toward the goal,
+while `flat` always keeps the dense forward term at full weight. That is why
+`cur` ends up below the control rather than merely equal to it.
+
+Both mechanisms point the same way and the data separates them: at epoch 79
+`cur` has the *lowest* fall rate of any arm (0.05-0.15, better than flat's
+0.25-0.30) — the high-alpha phase did suppress falling exactly as predicted —
+and by epoch 399 it has the *highest* (0.80-0.85). It learned not to fall, then
+unlearned it once the objective stopped paying for staying up.
+
+### 5e. The correlation structure inverts — return becomes a measure of competence
+
+E2's central finding was `r(fall rate, return) = +0.989` and
+`r(forward progress, return) = +0.019`: return measured falling, not running.
+Recomputed here over the seven arms of the headline table:
+
+| | E2 (7 arms, 5.0M) | **E2.1 (7 arms, 20.0M)** |
+|---|---|---|
+| r(fall rate, return) | **+0.989** | **−0.517** |
+| r(forward progress, return) | **+0.019** | **+0.947** |
+
+**The sign flips on both.** Return now tracks how far the agent gets
+(r = +0.947) and is *negatively* associated with falling. Per condition, at the
+episode level (2 seeds x 20 episodes pooled):
+
+| condition | n | r(fell, R) | r(fwd, R) | mean fwd | fall rate | goal |
+|---|---|---|---|---|---|---|
+| d2rep | 40 | *undefined* | −0.051 | 5.00 m | 0.00 | 0.97 |
+| flat | 40 | **−0.979** | +0.679 | 3.89 m | 0.75 | 0.25 |
+| cur | 40 | −0.179 | +0.680 | 2.19 m | 0.82 | 0.10 |
+| *idle* | 20 | **+0.985** | −0.120 | 0.08 m | 0.15 | 0.00 |
+
+Two of these need stating honestly rather than quoting:
+
+* **`d2rep`'s two correlations are degenerate, not informative.** `r(fell, R)`
+  is undefined because the fall rate is exactly 0 — zero variance — and
+  `r(fwd, R) = −0.051` is a ceiling effect: every episode is at 5.00 m, so
+  there is no forward-progress variance left to correlate with. That is what
+  solving the task looks like in this statistic, and it is why the goal column
+  and not the correlation is `d2rep`'s headline.
+* **The idle floor still shows E2's structure exactly** (`+0.985`). That is the
+  control that matters: the instrument did not change, the *policies* did. E2's
+  finding was true of E2's policies and remains true of an untrained one.
+
+### 5f. What this says about the question as asked
+
+> **Curriculum or budget? The reward mix, decisively — but only D2's realised
+> one, and CompetEvo's nominal one is actively harmful.**
+
+* **Both keep falling** was the predicted outcome for flat and for `cur`, and
+  it happened for both.
+* **The 15x budget scale-up was not needed and would not have been enough.**
+  `d2rep` solved the task at 4.0M; `flat` at 20M — four times E2's budget —
+  still reaches the goal in only 25% of episodes.
+* **The mechanism proposed in the brief is confirmed with one correction.** It
+  is not "early dense shaping lets the agent get moving before the sparse term
+  fades in". `cur` does exactly that and fails. It is "**the sparse ±1000 must
+  stay below (1 − 0.739) x 1000 = 261 points of weight for the whole run**",
+  which D2's unset default happened to guarantee and CompetEvo's nominal
+  200-epoch schedule does not.
+
+---
+
+## 6. Cost
+
+| | |
+|---|---|
+| six MLP arms | ~83 s/epoch with all six live (45 s with four), 400 epochs, **~9 h wall clock, all six concurrent** |
+| CPU | 10 sampler threads per arm, 60 processes; peak load ~38 of 48 cores |
+| **GPU** | **none. Every arm ran `CUDA_VISIBLE_DEVICES=` — E2.1 is CPU-only**, which is what made 6 x 20M affordable. D1 held the card for the whole training window and was stopped cleanly by the user afterwards at 17.6B steps; E2.1 never touched it |
+| disk | **~135 MB** — six results directories at ~11 MB (41 checkpoints x 419 KB) plus ~15 MB of clips. Measured on E2.1's own paths, not from `df` (§3 note 3) |
+| post-hoc | 9 jobs in parallel, ~12 min; then 6 more at epoch 79, ~10 min |
+| logging | six wandb runs, **metrics and video inline in one run each**, verified through the API: `metric rows=80, video/best_median_worst rows=10, video-in-summary=True, last epoch=399` on all six. No `_media` split, no run deleted |
+
+## 7. Not tested / not claimed
+
+* **n = 2 seeds per condition.** Six training runs cannot characterise seed
+  variance. `flat`'s two seeds differ by 0.15 vs 0.35 goal and 3.44 vs 4.35 m —
+  a factor of two on the headline metric — which is a direct warning against
+  reading any single condition mean too hard. `d2rep`'s 0.95/1.00 is the only
+  result here robust to that concern, because both seeds saturate.
+* **The flat control is not a bitwise replication of E2** (§5c). It reproduces
+  E2's qualitative result at matched budget; the residual gap is *probably* the
+  video cadence perturbing the parent RNG stream, and **that explanation is an
+  inference I did not test**.
+* **`a_crit = 0.739` is computed from one measured constant** — the +352.4
+  dense return of a full episode, measured on the idle floor. A policy that
+  moves forward banks more than +352.4, so the true threshold falls as the
+  agent improves; 0.739 is the threshold *for a policy that cannot yet move*,
+  which is the regime that matters for whether it ever starts. It is a
+  first-order argument, not a proof, and it was derived after seeing the
+  result, not before.
+* **Only three alpha schedules were run.** Nothing between `cur`'s 4M and
+  `d2rep`'s 130M was tried, so the experiment does not locate where between
+  them the transition happens, nor test the obvious follow-up — an alpha floor
+  at ~0.85 that anneals no further.
+* **Only the MLP arm.** The GNN was not re-run under any curriculum. E2's
+  architecture question is still unanswered, though it is now *answerable*:
+  `d2rep` is a reward regime on which this task is solvable, so a GNN-vs-MLP
+  comparison run there would finally be comparing two controllers that can both
+  do the task.
+* **The fall-dodge was not removed from the task.** E2 §6's hazard is still
+  present in the env exactly as CompetEvo defines it; `d2rep` avoids it by
+  never weighting it heavily, not by the rule being fixed. E3 still has to
+  decide about the rule itself.
+* **This is not a reproduction of D2.** D2 trained against an **idle** opponent
+  in mujoco_warp on a 2v2 team task; `d2rep` runs 1v1 against a scripted
+  opponent that scores, in mujoco-py with CompetEvo's PGS/1000. It replicates
+  D2's *alpha trajectory*, nothing else.
+* **No hyperparameter was swept.** lr 3e-4, 64x64 tanh, log_std 0, batch
+  50,000 — all inherited from E2 unchanged.
+* **Nothing here says anything about morphology.** The body was frozen and
+  verified frozen (134 arrays identical) under all six trained policies.

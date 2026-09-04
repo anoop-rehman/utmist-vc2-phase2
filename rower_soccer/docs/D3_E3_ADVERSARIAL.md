@@ -1261,6 +1261,121 @@ before the runs so that it can be wrong in public. The falsifier is direct: at
 
 ---
 
+## 3g. A PREDICTION FOR THE CONTROLS, recorded before they get there
+
+*The two frozen-body control arms face E3's control-cost economics exactly —
+8 motors, `control_log_std` initialised at 0, ~3.89/step against a 1.0 survive
+bonus — but `force_identity_design` welds the escape hatch shut. **They are
+route 1 running alone.** With route 1's speed now measured, their trajectory is
+predictable, so it is committed to here rather than explained afterwards.*
+
+### 3g-i. First, a correction: E2.1's σ trajectory, read rather than inferred
+
+The inference on the table was that E2.1's `d2rep` MLP arms took off at epochs
+44-84 with `log_std` around −0.27 to −0.51 — cost 1.4-2.3/step, **above** the
+survive bonus — and therefore that affordability-by-σ was not required. **The
+stored per-epoch `log_std` says otherwise**, and by a wide margin
+(`results/rtg_mlp_s*_d2rep/log.jsonl`, 400 epochs each):
+
+| epoch | 0 | 10 | 20 | **26** | 30 | **41** | 50 | **59** | 70 | **75** | 100 | 399 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `log_std` (s1) | −0.033 | −0.323 | −0.566 | | −0.789 | | −1.078 | | −1.242 | | −1.452 | −2.433 |
+| σ | 0.968 | 0.724 | 0.568 | | 0.454 | | 0.340 | | 0.289 | | 0.234 | 0.088 |
+| cost/step | 3.75 | 2.10 | **1.29** | **1.00** | 0.83 | 0.60 | 0.46 | 0.39 | 0.33 | 0.31 | 0.22 | 0.03 |
+| `train_net_dx` | −2.32 | −2.55 | −2.64 | | −2.19 | | +0.92 | **+2.67** | +3.72 | | +4.78 | +5.00 |
+| `train_goal_rate` | 0.00 | 0.00 | 0.00 | | 0.00 | | 0.00 | 0.04 | 0.37 | **0.72** | 0.91 | 1.00 |
+
+At epoch 44 the measured `log_std` is **−1.0151** (σ 0.362, cost **0.525**/step)
+and at 84 it is **−1.3368** (cost 0.276). Both are **below** the survive bonus,
+not above. **The inferred −0.27 to −0.51 is off by about a factor of three in
+σ², and the conclusion drawn from it does not hold.**
+
+The actual ordering is the opposite of the one proposed, and it is identical on
+both seeds:
+
+| milestone | s1 | s2 |
+|---|---|---|
+| cost/step drops **below** the survive bonus | epoch **26** | epoch **26** |
+| crosses the **empirical** boundary −0.9645 (§3f-iv-c) | epoch **41** | epoch **41** |
+| first locomotes (`train_net_dx` > 2.5 m) | epoch **59** | epoch **68** |
+| first `train_goal_rate` > 0.5 | epoch 75 | epoch 84 |
+
+> **Affordability came first and locomotion followed 18-27 epochs later.**
+> `net_dx` was still −2.6 to −0.9 m — being bulldozed backwards — right up to
+> epoch ~45, so forward progress was *not* paying before σ fell. **No arm on
+> this project has begun locomoting while the control cost exceeded the survive
+> bonus.**
+
+That does not make affordability *sufficient* — 18-27 epochs elapse after
+crossing before anything moves, and it is two arms of one architecture under
+one reward regime. But the σ story is not bypassed by the MLP; it is
+**confirmed** by it, at a boundary derived independently from E3.
+
+### 3g-ii. Why the GNN is slower, and by how much
+
+| | MLP (E2.1 `d2rep`) | GNN (E3) |
+|---|---|---|
+| `log_std` decay, epochs 0-40 | **−0.0231/epoch** | **−0.0047 to −0.0064/epoch** |
+| `policy_lr` | **3e-4** | **5e-5** |
+
+**The GNN's σ falls ~4x slower, and its policy learning rate is 6x lower.**
+`control_log_std` is an ordinary policy parameter updated by that optimiser, so
+the ratio is close to the mechanism rather than a coincidence — though `lr` is
+not the only difference between the arms and this is an association, not an
+isolated cause.
+
+### 3g-iii. The prediction, and its falsifier
+
+Composing the GNN's own measured decay rate with the MLP's measured lag:
+
+**Superseded within the hour by the controls' own σ, which is the right number
+to use.** `logstd_watcher.sh` reads it out of their checkpoints as they appear:
+`ctl_s1` is at `log_std` −0.0632 by epoch 5 and `ctl_s2` at −0.1381 by epoch 14
+— **mean rates −0.0126 and −0.0099/epoch, about 2x faster than E3's design-on
+arms** (−0.0047 to −0.0064) and still ~2x slower than the MLP's −0.0231.
+Extrapolating from E3's arms was the wrong base; extrapolating from the arm
+being predicted is better.
+
+**And linear extrapolation from an early mean rate is biased early, which the
+MLP lets us calibrate.** Its mean rate over epochs 0-20 was −0.0283/epoch,
+which linearly predicts crossing at epoch 34; it actually crossed at **41** — a
+**17% underestimate**, because the decay slows (the MLP ran −0.0231/epoch over
+0-40 and −0.0043/epoch over 100-399).
+
+> **Prediction, from the controls' own decay with the MLP's bias correction
+> applied.** They cross `log_std` = −0.9645 at **epoch ~89-114** (linear 76-98,
+> +17%), first locomote **18-27 epochs later** at **epoch ~107-141**, and reach
+> goal rate > 0.5 a further ~16 epochs on, **~123-157**. Comfortably inside the
+> 400-epoch budget.
+>
+> *(The version first written here said 151-205 / 169-232, extrapolated from
+> E3's design-on arms before the controls had produced a checkpoint of their
+> own. It is left visible rather than overwritten: it was the best available
+> estimate for about forty minutes and it was wrong by roughly a factor of
+> two, because the design-on arms' σ decays at half the rate.)*
+
+* **Takeoff at ~107-141** → route 1 completing on schedule. The same constant
+  predicts two experiments with different architectures and different learning
+  rates, and E3's null is confirmed from the other side.
+* **Takeoff much earlier (say the MLP's own 44-84 window)** → σ decay is *not*
+  the gate for the GNN, and something else lets an ant afford actuators first.
+  The live alternative is that once forward progress pays it dwarfs the control
+  cost (5.0 m at `dt` 0.015 is ~333 of dense). **That would mean the −1.5 fix
+  works by buying survival time for a stumble into locomotion, not by making
+  actuators cheap — the same remedy for a different mechanism**, and worth
+  knowing which we are relying on.
+* **No takeoff by 400** → the GNN controller itself is implicated, E3 becomes
+  uninterpretable as a morphology result, and E3.1's fix list needs revisiting
+  before launch.
+
+*This is a prediction about **when**, from two measured rates and one measured
+lag. It assumes the GNN's decay stays linear — it need not; the MLP's did not
+(−0.0231/epoch over 0-40, −0.0043/epoch over 100-399). If the GNN's decay
+accelerates the takeoff comes earlier than 169, and that is a third outcome
+distinct from both bullets above.*
+
+---
+
 ### What the frozen-body GNN control decides
 
 The control arms (`rtg_e3c_s{1,2}`, run after E3 on the freed card) are what

@@ -1,0 +1,18 @@
+{
+ "rtg_e3c_s1": [
+  {
+   "epoch": 5,
+   "file": "best.p",
+   "control_action_log_std": -0.0632424149731178,
+   "attr_action_log_std": -2.3030368825567513
+  }
+ ],
+ "rtg_e3c_s2": [
+  {
+   "epoch": 14,
+   "file": "best.p",
+   "control_action_log_std": -0.13810949395403208,
+   "attr_action_log_std": -2.304556463959522
+  }
+ ]
+}

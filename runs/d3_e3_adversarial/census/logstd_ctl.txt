@@ -1,0 +1,5 @@
+  arm           checkpoint       epoch  control_log_std   sigma  cost/step   vs crit -0.8837
+  rtg_e3c_s1    best.p               5          -0.0632  0.9387     3.5248       ABOVE (bad)
+  rtg_e3c_s2    best.p              14          -0.1381  0.8710     3.0346       ABOVE (bad)
+
+  -> /workspace/utmist-vc2-phase2/runs/d3_e3_adversarial/census/logstd_ctl.json

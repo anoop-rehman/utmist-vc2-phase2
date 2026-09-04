@@ -608,6 +608,28 @@ seeds converged on the identical topology hash** (`9a51d315a8da`, a 5-body
 (Jaccard 0.75-0.82 apart). The search does not merely degrade; it converges,
 and on the same body.
 
+**A prediction for the frozen-body controls, recorded before they get there**
+(`D3_E3_ADVERSARIAL.md` §3g). They face E3's control-cost economics exactly but
+`force_identity_design` welds the escape hatch shut, so they are **route 1
+running alone**. E2.1's *stored* per-epoch `log_std` (not inferred) shows the
+ordering on the MLP: cost drops below the survive bonus at epoch **26**,
+crosses the empirical boundary −0.9645 at epoch **41 on both seeds**, and
+locomotion follows **18-27 epochs later** (net_dx > 2.5 at 59 / 68).
+**Affordability came first; `net_dx` was −2.6 to −0.9 m right up to epoch ~45,
+so forward progress was not paying before σ fell.** No arm on this project has
+begun locomoting while the control cost exceeded the survive bonus — necessary-
+consistent, not shown sufficient. *(This corrects an inference that the MLP took
+off at `log_std` ≈ −0.27 to −0.51, i.e. above the bonus: measured, it was −1.02
+to −1.34.)*
+
+The GNN's σ falls slower — its `policy_lr` is **5e-5 against the MLP's 3e-4** —
+so from the controls' own checkpoints (−0.0126 and −0.0099/epoch), with the
+MLP's measured +17% linear-extrapolation bias applied: **cross at epoch ~89-114,
+locomote ~107-141, goal > 0.5 at ~123-157.** Falsifier: takeoff much earlier
+means σ is not the gate and the −1.5 fix works by buying survival time for a
+stumble into locomotion rather than by making actuators cheap; no takeoff by
+400 implicates the GNN controller itself and E3.1's fix list needs revisiting.
+
 **A decision-rule lesson worth carrying**: the original decision epoch was 100.
 It was moved to "every checkpoint from 20" once the collapse rate was seen, and
 even that was late — the condition was already met at **epoch 17**, surfaced

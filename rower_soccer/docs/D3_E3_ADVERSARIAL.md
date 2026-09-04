@@ -1578,6 +1578,57 @@ being bulldozed backwards. The MLP was at `net_dx` −2.19 at epoch 30 and did
 not turn positive until ~epoch 50, so the controls are tracking the same
 trajectory shape roughly 2.4x slower in σ, exactly as §3g-ii's rates imply.
 
+### 3g-v. Epoch 95: the affordability milestone HIT on schedule, and the acceleration claim is REVERSED
+
+The 6-epoch sampler (§3g-iv) paid for itself immediately.
+
+**Milestone 1 — affordability. Predicted epoch ~70; actual epoch 71, both
+arms.** `cost/step` fell below the 1.0 survive bonus at
+`control_log_std` −0.6979 / −0.6952 (cost **0.9906** / **0.9960**), having been
+1.0999 / 1.1038 six epochs earlier. The prediction machinery is calibrated.
+
+**Milestone 2 — and here the earlier claim breaks.** The 6-epoch series:
+
+| epoch | 65 | 71 | 77 | 83 | 89 | 95 |
+|---|---|---|---|---|---|---|
+| `log_std` s1 | −0.6455 | −0.6979 | −0.7486 | −0.7935 | −0.8367 | −0.8800 |
+| **segment rate** s1 | | −0.00872 | −0.00846 | −0.00748 | −0.00721 | −0.00721 |
+| `log_std` s2 | −0.6438 | −0.6952 | −0.7442 | −0.7894 | −0.8327 | −0.8756 |
+| **segment rate** s2 | | −0.00857 | −0.00817 | −0.00754 | −0.00721 | −0.00715 |
+
+> **The decay is DECELERATING, monotonically, on both arms — and §3g-iv said it
+> was accelerating.** That claim rested on the 20-epoch checkpoint segments
+> (−0.00864 → −0.00976 → −0.01043, ending at epoch 59), which is a series that
+> **stops at the peak.** The rate rose to roughly −0.0104 around epoch 55-60
+> and has fallen to −0.0072 by epoch 95.
+
+**So the GNN follows the MLP's shape after all** — rise, peak, decay — just
+later and shallower (the MLP peaked before epoch 10 at −0.0263 and was at
+−0.0069 by epoch 100). The sentence "accelerating, the opposite of the MLP over
+the same span" is **withdrawn**; the correct statement is that the GNN's decay
+curve is the same shape displaced later, which is consistent with, and does not
+explain, the 2-3x rate gap of §3g-ii.
+
+**Revised crossing projection: epoch ~107 on both arms**, from the current local
+rate — later than the ~96-98 projected from the coarse series, and **still
+inside the pre-registered 89-114**, though now near its upper end. Arms are at
+epoch 100 as this is written.
+
+*Fourth claim in this experiment corrected by a finer measurement — after "the
+bodies grew back", "my own probes", and the lr attribution. The pattern is
+consistent enough to be worth naming: **coarse series → plausible shape claim →
+finer series → reversal.** The habit that has caught every one of them is
+refusing to let the first reading stand as the finding.*
+
+**A durability note the archiver forced.** `train_e3_gnn.py`'s archiver prunes
+local checkpoints to the two most recent plus `best.p` after uploading them, so
+`epoch_0020/0040/0060.p` are now gone locally on `ctl_s1` (all present in GCS).
+`e3_logstd_trace.py` rebuilds its table from whatever files exist, so
+**`census/logstd_ctl.txt` will silently shrink as the run proceeds and is no
+longer the authoritative history.** `census/sigma_fine.csv` is append-only,
+independent of checkpoints, and 3x finer — it is the durable series and every
+number above comes from it.
+
 *This is a prediction about **when**, from two measured rates and one measured
 lag. It assumes the GNN's decay stays linear — it need not; the MLP's did not
 (−0.0231/epoch over 0-40, −0.0043/epoch over 100-399). If the GNN's decay

@@ -73,16 +73,59 @@ budget, and stated with the arithmetic:
   number (0.95/1.00), the frozen-body GNN control here, and the E3 arms three
   readings at one matched budget.
 
-**Seeds**: 3 for E3, 2 for the control.
+**Seeds**: **3** for E3, 2 for the control. Three was kept rather than traded
+for concurrency, and the reason is that n = 2 is already this project's
+recorded weak point — `D3_E21_CURRICULUM.md` §7 names it as its central
+statistical limitation, and its `flat` arm's two seeds differed by a factor of
+two on goal rate (0.15 vs 0.35). **E3 has a wider outcome space than E2.1
+did**, because morphology varies as well as control, so it needs at least as
+many seeds and not fewer. Three still cannot characterise a spread; it can only
+show whether the seeds agree in sign.
 
 ---
 
 ## 2. The two arms, and why the control is not optional
 
-| arm | cfg | design stages | device | seeds |
-|---|---|---|---|---|
-| **E3** | `rtg_e3_s{1,2,3}` | **LIVE** | GPU | 1, 2, 3 |
-| **GNN control** | `rtg_e3c_s{1,2}` | identity-forced | CPU only | 1, 2 |
+| arm | cfg | design stages | device | seeds | when |
+|---|---|---|---|---|---|
+| **E3** | `rtg_e3_s{1,2,3}` | **LIVE** | GPU | 1, 2, 3 | first |
+| **GNN control** | `rtg_e3c_s{1,2}` | identity-forced | GPU | 1, 2 | after E3 |
+
+**They run serially, and that is a measured decision.** The first launch put
+all five up at once. It did not work, for two independent reasons, both
+recorded here rather than smoothed over:
+
+* **CPU.** Five arms is 3x10 + 2x8 = **46 sampler threads against a 10.2-CPU
+  quota** (§5). Under that load the two CPU-only control arms logged **zero
+  epochs in 15 minutes** while the three E3 arms degraded from 346 s to ~7 min
+  per epoch.
+* **GPU.** Sampled over 90 s the card is cyclical, not leaking: ~8.6 GB during
+  sampling but **19.0 GB of 20.475 at the update peak** with three E3 seeds
+  alone — 93%. That is the number that killed D1 once already (E1's two seeds
+  took the card to 19.95 GB and D1 died asking for 8 MB). Nothing else could
+  be added to it.
+* **And the control arms' own problem was not contention.** khrylib's
+  `agent.py` sets `OMP_NUM_THREADS=1` at import and `env-gpu.sh` sets it
+  again, so a CPU-only arm's PPO update runs **single-threaded**: still
+  running after 700 s, against 150 s for the same update on the GPU. Setting
+  the env var after torch is imported does not move torch's thread pool;
+  `torch.set_num_threads` does, and `--torch-threads` exists for that. It is
+  not the fix used here.
+
+**The control does not need to run beside E3 — it only needs to exist before
+E3 is interpreted.** So E3 takes all three seeds unimpeded and the controls get
+the free card afterwards. Total wall clock is lower than five contended arms
+and E3 keeps its third seed.
+
+*The two control arms were stopped by signal, not by stop-file, and that needs
+saying plainly. The stop-file is only checked at the END of an epoch and these
+arms had not completed one in 15 minutes, so it could never have fired. Before
+signalling them, `nvidia-smi --query-compute-apps` was read: it listed the MPS
+server and the three E3 arms only, and both control processes had an empty
+`CUDA_VISIBLE_DEVICES`. They held no CUDA context, so the MPS
+never-kill-a-CUDA-client rule did not apply to them. They had logged zero
+epochs, so nothing was lost. **The three E3 arms will be ended by stop-file
+only.***
 
 They differ in **one cfg field**, `env_specs.force_identity_design`, run
 through the **same trainer** (`train_e3_gnn.py`) and the **same instrument**
@@ -164,15 +207,138 @@ phases, each with at least one negative control.
 E2's scene, opponent, frozen body, reward, termination, observation, E1.1
 regression, and E2.1's whole curriculum apparatus are untouched by this work.
 
-### The gate's own finding, before any training
+---
 
-> **A randomly evolved body falls in 12 of 12 episodes at zero torque, mean
-> length 21 steps, where the unevolved ant falls in 1 of 10.**
+## 3a. A result before training: the DESIGN SPACE is tilted toward the dodge
 
-E2 found that a *controller* can reach the degenerate ending by learning to
-tip over. This says a *design* reaches it without needing a controller at all.
-It is why the fall rate, the morphology and the correlation pair are logged
-from epoch 0 rather than reconstructed post-hoc.
+This came out of `gate_e3.py` phase 7 rather than out of a run, but it is a
+finding in its own right and not a gate byproduct, so it is stated as one.
+
+| policy | body | episodes | fell | mean episode length |
+|---|---|---|---|---|
+| zero torque | the unevolved 13-body ant | 10 | **1** (0.10) | — |
+| zero torque | 12 randomly evolved bodies | 12 | **12** (1.00) | **21 steps** |
+
+Same policy — none. Same task, same opponent, same termination rule. The only
+difference is the body.
+
+> **E2 established that a *controller* can reach the task's degenerate ending
+> by learning to tip over. This establishes that a *design* reaches it with no
+> controller at all.**
+
+`D3_E2_RTG.md` §6 measured the ending's value: a fall stops the episode before
+the scripted opponent's certain goal at step 491, so it never pays the −1000,
+and that is worth +750 to +900 inside every arm. E2 then found that ranking its
+seven arms by return reproduced the fall-rate ranking exactly
+(`r(fall rate, return) = +0.989`, `r(forward progress, return) = +0.019`).
+E2.1's `d2rep` inverted that to −0.517 / +0.947 by holding the sparse term
+under 15.4% weight for the whole run — **it avoided the dodge, it did not
+remove it**.
+
+What the table above adds is that with the design stages live the dodge is
+reachable through a channel E2 and E2.1 did not have, and that the *untrained*
+distribution over bodies already sits almost entirely inside it. That is why
+morphology, fall rate and E2's correlation pair are logged from epoch 0 rather
+than reconstructed afterwards (§4), and it is why keeping the termination rule
+unchanged (§1a) had to be an explicit decision rather than a default: E3 is
+the first rung where the rule is load-bearing on the *design* search and not
+only on the control policy.
+
+**What would falsify it, stated with it.** This is 12 episodes on bodies drawn
+from *destructive random design actions* — every body told to add or remove,
+every attribute kicked over its full range. That is the gate's stimulus, and it
+is deliberately not the distribution the trained search visits: the sampled
+census at epoch 0 already draws 20 distinct topologies with body counts 9-19,
+and a trained policy's distribution will be narrower and different again. So
+the claim this table supports is **"the design space contains a large region
+where falling is the default"**, not "the search will end up there". The
+falsifier is the run itself: if the E3 arms' per-epoch fall rate falls away
+from 1.00 while body counts move off the random distribution, the tilt is
+real but escapable, which is a different and better result. §3b pre-registers
+how that is read.
+
+---
+
+## 3b. Pre-registration — how the two outcomes will be read, fixed BEFORE the data
+
+*Written before any E3 epoch beyond 1 existed. This project has twice had to
+retract reasoning built after seeing a number — the mean-speed "arithmetic not
+tactics" argument, and the back-agent reinterpretation of `DESIGN_2V2.md` §11 —
+and both times the reasoning was constructed post-hoc. The readings below are
+committed in advance.*
+
+The two statistics that decide it are E2's own pair, recomputed on E3's arms by
+`e3_analyse.py`, plus the per-epoch morphology series:
+
+| | E2 (5.0M, flat) | E2.1 (20.0M, d2rep, frozen body) |
+|---|---|---|
+| `r(fall rate, return)` | **+0.989** | **−0.517** across arms; −0.94 over the trained arms |
+| `r(forward progress, return)` | **+0.019** | **+0.947** |
+
+### Reading A — "the dodge was found through the body"
+
+**Trigger, both parts required:**
+1. `r(fall rate, return)` drifts back toward E2's **+0.989** — concretely, the
+   pooled per-arm value ends **positive** and the across-arm value ends above
+   **+0.5**, while `r(forward progress, return)` stays near zero; **and**
+2. the per-epoch morphology series **correlates with fall rate** — body count,
+   limb length, mass or motor count moves monotonically with the fall rate
+   over the run, so the fall rate is being bought with the body.
+
+**Conclusion if triggered:** the design loop found the degenerate optimum
+through morphology. That is a real and publishable result — it is the first
+demonstration on this project that widening the search space widens the set of
+degenerate solutions — and it **promotes fixing the termination rule from
+optional cleanup to the next rung, E3.1**: pay the loser its −1000 on a fall as
+well, or drop the sparse term when an episode ends in a fall, and re-run.
+
+### Reading B — "the design loop works"
+
+**Trigger, both parts required:**
+1. the correlations hold near E2.1's structure — pooled `r(fall rate, return)`
+   **negative** and `r(forward progress, return)` **above +0.5**; **and**
+2. the evolved bodies trend toward locomotion — the mean-action fall rate
+   falls toward 0 and forward progress rises toward the 5.00 m the task needs,
+   i.e. a non-zero goal rate on the mean-action protocol.
+
+**Conclusion if triggered:** Transform2Act's design+control loop wins an
+adversarial task, and **E4 (self-play, both sides evolving) is on**.
+
+### Neither — the ambiguous middle, named in advance so it cannot be filed under a preference
+
+The result is **ambiguous, and will be reported as ambiguous**, if any of:
+
+* **the correlations are indeterminate** — |pooled `r(fall rate, return)`| < 0.3,
+  or the three seeds disagree in sign;
+* **the fall rate stays high but so does forward progress**, or vice versa, so
+  the two triggers of a single reading do not both fire;
+* **the goal rate is 0.00 on every seed with a fall rate below ~0.3** — that is
+  neither the dodge nor a working loop, it is "the design search made the task
+  harder", which is a third outcome and gets its own name;
+* **`design_fail_rate` is materially non-zero** (> 0.05), because then a
+  fraction of episodes never reached the execution stage and every rate is
+  conditioned on the designs that compiled;
+* **the seed spread exceeds the effect** — E2.1's `flat` arm's two seeds
+  differed by a factor of two on goal rate (0.15 vs 0.35), and E3 has a
+  *wider* outcome space than E2.1 because morphology varies as well as control.
+
+An ambiguous result is reported as an ambiguous result, with the mechanism I
+think explains it, and the next rung is chosen to disambiguate rather than to
+confirm.
+
+### What the frozen-body GNN control decides
+
+The control arms (`rtg_e3c_s{1,2}`, run after E3 on the freed card) are what
+separate "the design loop failed" from "the GNN controller cannot do this
+task", and the reading is fixed here too:
+
+* control reaches a **high goal rate** (near E2.1's frozen-body MLP 0.95/1.00)
+  and E3 does not → the deficit is the **design loop**;
+* control is also near **0.00** → the deficit is the **GNN controller**, E3 is
+  uninterpretable as a morphology result, and the rung to fix is the
+  controller;
+* control lands **between** → the two effects are mixed and the E3-minus-control
+  difference is the only quantity that can be attributed to design.
 
 ---
 
@@ -223,6 +389,14 @@ as arms were added, "peak load ~38 of 48") — that run was throttled too, and
 its "78% CPU idle" headroom estimate was wrong for the same reason it already
 records itself as optimistic.
 
+**Placement, measured.** Epochs 0-1 of the E3 arms ran while the two CPU-only
+control arms were up: T_sample 152-166 s, T_update 150-162 s, T_eval 10-26 s.
+The re-measurement with the CPUs freed is in §5a.
+
+### 5a. Per-epoch cost, measured
+
+*(Filled in from the unimpeded measurement; see the results section.)*
+
 *(Results section to be filled in when the runs finish.)*
 
 ---
@@ -245,3 +419,20 @@ records itself as optimistic.
   is E2's, which is itself E1.1's.
 * **Engine.** mujoco-py 2.1 with CompetEvo's own PGS/1000, not D1/D2's
   mujoco_warp with Newton/100.
+* **n = 3 seeds for E3, n = 2 for the control.** Three seeds cannot
+  characterise a spread; they can show whether the seeds agree in sign. E2.1's
+  `flat` arm's two seeds differed by a factor of two on goal rate, and E3's
+  outcome space is wider than E2.1's because morphology varies as well as
+  control (§1b). Any single-condition mean here is to be read with that.
+* **§3a's 12/12 is 12 episodes on destructive-random designs**, which is the
+  gate's own stimulus and deliberately not the distribution a trained search
+  visits. It supports "the design space contains a large region where falling
+  is the default", not "the search will end up there". §3a states the
+  falsifier; §3b pre-registers how the run decides it.
+* **The two protocols have disagreed twice on this project** (E1.1, E2 §7d), so
+  both are reported for every arm and the ordering is checked on both. Nothing
+  here assumes they agree.
+* **No arm was run with the design stages live and the FLAT reward**, so E3
+  cannot separate "the design loop needs `d2rep`" from "`d2rep` is simply the
+  regime that works on this task". E2.1 established the latter on a frozen
+  body; the interaction with design freedom is untested.

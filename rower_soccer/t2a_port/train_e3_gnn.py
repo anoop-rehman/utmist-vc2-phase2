@@ -164,6 +164,16 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--cfg", required=True)
     p.add_argument("--num-threads", type=int, default=10)
+    p.add_argument("--torch-threads", type=int, default=0,
+                   help="torch.set_num_threads for THIS process. 0 leaves it "
+                        "alone. It matters only for a CPU-only arm: khrylib's "
+                        "`agent.py` sets OMP_NUM_THREADS=1 at import and "
+                        "`env-gpu.sh` sets it again, so the PPO update runs "
+                        "single-threaded -- measured at >700 s per epoch on "
+                        "this box against 150 s for the same update on the "
+                        "GPU. Setting the env var after torch is imported does "
+                        "not move torch's pool; this does. The samplers are "
+                        "unaffected: they are separate processes.")
     p.add_argument("--gpu-index", type=int, default=0)
     p.add_argument("--epoch", default="0", help="resume from this checkpoint")
     p.add_argument("--max-epoch", type=int, default=0,
@@ -200,6 +210,8 @@ def main():
 
     dtype = torch.float64
     torch.set_default_dtype(dtype)
+    if args.torch_threads:
+        torch.set_num_threads(args.torch_threads)
     cfg = Config(args.cfg, tmp=False)
     if args.max_epoch:
         cfg.max_epoch_num = args.max_epoch
@@ -221,6 +233,7 @@ def main():
     if args.curriculum_steps:
         agent.custom_reward = make_custom_reward(agent)
     L(f"E3 GNN: cfg {args.cfg} seed {cfg.seed} threads {args.num_threads} "
+      f"torch_threads {torch.get_num_threads()} "
       f"DESIGN {'ON' if design_on else 'OFF (frozen-body control)'} "
       f"max_epoch {cfg.max_epoch_num} batch {cfg.min_batch_size} "
       f"curriculum_steps {args.curriculum_steps} alpha0 {agent.cur_alpha} "

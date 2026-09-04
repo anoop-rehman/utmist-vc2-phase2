@@ -167,6 +167,27 @@ for three concurrent arms.
 E3's ran 0.825 → 0.300 (epoch 3) → 0.000 (epoch 17). Two epochs is not a trend
 and this is recorded as a transient, not a result.
 
+**Epochs 0-5, both surviving arms** (`census/rtg_e31_s{2,3}_morph.csv`):
+
+| epoch | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| s2 `log_std` | −1.5033 | −1.5083 | −1.5123 | −1.5173 | −1.5194 | −1.5229 |
+| s2 `n_bodies` / motors | 12 / 6 | 13 / 8 | 16 / 8 | 16 / 8 | 21 / 9 | 21 / 9 |
+| **s2 `p_act4`** | 0.80 | 0.95 | 0.85 | **1.00** | **1.00** | **1.00** |
+| s3 `log_std` | −1.5061 | −1.5094 | −1.5116 | −1.5149 | −1.5190 | — |
+| s3 `n_bodies` / motors | 12 / 6 | 12 / 6 | 16 / 8 | 17 / 8 | 18 / 9 | — |
+| **s3 `p_act4`** | 0.95 | 0.95 | 0.95 | **1.00** | **1.00** | — |
+
+> **`p_act4` has reached 1.000 on both arms — every one of 20 sampled designs
+> carries four or more motors — where E3's had fallen to 0.300 by epoch 3 and
+> 0.000 by 17.** Motor count on the mean-action readout is *rising* (6 → 9) and
+> `log_std` is falling away from the boundary (−1.503 → −1.523), so neither
+> falsifier is approaching, let alone firing.
+>
+> **This is epoch 5 of 400 and the test is epoch 20.** It is recorded as a
+> transient. What it does establish is that the arms are in the opposite
+> regime to E3's at the same epochs, which is the minimum the fix had to do.
+
 ## The frozen-body control's final numbers — the reference E3.1 is read against
 
 Measured on the shared instrument from the arms' own final checkpoints

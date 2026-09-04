@@ -323,6 +323,19 @@ The result is **ambiguous, and will be reported as ambiguous**, if any of:
 * **the goal rate is 0.00 on every seed with a fall rate below ~0.3** — that is
   neither the dodge nor a working loop, it is "the design search made the task
   harder", which is a third outcome and gets its own name;
+* **the mean-action design ends with `morph/n_motors` at or near 0** — call
+  this outcome **"the search removed the ability to act"**. It is a third
+  reading, distinct from both A and B, and it is named here because it is
+  already visible at epoch 4 (see below). A body with no actuators cannot
+  reach the goal and cannot exploit the dodge deliberately either: it simply
+  topples. Reading A would be wrong for it — there is no *optimisation toward*
+  falling, only an inability to do anything else — and Reading B is obviously
+  wrong. `D3_E1_ANT.md` predicted this reachable state before E3 existed: our
+  ant "can erode to a **0-motor** blob theirs cannot reach", because 12 of its
+  16 possible additions are passive dead weight and its depth-1 leg stubs are
+  jointless. If E3 ends here, the finding is about the **design space of this
+  particular creature**, and the next rung is a constrained design space (a
+  floor on actuator count), not a change to the termination rule.
 * **`design_fail_rate` is materially non-zero** (> 0.05), because then a
   fraction of episodes never reached the execution stage and every rate is
   conditioned on the designs that compiled;
@@ -333,6 +346,29 @@ The result is **ambiguous, and will be reported as ambiguous**, if any of:
 An ambiguous result is reported as an ambiguous result, with the mechanism I
 think explains it, and the next rung is chosen to disambiguate rather than to
 confirm.
+
+### An observation at epoch 4 of 400, recorded as a transient, not a result
+
+*Logged here the moment it was seen, so that if it persists it cannot be
+presented as a prediction and if it resolves it cannot be quietly dropped.
+This project's own rule: a result from a still-running run is a transient.*
+
+Seeds 1-3 at epochs 0-4 have `morph/n_motors` = **0** on the mean-action
+design, with `morph/n_bodies` falling 6 → 5 and mass 0.51 → 0.47 kg. Fall rate
+is 1.00 and forward progress 0.01 m, which a 0-motor body explains completely
+without any appeal to the dodge. `design_fail_rate` is 0.00, so these bodies
+compile and run; they simply cannot act.
+
+Two reasons not to read anything into it yet. It is **epoch 4 of 400**, and the
+policy is barely off its initialisation. And under `d2rep`'s alpha ≈ 0.998 the
+objective is almost pure `dense = forward − 0.5·Σa² + 1.0`, which pays **+1.0
+per step survived** — so a blob that topples at step 21 banks ~21 where a
+standing, actuated ant banks up to 491. The gradient available to the design
+head points *away* from this body. Whether it follows it is the experiment.
+
+The curriculum was verified live against its own schedule at the same time:
+`e3/alpha` reads 1.000000, 0.999616, 0.999232, 0.998848, 0.998464 at epochs
+0-4 against an expected 1.0, 0.999616, 0.999232, 0.998848, 0.998464.
 
 ### What the frozen-body GNN control decides
 

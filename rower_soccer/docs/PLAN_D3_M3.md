@@ -683,7 +683,38 @@ is **1020000/100000 = 10.2 CPUs**, and `vmstat` under five arms shows 25-34
 runnable against 20-21% of 48 busy. E2.1's recorded slowdown (`T_sample`
 31 -> 41 -> 83 s as arms were added) is the same throttle.
 
-### E3.1 — repair the termination rule instead of out-weighting it (proposed 2026-09-04)
+### E3.1 — repair the CONTROL COST, and an actuator floor. LAUNCHED 2026-09-04. See [`D3_E31_FIX.md`](D3_E31_FIX.md).
+
+**Gated behind the controls, which cleared it**: the frozen-body GNN control
+reached **goal 1.00, forward 5.02 m, fell 0.00, R ≈ +1510**, matching E2.1's
+frozen-body MLP. The GNN controller can do this task, so E3's null is the
+design loop's and the fix list is about the design loop.
+
+**Two arms, 3 seeds each.** `rtg_e31_s{1,2,3}`: `control_log_std` 0 → **−1.5**
+(σ 0.223, cost **0.199/step**, below the 1.0 survive bonus from step 0).
+`rtg_e31f_s{1,2,3}`: the same plus `env_specs.min_motors = 4`. Everything else
+is E3's. **The floor alone would not work** — at `log_std` 0 a 4-motor ant pays
+2.0/step so falling early still beats standing, converting the morphology
+failure back into E2's fall-dodge — which is why it is the second arm.
+
+**`gate_e31.py`: 7 checks, 0 failed**, including the negative control that
+matters — *without* the floor the same all-remove actions reach **0 motors**,
+reproducing E3's failure on demand.
+
+**Falsifiers, pre-registered**: `control_log_std` above −0.9645 in the first 20
+epochs, or `p_act4` collapsing to 0 by epoch 20.
+
+**Epoch 0**: readouts are **14b/8m, 12b/6m, 12b/6m** where E3's was 6b/**0m**;
+`p_act4` **0.800 / 0.800 / 0.950** against E3's collapse to 0.000. Neither
+falsifier fired. Epoch 0 of 400; the test is epoch 20.
+
+*(The earlier E3.1 proposal below — repairing the TERMINATION rule — is
+superseded as the next rung but not withdrawn: §3d's grid still shows charging
+the fall −1000 dominates on every axis, and it addresses a different failure.
+E3 never collected the sparse term at all, so it could not have prevented the
+actuator deletion.)*
+
+### E3.1-alt — repair the termination rule instead of out-weighting it (proposed 2026-09-04, deferred)
 
 **Not started, and deliberately not started while E3 runs.** Recorded here
 because E3's own instrumentation produced the case for it, and because E2 §6

@@ -564,6 +564,135 @@ lengths: `p·491 / (p·491 + (1−p)·20.9)`. At `p` = 0.05 the step share is
 already **0.55**; at `p` = 0.015 it is 0.26. A design share that looks
 negligible is not negligible in the batch.
 
+## 3e. THE RESULT: the design search deleted the actuators, and the mechanism is the CONTROL COST
+
+**E3 was stopped at epoch ~19 by its own pre-registered rule**, on 3 of 3 seeds,
+by stop-file. The rule (§3c row 1) required three conditions on ≥ 2 of 3 seeds;
+all three held on all three.
+
+### 3e-i. The measurement
+
+Population probes of the **live** policy at epoch 17, 200 sampled designs each
+(`census/pop_rtg_e3_s{1,2,3}_LIVE.json`):
+
+| seed | readout | `pop_motors_mean` (max) | motor histogram | `p_act1` | **`p_act4`** | **step share** |
+|---|---|---|---|---|---|---|
+| s1 | 5 bodies, 0 motors | 0.055 (2) | 0: **191**, 1: 7, 2: 2 | 0.045 | **0.000** | **0.000** |
+| s2 | 6 bodies, 0 motors | 0.015 (1) | 0: **197**, 1: 3 | 0.015 | **0.000** | **0.000** |
+| s3 | 7 bodies, 0 motors | 0.015 (1) | 0: **197**, 1: 3 | 0.015 | **0.000** | **0.000** |
+
+**Not one design in 600 has four motors. The most actuated design in 600 has
+two.** The untrained baseline was `p_act4` = 0.825 with a mean of 5.71 motors
+and a maximum of 12.
+
+### 3e-ii. The mechanism: it is the DENSE control cost, not the sparse fall-dodge
+
+This is the part that matters, and it is not the hazard this rung was built to
+watch for.
+
+`dense = forward − 0.5·Σa² + 1.0`. At initialisation `control_log_std` is 0, so
+a fresh policy pays about **4.0 per step** in control cost against a survive
+bonus of 1.0 — `D3_E21_CURRICULUM.md` §1 measured exactly this and recorded that
+"the dense reward's first gradient is *quieten down*". Under E3's `d2rep`,
+alpha ≈ 0.998, so **the objective is essentially `dense` alone** and that
+gradient is the whole signal.
+
+With the design stages live there are two ways to stop paying it:
+
+1. **learn small actions** — slow, and it only pays off once the control head
+   can also keep the body upright and run;
+2. **delete the actuators** — immediate, and `0.5·Σa²` becomes *exactly* 0
+   forever.
+
+**It took route 2, identically on all three seeds.** The trainer's own
+per-step reward is the trace:
+
+| epoch | 0 | 2 | 4 | 6 | 8 | 10 | 14 | 17 |
+|---|---|---|---|---|---|---|---|---|
+| s1 `train_R` | −2.38 | −1.28 | −0.24 | 0.11 | 0.50 | 0.61 | 0.75 | 0.76 |
+| s2 `train_R` | −2.53 | −1.31 | −0.26 | 0.24 | 0.54 | 0.68 | 0.76 | 0.78 |
+| s3 `train_R` | −2.51 | −1.28 | −0.24 | 0.37 | 0.60 | 0.68 | 0.76 | 0.77 |
+
+Monotone, concave, asymptoting at **+0.78** — which is the 0-motor body's
+ceiling: `+1.0` of survive bonus per step, minus the backward drift the
+opponent imposes. The reward went up the whole time. **The run optimised its
+objective successfully and the objective was the problem.**
+
+> **`d2rep` cannot prevent this, and that is the structural point.** `d2rep`
+> down-weights `parse` — the ±1000, the fall-dodge. **The control cost lives in
+> `dense`, which `d2rep` weights at ~1.0.** E2.1's protection is orthogonal to
+> the failure that actually occurred, and buying it (alpha ≈ 1) *maximises*
+> the weight on the term that caused it.
+
+**Why §3b-i's "+310.6 for keeping the body" did not save it.** That figure
+compares the blob against a *standing* actuated ant — a body **plus** a policy
+that can hold it up. The design head does not have that policy and cannot get
+it without first paying the ~4/step it is busy escaping. The comparison
+actually available to it at epoch 0 is different and points the other way:
+**pay ~4/step now, or bank ~+1/step now.** §3b-i measured a distant optimum;
+the search followed the local gradient.
+
+### 3e-iii. Which of the pre-registered readings this is — and it is none of them
+
+Not **Reading A** ("the dodge was found through the body"): there is no
+optimisation *toward* falling. A 0-motor body topples because it cannot do
+anything else, and the sparse term never enters — the blob's `parse` is 0.0
+(§3d), so the fall-dodge is not what it is exploiting.
+
+Not **Reading B**. It is the **third outcome named in §3b before the data**,
+*"the search removed the ability to act"* — with the mechanism now identified,
+which the naming did not contain.
+
+**Where §3c was still wrong, and it was wrong in my favour.** §3c relocated the
+decision from epoch 100 to "every checkpoint from 20". Even that was late: the
+condition was already satisfied at **epoch 17**, and only the live-capture trick
+(`catch_live_ckpt.sh`) surfaced it before epoch 20. The original epoch-100 rule
+would have run **83 epochs — about 22 hours — past a settled outcome.**
+
+### 3e-iv. The collapse rate: what the points can and cannot support
+
+Asked plainly, and answered plainly.
+
+| seed | points | series |
+|---|---|---|
+| s1 | 3 | untrained **0.825** → epoch 3 **0.300** → epoch 17 **0.000** |
+| s2 | 2 | epoch 1 **0.680** → epoch 17 **0.000** |
+| s3 | 2 | epoch 0 **0.790** → epoch 17 **0.000** |
+
+**The drop is established; its shape is not, and I will not name one.** Only s1
+has three points. Its absolute rate falls from −0.175/epoch (untrained→3) to
+−0.021/epoch (3→17), which *looks* decelerating — but `p_act4` is **bounded
+below by 0 and reached the bound**, so the deceleration is forced by the
+boundary and is not evidence about the process. Three points against a floor
+cannot separate exponential decay from linear-then-floor, and two points
+separate nothing. `e3_pact_series.py` prints this caveat with the series and
+refuses to fit a form.
+
+**The one shape claim that IS supported comes from a different, better-sampled
+series**: `train_R`, 18-21 points per seed, is smooth, monotone and concave to
+an asymptote (§3e-ii). That is a claim about the reward the search was
+climbing, not about `p_act4`, and the two should not be conflated.
+
+### 3e-v. What this says for the ladder
+
+* **The next rung is a constrained design space**, exactly as §3c row 1
+  prescribed: a **floor on actuator count** (or a control cost that does not
+  reward amputation — e.g. cost per actuator *present* rather than per action
+  emitted, so deleting a motor does not reduce the cost to zero).
+* **It is NOT a termination-rule change.** §3d's rule (iii) recommendation
+  stands on its own merits for the *fall-dodge*, but it would not have
+  prevented this: the blob never collects the sparse term at all.
+* **E3.1's spec should be revisited in light of this.** As recorded in
+  `PLAN_D3_M3.md` it fixes the termination rule and drops `d2rep`. Dropping
+  `d2rep` **raises** the sparse weight and leaves `dense`'s control cost
+  untouched, so on its own it does not address §3e-ii. An actuator floor is
+  the prerequisite for any design-on rung on this creature.
+* **The frozen-body GNN control is now the load-bearing arm**, and it is
+  unaffected by all of this: with `force_identity_design` the body cannot be
+  edited, so the escape route does not exist. It runs next on the freed card.
+
+---
+
 ### 3c-0. THE DECISION POINT MOVED: epoch 100 was 83 epochs too late
 
 *Written when the first live-policy measurement came back, before the other two

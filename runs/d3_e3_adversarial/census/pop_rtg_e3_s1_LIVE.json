@@ -1,0 +1,39 @@
+{
+ "cfg": "rtg_e3_s1",
+ "ckpt": "_live_probe",
+ "ckpt_epoch": 17,
+ "designs": 200,
+ "mean_action_n_motors": 0,
+ "mean_action_n_bodies": 5,
+ "mean_action_gear_mean": 0.0,
+ "mean_action_topo": "9a51d315a8da",
+ "census": {
+  "sampled": 200,
+  "design_failed": 0,
+  "distinct_topologies": 132,
+  "top_topology_share": 0.05,
+  "bodies_mean": 8.81,
+  "bodies_min": 5,
+  "bodies_max": 15,
+  "motors_mean": 0.055,
+  "motors_max": 2,
+  "motors_hist": {
+   "0": 191,
+   "1": 7,
+   "2": 2
+  },
+  "p_act1": 0.045,
+  "p_act4": 0.0,
+  "sampled_genome_std": [
+   0.2766055902998479,
+   0.28067892417930307,
+   0.014872746352374374,
+   0.09974446497250765,
+   0.060117814911988185
+  ],
+  "sampled_genome_rows": 1562
+ },
+ "step_share_act1": 0.5253896729244195,
+ "step_share_act4": 0.0,
+ "ckpt_epoch_provenance": "read from the captured live checkpoint; the probe race-lost the temp copy"
+}

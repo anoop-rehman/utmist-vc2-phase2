@@ -478,6 +478,51 @@ moving part.
 * **Measure**: win rate against the fixed opponent, and whether the evolved body
   differs from E1's (same creature, different pressure — a role effect).
 
+#### E3 RESULT, 2026-09-04 — the design search DELETED THE ACTUATORS. See [`D3_E3_ADVERSARIAL.md`](D3_E3_ADVERSARIAL.md) §3e.
+
+**Stopped at epoch ~19 of 400 by its own pre-registered rule, on 3 of 3 seeds.**
+Population probes of the live policy at epoch 17, 200 sampled designs per seed:
+**`p_act4` = 0.000 on every seed** (fraction of designs with ≥ 4 motors),
+against an untrained baseline of **0.825**. Not one design in 600 has four
+motors; the most actuated has two. 191-197 of every 200 have **zero**.
+
+**The mechanism is the DENSE control cost, not the sparse fall-dodge this rung
+was built to watch.** `dense = forward − 0.5·Σa² + 1.0`, and at
+`control_log_std = 0` a fresh policy pays ~4.0 per step against a survive bonus
+of 1.0 (E2.1 §1 measured this and called it "the dense reward's first gradient
+is *quieten down*"). With the design stages live there are two ways to stop
+paying it — learn small actions, or **delete the actuators**, which makes
+`0.5·Σa²` exactly 0 forever. It took the second, identically on all three
+seeds. `train_R` per step runs **−2.4 → +0.78**, monotone and concave to the
+0-motor body's ceiling of +1.0 minus the opponent's backward shove. **The run
+optimised its objective successfully; the objective was the problem.**
+
+**`d2rep` cannot prevent this and buying it makes it worse.** `d2rep`
+down-weights `parse` — the ±1000. The control cost is in `dense`, which
+`d2rep` weights at ~1.0. E2.1's protection is orthogonal to the failure that
+occurred.
+
+* **This is the third outcome named in §3b *before* the data** — "the search
+  removed the ability to act" — not Reading A (there is no optimisation
+  *toward* falling; the blob's `parse` is 0.0) and not Reading B.
+* **The next rung is a constrained design space**: a floor on actuator count,
+  or a control cost charged per actuator *present* rather than per action
+  emitted, so amputation does not zero it. **Not** a termination-rule change.
+* **E3.1 as recorded below needs revisiting**: dropping `d2rep` raises the
+  sparse weight and leaves `dense` untouched, so on its own it does not address
+  this. An actuator floor is the prerequisite for any design-on rung on this
+  creature.
+* **The frozen-body GNN control (`rtg_e3c_s{1,2}`) is now the load-bearing arm**
+  and is unaffected — with `force_identity_design` the escape route does not
+  exist. Running now on the freed card.
+
+**A decision-rule lesson worth carrying**: the original decision epoch was 100.
+It was moved to "every checkpoint from 20" once the collapse rate was seen, and
+even that was late — the condition was already met at **epoch 17**, surfaced
+only by scraping the trainer's transient video checkpoint
+(`catch_live_ckpt.sh`). The original rule would have run **83 epochs, ~22 h,
+past a settled outcome.**
+
 #### E3 GATED AND LAUNCHED, 2026-09-04. See [`D3_E3_ADVERSARIAL.md`](D3_E3_ADVERSARIAL.md).
 
 Open question §3.3 is answered the way it recommended: **E2's scripted

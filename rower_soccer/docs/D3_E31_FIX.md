@@ -185,6 +185,39 @@ task, **return measures competence and not falling**. That is the cleanest
 confirmation of E2.1's central result this project has produced, on a different
 architecture.
 
+## GPU memory became evidence, and cost a seed
+
+**Three E3.1 arms did not fit on the card, and the reason is the fix working.**
+Sustained at **19,613 MiB of 20,475 (95.8%)**, 862 MiB of headroom — E1 lost the
+live D1 run at 19.95 GB. Per client: 7,228 / 4,602 / 7,032 MiB.
+
+The driver is body size, measured:
+
+| epoch | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| s1 `n_bodies` | 14 | 17 | **22** | 17 | — |
+| s2 `n_bodies` | — | 13 | 16 | 16 | **21** |
+| s3 `n_bodies` | 12 | 12 | 16 | **17** | — |
+
+**E3's three arms fitted comfortably *because their bodies collapsed to 5
+nodes*.** E3.1's don't fit because they are holding 12-22. So the GPU headroom
+E3 enjoyed was itself a symptom of its failure, and the memory pressure here is
+a (crude, indirect) indicator that the design search is doing something. §5a of
+[`D3_E3_ADVERSARIAL.md`](D3_E3_ADVERSARIAL.md) predicted exactly this — *"if the
+design search grows bodies back the epochs slow down again, and so does the
+card"* — for E3, where it never happened.
+
+**`rtg_e31_s1` was stopped by stop-file** (largest client, 7,228 MiB), leaving
+s2 + s3 at ~11.6 GB and **8.8 GB of headroom**. Losing one seed deliberately
+beats losing three to an OOM, and the arms hold CUDA contexts under MPS so a
+signal was never an option. **E3.1's primary arm is n = 2, not n = 3**, and that
+is a resource limit rather than a design choice — recorded as such. The third
+seed's checkpoint is saved and the arm is resumable with `--epoch`.
+
+**Consequence for the second (floor) arm**: it cannot run three seeds either,
+and on current evidence not even alongside these two. It follows when these
+finish, at whatever seed count the card allows.
+
 ## Not tested / not claimed
 
 * **Nothing yet.** This document records a launch and a gate. The falsifiers
@@ -193,7 +226,10 @@ architecture.
 * **§3f is an incentive-landscape calculation over fixed measured quantities**,
   like E2.1's `a_crit`. It measures what the objective rewards, not what PPO
   does in it. That is exactly what E3.1 tests.
-* **n = 3 seeds per arm**, and the second arm has not started (GPU memory).
+* **n = 2 seeds on the primary arm** after `rtg_e31_s1` was stopped for GPU
+  headroom, and the second (floor) arm has not started at all. Both are
+  resource limits, not design choices. E3 had n = 3, so the arms are not
+  seed-matched and any E3-vs-E3.1 contrast inherits that.
 * **The empirical boundary −0.9645 was measured on the FROZEN 13-body ant.**
   An evolved body with a different actuator count has a different threshold;
   §3f's `n` is 8 throughout.

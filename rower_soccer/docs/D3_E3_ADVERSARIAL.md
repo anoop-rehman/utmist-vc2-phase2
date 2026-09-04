@@ -439,7 +439,42 @@ The re-measurement with the CPUs freed is in §5a.
 
 ### 5a. Per-epoch cost, measured
 
-*(Filled in from the unimpeded measurement; see the results section.)*
+Wall clock taken from the **timestamped** `results/<cfg>/log/log_train.txt`
+rather than from a stopwatch, so the "instrument" column is a residual and not
+an estimate. Epochs 0-2 ran with the two CPU-only control arms up; 3 onward
+did not.
+
+| epoch | wall | sample | update | eval | instrument + video | condition |
+|---|---|---|---|---|---|---|
+| 0 | — | 165.8 | 161.8 | 18.3 | — | 5 arms |
+| 1 | 341.8 | 152.4 | 150.3 | 25.0 | 14.1 | 5 arms |
+| 2 | 317.4 | 146.7 | 142.4 | 22.9 | 5.5 | 5 arms |
+| 3 | 258.2 | 98.7 | 132.3 | 24.2 | 2.9 | **3 arms** |
+| 4 | 198.7 | 71.0 | 115.0 | 9.5 | 3.2 | 3 arms |
+| 5 | 181.4 | 61.1 | 109.3 | 7.5 | 3.4 | 3 arms |
+
+*(seed 1; seeds 2 and 3 agree to within a few seconds — seed 2 is faster at
+132.4 s by epoch 5.)*
+
+* **Shedding the two CPU-only arms cut `T_sample` from 166 s to 61 s** and the
+  epoch from 342 s to 181 s. Transform2Act's own ETA went **1 day 14 h ->
+  19 h 28 m**.
+* **The per-epoch instrumentation this rung adds costs 3-5 s**, video epochs
+  included — 2% of the epoch, not the several minutes the first (contended)
+  epochs suggested. The morphology census, the inline evaluation and the
+  best/median/worst clip are not what makes this run long.
+* **Independent cross-check**: 3 epochs in a 600 s wall-clock window over the
+  same period = **200 s/epoch**, against the log's 181-199 s. Projected 400
+  epochs: **~18-21 h per seed, all three concurrent**.
+
+**The ETA is contingent, and on the thing under test.** `T_sample` is falling
+because the *bodies are shrinking* — 13 nodes to 5 — so each GNN forward is
+cheaper. If the design search grows bodies back the epochs slow down again,
+and so does the card: the GPU peak over the same unimpeded window was
+**17,681 MiB of 20,475 (86%)** with 5-6-body designs, against the **19.0 GB
+(93%)** measured with three seeds while designs were still near 13 bodies.
+**2.8 GB of headroom is what this run has**, which is why nothing else goes on
+the card and why a monitor is armed at 19,200 MiB — E1 lost D1 at 19.95 GB.
 
 *(Results section to be filled in when the runs finish.)*
 

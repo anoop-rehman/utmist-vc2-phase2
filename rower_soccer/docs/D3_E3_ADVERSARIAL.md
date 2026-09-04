@@ -1629,6 +1629,66 @@ longer the authoritative history.** `census/sigma_fine.csv` is append-only,
 independent of checkpoints, and 3x finer — it is the durable series and every
 number above comes from it.
 
+### 3g-vi. THE CONTROLS ARE LOCOMOTING — and my prediction used the wrong threshold
+
+**`net_dx` has turned positive on both control arms.** It was −2.47 / −2.30 m at
+epoch 59 (bulldozed backwards, as every arm on this project has been) and is
+**+1.27 / +0.94 m** at epoch 99, with forward progress up from 0.28 / 0.27 m to
+**1.62 / 1.40 m**. Goal rate is still 0.00.
+
+| epoch | 19 | 39 | 59 | 79 | 84 | 99 |
+|---|---|---|---|---|---|---|
+| s1 `net_dx` | −2.71 | −3.48 | −2.47 | −0.26 | **+0.14** | **+1.27** |
+| s1 forward | 0.19 | 0.24 | 0.28 | 0.75 | 0.91 | **1.62** |
+| s2 `net_dx` | −1.80 | −2.91 | −2.30 | **+0.29** | — | **+0.94** |
+| s2 forward | 0.12 | 0.16 | 0.27 | 1.01 | — | **1.40** |
+
+**`net_dx` first turned positive at epoch 84 (s1) and 79 (s2)** — before the
+−0.9645 crossing, which is still projected at ~107 and has not happened.
+
+#### The mis-specification, and it is mine
+
+§3g-iii predicted "cross −0.9645, then locomote 18-27 epochs later". **−0.9645
+is the wrong threshold for this arm, and I should have seen it when I wrote the
+prediction.** §3f-ii derived it as the point where a standing actuated ant's
+episode return beats **a 0-motor blob's** — a comparison between *keeping and
+deleting motors*. **The frozen-body control cannot delete its motors.** That
+boundary has no operative meaning for an arm whose body is fixed by
+construction; it was carried over from the design-on case because both arms
+share a σ trajectory, which is not a good enough reason.
+
+**The operative threshold for the control is affordability** — `cost/step`
+below the 1.0 survive bonus, `log_std` = −0.6931 — and on that threshold the
+prediction was accurate:
+
+| | affordable | `net_dx` > 0 | lag | vs the −0.9645 crossing |
+|---|---|---|---|---|
+| MLP s1 | 26 | 45 | **+19** | +4 (after) |
+| MLP s2 | 26 | 54 | **+28** | +13 (after) |
+| **control s1** | **71** (predicted ~70) | **84** | **+13** | −23 (**before**) |
+| **control s2** | **71** (predicted ~70) | **79** | **+8** | −28 (**before**) |
+
+> **Read against the right threshold the σ story holds and tightens.**
+> Affordability was predicted at epoch ~70 and landed at **71 on both arms**;
+> locomotion followed **8-13 epochs later**, *sooner* than the MLP's 19-28.
+> Read against the wrong threshold it looks like locomotion arrived ~25 epochs
+> "early", which would have been mis-scored as the §3g-iii falsifier
+> *"σ decay is not the gate"*. **It is the gate — I aimed it at the wrong line.**
+
+**What this does to the falsifier.** §3g-iii's second bullet — takeoff much
+earlier means σ is not the gate and the −1.5 fix works by buying survival time
+rather than making actuators cheap — **does not fire.** σ had to reach
+affordability first, it did so exactly on schedule, and locomotion followed
+within 13 epochs. The mechanism behind the −1.5 recommendation (§3f-iv) is
+unaffected: it is the *affordability* threshold that fix moves an arm past
+immediately, and `log_std = −1.5` clears it with margin.
+
+**Still ahead**: the −0.9645 crossing at ~107 remains a real prediction for the
+*design-on* rung E3.1, where the keep-vs-delete choice exists and the boundary
+means something. For these arms the next meaningful number is the goal rate —
+the MLP reached goal > 0.5 at 49 / 58 epochs after affordability, which would
+put the controls at epoch **~120-129**.
+
 *This is a prediction about **when**, from two measured rates and one measured
 lag. It assumes the GNN's decay stays linear — it need not; the MLP's did not
 (−0.0231/epoch over 0-40, −0.0043/epoch over 100-399). If the GNN's decay

@@ -1177,12 +1177,71 @@ actuators pays, and every number measured after that point would be measured on
 a run that had already lost. It is checkable per epoch from
 `census/<cfg>_morph.csv` with no wandb.
 
+### 3f-iv-c. −1.0 against −1.5, decided on the measurement — and −1.0 loses
+
+The choice was supposed to trade **margin below the boundary** against
+**exploration**. Both sides were measured
+(`e3_sigma_exploration.py`, `posthoc/sigma_exploration_fine.json`; untrained
+policy, frozen 13-body ant, 10 episodes per σ):
+
+| `log_std` | σ | cost/step | ep len | fall | **path m** | \|net dx\| | **dense** | §3f-ii predicts |
+|---|---|---|---|---|---|---|---|---|
+| −0.8837 | 0.4133 | 0.679 | 491.0 | 0.00 | 4.258 | 2.855 | **−32.8** | +21.2 |
+| −0.90 | 0.4066 | 0.656 | 470.6 | 0.20 | 3.907 | 2.895 | **−31.0** | +31.2 |
+| −0.95 | 0.3867 | 0.599 | 461.0 | 0.10 | 3.849 | 2.676 | **+8.0** | +60.1 |
+| **−1.00** | 0.3679 | 0.538 | 480.5 | 0.10 | 4.276 | 2.528 | **+53.6** | +86.2 |
+| −1.05 | 0.3499 | 0.487 | 490.7 | 0.10 | 4.248 | 2.852 | +61.6 | +109.8 |
+| −1.10 | 0.3329 | 0.441 | 485.6 | 0.10 | 4.355 | 2.934 | +76.0 | +131.2 |
+| −1.25 | 0.2865 | 0.327 | 491.0 | 0.00 | 4.038 | 2.737 | +148.2 | +183.9 |
+| **−1.50** | 0.2231 | 0.198 | 473.2 | 0.20 | 3.596 | 2.804 | **+192.7** | +243.1 |
+| −1.75 | 0.1738 | 0.120 | 489.8 | 0.10 | 4.066 | 2.569 | +259.7 | +279.0 |
+
+**The analytic threshold is too permissive, by exactly the amount §3f-ii said
+it would be.** Measured `dense` crosses the blob's +21.2 between −0.95 (+8.0)
+and −1.00 (+53.6); interpolating, the **empirical boundary is
+`log_std ≈ −0.9645`**, against the analytic −0.8837 — the derivation held
+`L_ant` at the zero-torque episode length and assumed no falls, and it was
+stated as an upper bound for that reason. At the analytic value itself the
+measured `dense` is **−32.8**, i.e. already losing to the blob.
+
+| candidate | margin below the empirical boundary | dense | vs blob |
+|---|---|---|---|
+| **−1.00** | **−0.036** | +53.6 | 2.5x |
+| −1.25 | −0.286 | +148.2 | 7.0x |
+| **−1.50** | **−0.536** | +192.7 | **9.1x** |
+| −1.75 | −0.786 | +259.7 | 12.2x |
+
+**So `−1.0` really is a knife edge — 0.036 in `log_std` — and my earlier "0.116
+of margin" was measured against the wrong (analytic) boundary.**
+
+**And the exploration cost that was supposed to justify staying high does not
+exist in this range.** Path length travelled by noise alone is **flat**:
+3.60–4.36 m across the whole sweep with no monotone trend (the *minimum* is at
+−1.50 and the *maximum* at −1.10, and −1.75 is higher than −0.90). `|net dx|`
+is likewise flat at 2.53–2.93 m, and fall rate is 0.00–0.20 with no trend. The
+body moves the same amount whether σ is 0.41 or 0.17.
+
+*Why: displacement here is dominated by the opponent bulldozing a
+non-locomoting ant backwards (`|net dx|` ≈ 2.8 m, and it is **backwards**),
+not by action noise. **This measures whether the body moves at all — the
+precondition for the `forward` term to have variance — and not directed
+exploration toward the goal**, which nothing at this stage produces. If a
+later rung finds the initial σ does limit directed exploration, this table does
+not speak to it.*
+
+> **Revised: `control_log_std = −1.5`, not −1.0.** It buys 15x the margin
+> (0.536 against 0.036) for no measurable exploration cost, and σ = 0.223 is
+> still **2.6x** the value E2.1's solving arms converged to (0.086).
+> −1.0 cannot be justified against it on any number I can measure.
+
 ### 3f-iv. Recommendation
 
-> **Primary: `control_log_std` from 0 to −1** (σ = 0.368, cost 0.541/step).
-> Least invasive of the three — it touches neither the reward, nor the search
-> space, nor CompetEvo's task definition, only the policy's initialisation. It
-> is not an exotic value: E2.1's `d2rep` arms *converged* to σ ≈ 0.086, and
+> **Primary: `control_log_std` from 0 to −1.5** (σ = 0.223, cost 0.198/step).
+> *(This read −1.0 when first written; §3f-iv-c measures the empirical boundary
+> at −0.9645 and −1.0 sits 0.036 below it, so −1.0 is revised out.)* Least
+> invasive of the three — it touches neither the reward, nor the search space,
+> nor CompetEvo's task definition, only the policy's initialisation. It is not
+> an exotic value: E2.1's `d2rep` arms *converged* to σ ≈ 0.086, and
 > Transform2Act's own `attr_log_std` default is −2.3.
 >
 > **Secondary, and worth running as a second arm: (1)+(2) together.** The floor

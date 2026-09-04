@@ -531,8 +531,30 @@ occurred.
   > DELETE +21.2 > fall +9.6, with only 0.116 of margin (at −0.75 it flips
   back). **(3) cutting `CTRL_COST_COEF` works arithmetically** but changes
   CompetEvo's reward and breaks comparability with D2/E2/E2.1.
-  **Recommendation: (2) as primary, (1)+(2) as a second arm, not (3).**
-  **Not** a termination-rule change.
+  **The analytic threshold is an upper bound and the empirical one is
+  stricter.** Measured on the simulator (10 episodes per sigma, untrained
+  policy, frozen ant), `dense` crosses the blob's +21.2 between `log_std`
+  −0.95 (+8.0) and −1.00 (+53.6): **the empirical boundary is ≈ −0.9645**, so
+  **−1.0 sits only 0.036 below it** — a knife edge. And the exploration cost
+  that was meant to justify staying high **does not exist**: path travelled by
+  noise alone is flat at 3.60-4.36 m across σ 0.41→0.17 with no monotone trend
+  (minimum at −1.50, maximum at −1.10), because displacement is dominated by
+  the opponent's backward shove, not by action noise.
+
+  **Recommendation: `control_log_std = −1.5` as primary** (margin 0.536,
+  `dense` +192.7 = 9.1x the blob, σ = 0.223 still 2.6x E2.1's converged 0.086),
+  **(1)+(2) as a second arm, not (3).** **Not** a termination-rule change.
+
+  **`log_std` is a LEARNED parameter, so this is a basin boundary, not a
+  precision requirement** — but that makes "σ actually falls" load-bearing.
+  Measured from E3's own checkpoints, σ fell at only **−0.005/epoch**, so
+  reaching the boundary would have taken **125-164 epochs while the design head
+  deleted the actuators in 17**: route 2 is 8-10x faster than route 1, and the
+  race is not close. **No entropy bonus exists** in this stack (checked: no
+  term in the loss, no coefficient in any cfg), so nothing opposes σ falling.
+  `control_log_std` is now logged per epoch to disk from epoch 0, and the
+  falsifier is pre-registered: **if it exceeds −0.8837 in the first 20 epochs,
+  candidate (2) has failed and the arm is stopped.**
 * **E3.1 as recorded below needs revisiting**: dropping `d2rep` raises the
   sparse weight and leaves `dense` untouched, so on its own it does not address
   this. An actuator floor is the prerequisite for any design-on rung on this

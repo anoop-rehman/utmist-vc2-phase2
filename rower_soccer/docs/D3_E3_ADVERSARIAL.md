@@ -370,6 +370,117 @@ The curriculum was verified live against its own schedule at the same time:
 `e3/alpha` reads 1.000000, 0.999616, 0.999232, 0.998848, 0.998464 at epochs
 0-4 against an expected 1.0, 0.999616, 0.999232, 0.998848, 0.998464.
 
+### 3b-i. The +1.0-per-step argument, MEASURED — and it reverses under the flat reward
+
+The claim in the transient note below was that under `d2rep`'s alpha ~ 0.998
+the objective pays +1.0 per step survived, so the gradient available to the
+design head points away from the 0-motor blob. That was an argument. Measured
+(`e3_blob_probe.py`, seed 1's own `best.p`, alpha 0.997696 = the live value at
+epoch 6, 10 mean-action episodes, identical seeds):
+
+| arm | body | steps | env R | = dense | + sparse | **objective at alpha 0.9977** | endings |
+|---|---|---|---|---|---|---|---|
+| **blob** — the arm's own mean-action design, its own control head | 5 bodies, **0 motors** | 20.9 | **+21.2** | +21.2 | 0.0 | **21.2** | fell 10/10 |
+| **ant_pol** — the SAME weights on the frozen 13-body ant | 13 bodies, 8 motors | 491.0 | −677.8 | +322.2 | −1000.0 | **319.2** | lost 10/10 |
+| **ant_idle** — the frozen ant at zero torque | 13 bodies, 8 motors | 458.5 | −465.6 | +334.4 | −800.0 | **331.8** | fell 2, lost 8 |
+
+**The prediction holds, and by more than the argument claimed: keeping the body
+is worth +310.6 of objective per episode, a factor of 15.7.**
+
+All three seeds, same probe (`posthoc/blob_probe_s{1,2,3}_e0006.json`):
+
+| seed | blob | blob obj | `ant_pol` obj | `ant_idle` obj | gain from keeping the body | **under the FLAT reward** |
+|---|---|---|---|---|---|---|
+| 1 | 5 bodies, 0 motors | 21.2 | 319.2 | 331.8 | **+310.6 (15.7x)** | blob beats `ant_idle` by **+486.8** |
+| 2 | 6 bodies, 0 motors | 21.2 | 331.5 | 331.8 | **+310.6 (15.7x)** | **+486.8** |
+| 3 | 6 bodies, 0 motors | 21.2 | 271.8 | 331.8 | **+310.6 (15.7x)** | **+486.8** |
+
+*The blob column being identical to the tenth across three independently
+seeded runs is not a copy-paste error, and the arithmetic says why: with no
+actuators the control cost is exactly 0 and the policy's output is discarded,
+so `dense` collapses to `sum(forward) + 1.0 x steps`, and `sum(forward)`
+telescopes to `net_dx / dt` = 0.004 / 0.015 = **+0.27**. The whole +21.2 is
+20.9 survive-bonus steps plus 0.27 m/s of drift. `ant_pol` does differ by seed
+(319.2 / 331.5 / 271.8), which is the control head, as it should.*
+
+Two things fall out of this that the argument did not contain:
+
+1. **`ant_pol` (319.2) is statistically indistinguishable from `ant_idle`
+   (331.8).** The same weights that produce the blob are, on an unevolved body,
+   no better than zero torque — which is expected at epoch 6 and is exactly the
+   separation the arm was built for: **the blob's deficit is the BODY, not the
+   control head.** Same policy, one body evolved and one not, 21.2 against
+   319.2.
+2. **Under the FLAT reward the ranking REVERSES.** Read the `env R` column: the
+   blob scores **+21.2** and the standing ant **−677.8**, because the ant
+   survives to the opponent's certain goal at step 491 and pays the −1000 while
+   the blob topples at step 21 and dodges it. **On E2's reward the 0-motor blob
+   is the optimum, by +699 per episode.** Only `d2rep`'s alpha ≈ 0.998
+   suppresses the sparse term far enough to invert it.
+
+That is `D3_E2_RTG.md` §6's fall-dodge appearing through morphology in its
+purest available form, and it is a direct, quantitative vindication of taking
+E2.1's reward regime into this rung rather than E2's: **had E3 been run on the
+flat reward, the design search would have been rewarded for building a body
+that cannot act.**
+
+### 3b-ii. Nothing in the design search penalises an unactuated body
+
+Stated plainly because it is load-bearing for §3c's first row. `design_fail_rate
+0.00` does **not** mean the search approves of these bodies — it means it has
+no opinion about them. `AntEnv.allow_add_body` and `allow_remove_body`
+(`design_opt/envs/ant.py`) constrain **depth and child count only**; neither
+reads `body.joints` or the actuator list. `apply_skel_action` and
+`set_design_params` return `False` only when `reload_sim_model` raises, and
+`transit_execution` only when `reset_state` raises. A 0-motor body does
+neither: it compiles, it resets, and it runs — measured, 10 of 10 episodes
+above with zero design failures.
+
+So **the only thing in the whole loop that penalises an unactuated body is the
+return**, and §3b-i is the measurement of how hard it penalises it (15.7x under
+`d2rep`; *negatively* under the flat reward). There is no structural floor on
+actuator count, which is why §3c's first row prescribes adding one rather than
+changing the termination rule.
+
+### 3c. THE DECISION POINT: epoch 100, and what each state there means
+
+*A pre-registration that says what an outcome means but not when it is judged
+is a run you watch indefinitely and then rationalise. The epoch and the rule
+are fixed here.*
+
+**Epoch 100 (5.0M steps, a quarter of the budget), chosen from our own data:**
+
+* **E1 produced a decisive morphological verdict on this same creature in this
+  same machinery at exactly 100 epochs** — "the evolved creature stops being a
+  quadruped", torso height halved 0.561 -> 0.270 on both seeds, mass nearly
+  doubled, limbs airborne 71-76%. Whatever E3's design search is going to say
+  about this ant, E1 says 100 epochs is enough for it to say it.
+* **Control has had its measured time by then.** E2.1's `d2rep` reached goal
+  0.95 at epoch 79 on the frozen body. A design-on arm at epoch 100 has had
+  more than the control side needed.
+* **The design side has had a comparable share.** At epoch 100 E0's ant had
+  concentrated to 34/20/27 distinct topologies of 200 (20-41% most-common) and
+  ours to 63/101 (5.5-7.0%) — not converged, but far from epoch 20's 187-190.
+* **It is checkpointed.** `additional_saves: [20, 100]` puts checkpoints at
+  20/40/60/80/100, so the decision has the run-up to it, not only the endpoint.
+
+The decision is **stop early or run on**, and it is made on the mean-action
+design's `morph/n_motors` — read from
+`runs/d3_e3_adversarial/census/<cfg>_morph.csv`, which is in the repo and
+needs no wandb.
+
+| state at epoch 100 | rule | conclusion |
+|---|---|---|
+| **`n_motors` = 0 on ≥ 2 of 3 seeds** | **STOP the E3 arms at 100** | That is the answer for this configuration: *the search removed the ability to act*. Write E3 up as a null with that mechanism. The next rung is a **constrained design space — a floor on actuator count** — **not** a termination-rule change, because an unactuated body is not an exploitation of the fall rule (§3b). Run the frozen-body controls to confirm the controller is sound. |
+| **`n_motors` ≥ 4 on ≥ 2 of 3 seeds** | **run on to 400** | The design search kept a body that can act; readings A and B (§3b) take over at 400. If goal rate is still 0.00 at 400 with motors intact, that is the third outcome *"the design search made the task harder"*. |
+| **1 ≤ `n_motors` < 4 on ≥ 2 seeds, AND strictly increasing over the epoch-60 -> epoch-100 checkpoints** | **run on to 200 and re-decide ONCE** | Recovering but slowly. At 200 the same table is applied and there is **no second extension**: `n_motors` < 4 at 200 means the first row's conclusion. |
+| **1 ≤ `n_motors` < 4 and NOT increasing** | **STOP at 100** | Same conclusion as the first row. |
+| **any seed shows mean-action goal rate > 0** | **run on to 400 regardless of motor count** | Something is working; do not stop a run that is scoring. |
+
+Stopping is by **stop-file** (`/tmp/stop_e3_s{1,2,3}`), never by signal.
+
+---
+
 ### What the frozen-body GNN control decides
 
 The control arms (`rtg_e3c_s{1,2}`, run after E3 on the freed card) are what

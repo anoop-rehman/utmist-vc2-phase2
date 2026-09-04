@@ -1,0 +1,55 @@
+{
+ "cfg": "rtg_e3_s2",
+ "ckpt": "best",
+ "alpha": 0.9976959999941017,
+ "epoch_for_alpha": 6,
+ "episodes": 10,
+ "arms": {
+  "blob": {
+   "arm": "blob",
+   "n_eps": 10,
+   "n_bodies": 6.0,
+   "n_motors": 0.0,
+   "steps": 20.9,
+   "R": 21.200080224223818,
+   "dense": 21.200080224223818,
+   "parse": 0.0,
+   "objective": 21.151235239262167,
+   "fwd": 0.004501203363357342,
+   "ends": {
+    "fell": 10
+   }
+  },
+  "ant_pol": {
+   "arm": "ant_pol",
+   "n_eps": 10,
+   "n_bodies": 13.0,
+   "n_motors": 8.0,
+   "steps": 491.0,
+   "R": -665.4191380745858,
+   "dense": 334.58086192541407,
+   "parse": -1000.0,
+   "objective": 331.5059876116662,
+   "fwd": -2.3266687352644126,
+   "ends": {
+    "lost": 10
+   }
+  },
+  "ant_idle": {
+   "arm": "ant_idle",
+   "n_eps": 10,
+   "n_bodies": 13.0,
+   "n_motors": 8.0,
+   "steps": 458.5,
+   "R": -465.6104699965464,
+   "dense": 334.3895300034536,
+   "parse": -800.0,
+   "objective": 331.7758965196347,
+   "fwd": -1.8616570499481966,
+   "ends": {
+    "lost": 8,
+    "fell": 2
+   }
+  }
+ }
+}

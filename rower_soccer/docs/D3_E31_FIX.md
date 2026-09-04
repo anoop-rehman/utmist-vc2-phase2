@@ -92,6 +92,42 @@ off, counting actuators on the **current** robot each call because
 `apply_skel_action` removes bodies one at a time and the floor must hold at
 every step of that loop.
 
+## Instrumentation — and the trap that nearly cost the falsifier
+
+**E3's four watchers all carried hardcoded cfg lists and kept polling
+faithfully after every one of those runs ended.** `census_sidecar.sh`,
+`population_watcher.sh`, `logstd_watcher.sh` and `sigma_sampler.sh` were all
+still running, all pointed at `rtg_e3_s*` / `rtg_e3c_s*`, all dead — so the
+instrumentation *looked* healthy while producing nothing for E3.1, and
+`runs/d3_e31_fix/census/` was empty. All four are now stopped.
+
+**What was actually at risk, stated precisely.** `p_act4` and
+`control_log_std` were never in danger: both are written **per epoch by the
+trainer itself** into `results/<cfg>/e3_epochs.jsonl`, because
+`e3_morph.census` gained its motor columns *before* these arms launched.
+Verified at epoch 0 — `census['p_act4']` = 0.80 / 0.80 / 0.95 on the three
+seeds. What was missing was every **derived** artefact: no CSV, no falsifier
+check, nothing watching. The raw data was safe; the thing that would have told
+us it fired was not.
+
+**Both instrumentation failures in this experiment happened at a TRANSITION** —
+new arms, new directory — which is exactly when a watcher keeps pointing at the
+old target and nobody notices, because the files it writes keep looking fresh.
+
+Fixed three ways:
+
+1. `runs/d3_e31_fix/watch.sh` distils each arm's JSONL into
+   `census/<cfg>_morph.csv` (24 columns including `p_act4` and
+   `control_log_std`) and evaluates **both falsifiers** every 120 s, taking its
+   cfg list from `$CFGS` so repointing is a variable rather than an edit.
+2. `runs/d3_e31_fix/assert_instruments.sh` fails **loudly** if any quantity a
+   falsifier depends on is not producing rows for a given cfg.
+3. `launch.sh` now runs that assertion against the cfg it just launched. **A
+   falsifier that depends on a collector nobody checked is not pre-registered
+   in any useful sense.**
+
+Assertion at launch: **3 of 3 arms confirmed collecting.**
+
 ## Pre-registered falsifiers
 
 > **Either fires and the fix has failed:**
@@ -119,6 +155,35 @@ nothing here is a result yet.
 
 **Cost**: T_sample 79-108 s, T_update 180-222 s → ~310 s/epoch, ETA ~1 day 6-10 h
 for three concurrent arms.
+
+**Epoch 1 — `p_act4` is rising, not falling:**
+
+| | epoch 0 | **epoch 1** |
+|---|---|---|
+| s1 `p_act4` / motors | 0.80 / 8 | **0.90 / 8** |
+| s2 `p_act4` / motors | 0.80 / 6 | **0.95 / 8** |
+| s3 `p_act4` / motors | 0.95 / 6 | — |
+
+E3's ran 0.825 → 0.300 (epoch 3) → 0.000 (epoch 17). Two epochs is not a trend
+and this is recorded as a transient, not a result.
+
+## The frozen-body control's final numbers — the reference E3.1 is read against
+
+Measured on the shared instrument from the arms' own final checkpoints
+(`e3_posthoc.py`, 20 episodes, both protocols), not from training-log evals:
+
+| arm | protocol | R | goal | fell | forward | of 5.0 m | `r(fall,R)` | `r(fwd,R)` |
+|---|---|---|---|---|---|---|---|---|
+| control s1 (ep 312) | mean-action | **+1452.1** | **0.95** | 0.05 | 4.82 m | 96.3% | **−0.996** | **+0.994** |
+| control s1 | stochastic | +1449.4 | 0.95 | 0.05 | **5.00 m** | 100.0% | −0.975 | +0.745 |
+
+Body frozen: **134 mjModel arrays identical**, 1 distinct topology of 50 sampled
+designs, 13 bodies / 8 motors throughout. **And the correlation pair has
+inverted to E2.1's `d2rep` structure** — −0.996 / +0.994 against E2.1's
+−0.94 / +0.95 — so on a frozen body under `d2rep`, once the agent can do the
+task, **return measures competence and not falling**. That is the cleanest
+confirmation of E2.1's central result this project has produced, on a different
+architecture.
 
 ## Not tested / not claimed
 

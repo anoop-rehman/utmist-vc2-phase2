@@ -43,3 +43,10 @@ case "$1" in
   *) echo "unknown arm $1"; exit 1 ;;
 esac
 echo "launched $1 pid $!"
+# Assert the falsifiers' collectors actually produce rows for THIS cfg. Twice in
+# this experiment an instrument looked present and was collecting nothing for
+# the new arms, both times at a transition. Runs in the background so the launch
+# is not blocked, and shouts into the log if a collector is missing.
+CFG=$(case "$1" in p_*) echo "rtg_e31_${1#p_}";; f_*) echo "rtg_e31f_${1#f_}";; esac)
+setsid nohup /workspace/utmist-vc2-phase2/runs/d3_e31_fix/assert_instruments.sh \
+  "$CFG" 1200 >> "$L/instrument_assertion.log" 2>&1 &

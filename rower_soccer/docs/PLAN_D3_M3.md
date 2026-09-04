@@ -704,9 +704,29 @@ reproducing E3's failure on demand.
 **Falsifiers, pre-registered**: `control_log_std` above −0.9645 in the first 20
 epochs, or `p_act4` collapsing to 0 by epoch 20.
 
-**Epoch 0**: readouts are **14b/8m, 12b/6m, 12b/6m** where E3's was 6b/**0m**;
-`p_act4` **0.800 / 0.800 / 0.950** against E3's collapse to 0.000. Neither
-falsifier fired. Epoch 0 of 400; the test is epoch 20.
+**EPOCH-20 VERDICT: both falsifiers NOT FIRED on both arms.** `log_std` never
+approached −0.9645 (worst −1.503, and it fell monotonically to −1.583, moving
+away). **`p_act4` has been 1.000 continuously since epoch 3** — every one of 20
+sampled designs carries ≥ 4 motors, at every epoch, for twenty consecutive
+epochs — against E3's 0.300 at epoch 3 and **0.000** at 17. Readout motors 7-11
+against E3's **0**. **The fix works**: the failure that stopped E3 does not
+occur when the control cost is affordable from step 0.
+
+**Growth self-limited, so the size-cost remedy would have been a mistake.**
+Both arms grew, peaked and receded with no size term in the reward: readout
+26@ep9→21 and 21@ep7→15, mass 1.363→1.196 and 1.186→**0.948** (original ant
+0.879). Neither approached the 29-body ceiling. Forward progress bottomed on
+both arms at exactly the epoch mass peaked and recovered as mass fell —
+`r(mass, max_fwd)` **−0.855** and **−0.880** within arm. **Physics already
+charges for mass and the search found the charge**; a per-body cost would
+double-charge it. n = 4-5 per arm, time-indexed, so the correlation is not
+causal — but the peak-and-recede behaviour does not depend on it.
+
+**Not yet knowable**: goal rate is 0.00 on both, as expected — the frozen-body
+controls did not locomote until epochs 79-84 nor reach goal 0.5 until 144-149.
+At matched epoch 19 E3.1's `max_fwd` is 0.279 / 0.137 m against the controls'
+0.19 / 0.12, so it is tracking the reference arm. **n = 2** (one seed suspended
+at epoch 5 and resumable); the floor arm has not started.
 
 *(The earlier E3.1 proposal below — repairing the TERMINATION rule — is
 superseded as the next rung but not withdrawn: §3d's grid still shows charging

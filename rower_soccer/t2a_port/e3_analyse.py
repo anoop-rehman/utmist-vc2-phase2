@@ -77,12 +77,19 @@ def series(cfg):
     f = f"/workspace/Transform2Act/results/{cfg}/e3_epochs.jsonl"
     if not os.path.exists(f):
         return None
-    rows = []
+    rows, n_lines, n_eval, n_ma = [], 0, 0, 0
     for line in open(f):
         try:
             d = json.loads(line)
         except Exception:
             continue
+        n_lines += 1
+        n_eval += int("eval" in d)
+        # An EMPTY mean_action_design means the design stages ended that
+        # episode before reaching execution -- a body that failed to compile or
+        # to reset. Counted, because an empty series must be visibly explained
+        # rather than look like missing instrumentation.
+        n_ma += int(bool(d.get("mean_action_design")))
         if "eval" not in d or not d.get("mean_action_design"):
             continue
         m = d["mean_action_design"]
@@ -96,6 +103,11 @@ def series(cfg):
             limb_sum=m["limb_length"]["sum"], gear=m["gear"]["mean"],
             distinct=d["census"]["distinct_topologies"],
             top_share=d["census"]["top_topology_share"]))
+    if not rows and n_lines:
+        print(f"  [{cfg}] {n_lines} epochs logged, {n_eval} carry an "
+              f"evaluation, {n_ma} carry a mean-action design -> 0 joinable "
+              f"rows. If n_ma is 0 the mean-action design never reached the "
+              f"execution stage, which is a RESULT, not missing data.")
     return rows
 
 

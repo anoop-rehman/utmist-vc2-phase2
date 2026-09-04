@@ -279,11 +279,18 @@ The two statistics that decide it are E2's own pair, recomputed on E3's arms by
 
 **Trigger, both parts required:**
 1. `r(fall rate, return)` drifts back toward E2's **+0.989** — concretely, the
-   pooled per-arm value ends **positive** and the across-arm value ends above
-   **+0.5**, while `r(forward progress, return)` stays near zero; **and**
-2. the per-epoch morphology series **correlates with fall rate** — body count,
-   limb length, mass or motor count moves monotonically with the fall rate
-   over the run, so the fall rate is being bought with the body.
+   pooled per-arm value ends **positive on at least 2 of the 3 seeds** and the
+   across-arm value (the 6-row table: 3 E3 arms, 2 control arms, the idle
+   floor; E2's was 7 rows) ends above **+0.5**, while
+   `r(forward progress, return)` stays below **+0.3**; **and**
+2. the per-epoch morphology series **correlates with fall rate**. Stated as a
+   number so it cannot be argued afterwards: `e3_analyse.morph_vs_fall`
+   reports `r(column, fall rate)` across epochs for body count, motor count,
+   mass, mean limb length, limb-length sum, gear, distinct topologies and
+   most-common share. The trigger is **|r| > 0.5 on at least one of body
+   count, motor count, mass or mean limb length, with the same sign on at
+   least 2 of the 3 seeds**. That is the claim that the fall rate is being
+   bought with the body rather than merely coinciding with it.
 
 **Conclusion if triggered:** the design loop found the degenerate optimum
 through morphology. That is a real and publishable result — it is the first
@@ -295,8 +302,9 @@ well, or drop the sparse term when an episode ends in a fall, and re-run.
 ### Reading B — "the design loop works"
 
 **Trigger, both parts required:**
-1. the correlations hold near E2.1's structure — pooled `r(fall rate, return)`
-   **negative** and `r(forward progress, return)` **above +0.5**; **and**
+1. the correlations hold near E2.1's structure — pooled per-arm
+   `r(fall rate, return)` **negative** and `r(forward progress, return)`
+   **above +0.5**, on at least 2 of the 3 seeds; **and**
 2. the evolved bodies trend toward locomotion — the mean-action fall rate
    falls toward 0 and forward progress rises toward the 5.00 m the task needs,
    i.e. a non-zero goal rate on the mean-action protocol.

@@ -697,6 +697,22 @@ Three further things the grid says:
    the termination alone never did. E2's entire null, and E2.1's need for
    `d2rep` at all, trace to those two jobs having been fused.
 
+#### This does not contradict E3's own choice of `d2rep` — the grid confirms it
+
+Read together with §3b-i: **under the rule E3 actually runs, `d2rep` was the
+right call and the flat reward would have been a disaster.** The `current`+flat
+row's upright gradient is **−486.8** — the design search would have been
+actively *rewarded* for building a body that cannot act — while `current`+d2rep
+turns it to **+310.6**. That is exactly the choice §3b-i vindicated, and this
+grid re-derives it from a different direction.
+
+What the grid adds is that `d2rep` is a **compensation for a rule defect**, not
+a fix for it, and that compensating has a price: it scales the sparse term to
+0.2%, which costs 2.5x of the scoring gradient (+531 against +1331) and would
+cost 10.6x if the rule were repaired. **Fix the rule and the compensation
+becomes the thing holding you back** — hence "whichever one is used, drop the
+other", and hence rule (iii) + flat for E3.1 rather than rule (iii) + d2rep.
+
 **What this does NOT say.** It is a scoring of fixed policies under six reward
 definitions, not six training runs — it measures the *incentive landscape*,
 not what PPO does in it. No arm has been trained under rule (ii) or (iii), and

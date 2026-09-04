@@ -1689,6 +1689,74 @@ means something. For these arms the next meaningful number is the goal rate —
 the MLP reached goal > 0.5 at 49 / 58 epochs after affordability, which would
 put the controls at epoch **~120-129**.
 
+### 3g-vii. The correlation window: `r(fall,R)` is +0.98, and it is NOT the dodge
+
+Fall rate on the controls went 0.00 → 0.10-0.40 once they started moving, so
+`r(fall, R)` has variance for the first time and the pre-registered correlation
+becomes readable. It reads **+0.957 to +0.997 on every evaluation of both
+arms** — E2's +0.989 almost exactly, and nothing like E2.1's −0.94. Taken at
+face value that is Reading A: return tracking falling.
+
+**It should not be taken at face value, for a reason that is arithmetic.**
+Goal rate is still 0.00, so every episode ends one of two ways: fall early and
+never reach step 491, or survive to 491 and pay the −1000. Return is therefore
+**bimodal by ending**, and `r(fall, R) ≈ +1` follows *by construction* whenever
+falls are rare and the sparse term dominates — which is precisely the +750 to
++900 premium `D3_E2_RTG.md` §6 measured. **The statistic is reporting the
+reward's shape, not the policy's behaviour.** It was degenerate before because
+fall rate had no variance; it is degenerate now because return has only two
+values. The window in which it is informative is narrower than it looked.
+
+**So the question is settled by fall TIMING, not by the correlation.** The
+scripted opponent's position is a function of the step index alone, so for every
+fallen episode the gap between the two bodies at the moment of the fall is known
+exactly:
+
+| | falls | **at contact** (\|gap\| < 0.75 m) | opponent already past | opponent still ahead | within 31 steps of the opponent's goal |
+|---|---|---|---|---|---|
+| s1, all epochs | 20 | 35% | 35% | 30% | 35% |
+| s2, all epochs | 23 | 43% | 52% | 4% | 48% |
+| **s1, since locomotion (ep ≥ 79)** | 5 | **0%** | — | — | **0%** |
+| **s2, since locomotion (ep ≥ 79)** | 13 | **8%** | — | — | **8%** |
+
+> **Since the arms started moving, essentially no fall happens at the opponent
+> or near its goal at step 491.** They happen mid-run with the opponent
+> nowhere near. **That is a locomotion failure, not a dodge.** The earlier
+> falls *were* late and adjacent to the opponent — but that is a stationary ant
+> being knocked over at the end of the episode, which is not a learned dodge
+> either.
+
+**Fall rate at matched forward progress is in family with the MLP's**, which is
+the comparison that would show selection toward falling:
+
+| | at `net_dx` ≈ 0.7-1.7 m |
+|---|---|
+| MLP `d2rep` s1 / s2 (train, ~200 eps) | 0.11-0.16 |
+| control s1 (eval, 10 eps) | 0.10-0.20 |
+| control s2 (eval, 10 eps) | 0.10-0.40 |
+
+s2 runs higher, but 10 mean-action episodes put a 0.40 reading's 95% interval at
+roughly 0.12-0.74, and the protocols differ (train/stochastic against
+eval/mean-action). **No selection toward falling is demonstrable from this.**
+
+**The render agrees** (`rtg_e3c_s1_e0102`, best/median/worst): the best episode
+walks 1.00 m and falls at step 227 having already passed the opponent; the
+median runs the **full 491 steps upright** for 1.06 m and loses on the clock;
+the worst is shoved backwards to −2.95 m. A slow walker that sometimes trips —
+not an agent that has found a way to end episodes early.
+
+> **Verdict: the dodge has NOT reappeared. `r(fall,R)` = +0.98 is the reward's
+> arithmetic, and the falls are locomotion failures.** The genuine test —
+> whether the fall rate is *selected upward* while falls cluster at the
+> opponent — is negative on both counts.
+
+*A correction to my own analysis, and it inverted the answer.* The first run of
+this classified falls with `gap < 0.75`, which counts a gap of −2.24 m — the
+opponent 2.24 m **past** our agent — as "at the opponent". It reported
+"DODGE-shaped, 70-96%". The correct test is `|gap| < 0.75`, and it gives 35-43%
+overall and 0-8% since locomotion began. **A one-sided test on a signed
+quantity, and it produced exactly the wrong headline.**
+
 *This is a prediction about **when**, from two measured rates and one measured
 lag. It assumes the GNN's decay stays linear — it need not; the MLP's did not
 (−0.0231/epoch over 0-40, −0.0043/epoch over 100-399). If the GNN's decay

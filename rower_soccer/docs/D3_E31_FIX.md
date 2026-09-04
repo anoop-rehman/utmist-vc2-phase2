@@ -400,8 +400,16 @@ actuated one.**
 
 ### The definition
 
-> **Outcome C fires when** readout `n_bodies` ≥ **27** (within 2 of the ceiling)
-> **sustained over ≥ 5 consecutive epochs** with `p_act4` ≥ 0.9.
+> **Outcome C fires when** the **sampled population** `sampled_bodies_mean` ≥
+> **26** (90% of the 29 ceiling) **sustained over ≥ 5 consecutive epochs** with
+> `p_act4` ≥ 0.9. Readout `n_bodies` ≥ 27 is reported beside it as a secondary
+> indicator, **not** as the trigger.
+
+*Originally defined on the readout. **Corrected**, and by E3's own lesson: §3c
+of [`D3_E3_ADVERSARIAL.md`](D3_E3_ADVERSARIAL.md) had to rewrite E3's stop rule
+for exactly this reason — the mean-action design is the MODE of the design
+distribution and not the distribution. Keying Outcome C on the readout would
+have repeated the mistake in the opposite direction.*
 
 ### What distinguishes healthy growth from a second degenerate optimum
 
@@ -436,3 +444,77 @@ flat forward progress now is exactly what the reference arm did.
 **This is recorded as an outcome to classify, not a trigger to halt.** Growth
 toward a larger body may simply be correct, and stopping the run on it would
 throw away the result that distinguishes C1 from C2.
+
+### C2 is not a free lunch — physics already charges for mass, and it may be enough
+
+The reward has no mass term, which is the mechanism above. **But mass enters the
+objective through the door the reward *does* look at**: a heavier body is harder
+to accelerate, so `forward_r = ΔCOM_x/dt` falls. The loading is real — s2's
+mean-action mass has gone **0.812 → 1.323 kg** against the original ant's
+**0.879**, roughly 1.5× — so there is a countervailing pressure already present
+and it is not obvious which way the balance tips.
+
+**All four paired points that exist**, plus the frozen-body controls whose mass
+is constant at 0.879 by construction:
+
+| arm | epoch | mass | `max_fwd` |
+|---|---|---|---|
+| s2 | 4 | 1.165 | **0.154** |
+| s2 | 9 | 1.363 | **0.123** |
+| s3 | 4 | 1.062 | **0.157** |
+| s3 | 9 | 1.145 | **0.113** |
+| *control s1 (mass fixed)* | 4 → 9 | 0.879 | **0.10 → 0.21** (rising) |
+| *control s2 (mass fixed)* | 4 → 9 | 0.879 | 0.13 → 0.14 (flat) |
+
+**Both design-on arms got heavier and slower over epochs 4-9 while both
+fixed-mass controls got faster or stayed flat.** That is directionally what the
+mass hypothesis predicts.
+
+**It is four points and it establishes nothing causal.** Forward progress at
+epochs 4-9 is dominated by "the policy cannot walk yet", not by mass; the arms
+differ from the controls in several ways besides mass; and n = 2. **The
+consequence for the C2 remedy is the important part: before proposing a
+per-body or per-mass cost, measure whether physics is already supplying one.**
+If forward progress recovers as the policy learns despite rising mass, the
+pressure is insufficient; if it stays suppressed in proportion to mass, a size
+cost would be **double-charging** a penalty the simulator already applies. That
+check belongs before the remedy, not after.
+
+### The seeds disagree about the READOUT and agree about the POPULATION
+
+With one arm suspended, a two-seed disagreement about the direction of
+morphological change would be most of what we know about morphology. So it
+matters which quantity is disagreeing.
+
+| | epoch 0 → 10 | peak |
+|---|---|---|
+| **s2 readout** `n_bodies` | **12 → 25** | 26 |
+| **s3 readout** `n_bodies` | **12 → 17** | 21 (epoch 7) |
+| s2 population `sampled_bodies_mean` | **14.1 → 18.9** | 19.4 |
+| s3 population `sampled_bodies_mean` | **15.0 → 19.1** | 19.4 |
+
+> **The readouts diverge — 25 against 17 — and the populations do not. Both
+> populations rose monotonically from ~14-15 to ~19, and at epoch 9 they were
+> identical at 19.4.**
+
+**This is E3's lesson applying to E3.1, and it is the second time it has
+changed a conclusion.** §3c of [`D3_E3_ADVERSARIAL.md`](D3_E3_ADVERSARIAL.md)
+had to rewrite E3's stop rule because the mean-action design is the *mode* of
+the design distribution, not the distribution — there, the readout collapsed to
+a 0-motor stump at epoch 5 while 30-79% of sampled designs were still actuated.
+Here the same gap runs the other way: the readout says the seeds are heading
+in opposite directions, and the population says they are doing the same thing.
+
+**What E3.1 can and cannot say about morphological direction:**
+
+* **Can**: the design *distributions* of both seeds are growing, together, from
+  ~14-15 to ~19 bodies, and neither collapses. That is what the falsifier test
+  needs, and it is answered.
+* **Cannot**: anything about the *mode's* direction. One seed's readout is at
+  25 and the other's at 17, and **E3.1 has not established a direction of
+  morphological change for the mean-action design.** With n = 2 that is not
+  dressed up as more.
+
+**This strengthens the case for resuming `rtg_e31_s1`** (suspended at epoch 5,
+`epoch_0005.p` saved, `--epoch 5` resumes it). A third seed is worth more when
+the two in hand disagree than when they agree — and on the readout they do.

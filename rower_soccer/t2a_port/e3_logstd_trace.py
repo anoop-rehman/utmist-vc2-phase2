@@ -24,7 +24,13 @@ import pickle
 import re
 import sys
 
-CRIT = -0.8837          # log_std_crit, D3_E3_ADVERSARIAL.md 3f
+CRIT_ANALYTIC  = -0.8837   # log_std_crit derived in D3_E3_ADVERSARIAL.md 3f-ii
+# 3f-iv-c measured the boundary on the simulator and it is STRICTER than the
+# analytic one, because the derivation held L_ant at the zero-torque episode
+# length and assumed no falls. The empirical value is the operative one.
+CRIT = -0.9645             # empirical, D3_E3_ADVERSARIAL.md 3f-iv-c
+SURVIVE_CROSS = -0.6931    # where ctrl cost/step first drops below the 1.0
+                           # survive bonus (0.5*8*sigma^2 = 1 -> sigma = 0.5)
 
 
 def read(path):
@@ -53,7 +59,7 @@ def main():
     allrows = {}
     print(f"  {'arm':<14}{'checkpoint':<16}{'epoch':>6}"
           f"{'control_log_std':>17}{'sigma':>8}{'cost/step':>11}"
-          f"{'  vs crit -0.8837':>18}")
+          f"{'  vs -0.9645':>14}")
     for cfg in a.cfgs.split(","):
         rows = []
         for f in sorted(glob.glob(f"{a.results}/{cfg}/models/*.p")):
@@ -65,19 +71,37 @@ def main():
             ls = r["control_action_log_std"]
             sig = math.exp(ls)
             cost = 0.5 * 8 * sig * sig
-            side = "BELOW (good)" if ls < CRIT else "ABOVE (bad)"
+            side = "BELOW (good)" if ls < CRIT else "above"
             print(f"  {cfg:<14}{r['file']:<16}{str(r['epoch']):>6}"
-                  f"{ls:>17.4f}{sig:>8.4f}{cost:>11.4f}{side:>18}")
+                  f"{ls:>17.4f}{sig:>8.4f}{cost:>11.4f}{side:>14}")
         allrows[cfg] = rows
         if len(rows) >= 2:
             a0, a1 = rows[0], rows[-1]
             de = (a1["epoch"] or 0) - (a0["epoch"] or 0)
             dl = a1["control_action_log_std"] - a0["control_action_log_std"]
             rate = dl / de if de else float("nan")
-            need = (CRIT - a1["control_action_log_std"]) / rate if rate else float("inf")
-            print(f"  {'':<14}-> moved {dl:+.4f} over {de} epochs "
-                  f"({rate:+.5f}/epoch); at that rate reaching the boundary "
-                  f"takes {need:.0f} more epochs")
+            ls_now, e_now = a1["control_action_log_std"], a1["epoch"] or 0
+            if rate:
+                e_sur = e_now + (SURVIVE_CROSS - ls_now) / rate
+                e_cri = e_now + (CRIT - ls_now) / rate
+                print(f"  {'':<14}-> {dl:+.4f} over {de} epochs "
+                      f"({rate:+.5f}/epoch, {len(rows)} points)")
+                print(f"  {'':<14}   projected: cost/step < survive bonus at "
+                      f"epoch ~{e_sur:.0f}; crosses {CRIT} at epoch ~{e_cri:.0f}"
+                      f"; locomotion +18-27 -> ~{e_cri+18:.0f}-{e_cri+27:.0f}")
+            # is the decay linear, or slowing as the MLP's did?
+            if len(rows) >= 3:
+                segs = []
+                for i in range(len(rows) - 1):
+                    d_e = (rows[i+1]["epoch"] or 0) - (rows[i]["epoch"] or 0)
+                    if d_e:
+                        segs.append((rows[i]["epoch"], rows[i+1]["epoch"],
+                                     (rows[i+1]["control_action_log_std"]
+                                      - rows[i]["control_action_log_std"]) / d_e))
+                print(f"  {'':<14}   segment rates: " + ", ".join(
+                    f"{a}->{b} {r:+.5f}" for a, b, r in segs)
+                    + "   (the MLP's SLOWED: -0.0231 over 0-40, "
+                      "-0.0043 over 100-399)")
     if a.out:
         json.dump(allrows, open(a.out, "w"), indent=1)
         print(f"\n  -> {a.out}")

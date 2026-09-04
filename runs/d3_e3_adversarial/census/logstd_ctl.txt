@@ -1,9 +1,11 @@
   arm           checkpoint       epoch  control_log_std   sigma  cost/step   vs crit -0.8837
   rtg_e3c_s1    best.p               5          -0.0632  0.9387     3.5248       ABOVE (bad)
   rtg_e3c_s1    epoch_0020.p        19          -0.1842  0.8318     2.7676       ABOVE (bad)
-                -> moved -0.1209 over 14 epochs (-0.00864/epoch); at that rate reaching the boundary takes 81 more epochs
+  rtg_e3c_s1    epoch_0040.p        39          -0.3794  0.6842     1.8728       ABOVE (bad)
+                -> moved -0.3162 over 34 epochs (-0.00930/epoch); at that rate reaching the boundary takes 54 more epochs
   rtg_e3c_s2    best.p              15          -0.1456  0.8645     2.9892       ABOVE (bad)
   rtg_e3c_s2    epoch_0020.p        19          -0.1788  0.8363     2.7975       ABOVE (bad)
-                -> moved -0.0331 over 4 epochs (-0.00828/epoch); at that rate reaching the boundary takes 85 more epochs
+  rtg_e3c_s2    epoch_0040.p        39          -0.3791  0.6845     1.8740       ABOVE (bad)
+                -> moved -0.2335 over 24 epochs (-0.00973/epoch); at that rate reaching the boundary takes 52 more epochs
 
   -> /workspace/utmist-vc2-phase2/runs/d3_e3_adversarial/census/logstd_ctl.json

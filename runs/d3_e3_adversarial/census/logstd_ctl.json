@@ -11,6 +11,12 @@
    "file": "epoch_0020.p",
    "control_action_log_std": -0.1841651257793881,
    "attr_action_log_std": -2.3019229619493387
+  },
+  {
+   "epoch": 39,
+   "file": "epoch_0040.p",
+   "control_action_log_std": -0.37944249067115776,
+   "attr_action_log_std": -2.3012254353504082
   }
  ],
  "rtg_e3c_s2": [
@@ -25,6 +31,12 @@
    "file": "epoch_0020.p",
    "control_action_log_std": -0.17877520938407107,
    "attr_action_log_std": -2.3050874421332703
+  },
+  {
+   "epoch": 39,
+   "file": "epoch_0040.p",
+   "control_action_log_std": -0.37910201149188205,
+   "attr_action_log_std": -2.3020426285812023
   }
  ]
 }

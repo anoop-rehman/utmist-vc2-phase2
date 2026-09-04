@@ -1451,6 +1451,43 @@ which linearly predicts crossing at epoch 34; it actually crossed at **41** — 
   uninterpretable as a morphology result, and E3.1's fix list needs revisiting
   before launch.
 
+### 3g-iv. Checkpoint at epoch 52: the projection tightens and stays inside the window
+
+Three σ points per arm now, from archival checkpoints
+(`census/logstd_ctl.txt`, refreshed every 10 min):
+
+| arm | ep 5/15 | ep 19 | ep 39 | rate | cost/step now |
+|---|---|---|---|---|---|
+| `ctl_s1` | −0.0632 | −0.1842 | **−0.3794** | −0.00930/epoch | 1.873 |
+| `ctl_s2` | −0.1456 | −0.1788 | **−0.3791** | −0.00973/epoch | 1.874 |
+
+**Projected milestones, from the arms' own three points:**
+
+| milestone | `ctl_s1` | `ctl_s2` | predicted in §3g-iii |
+|---|---|---|---|
+| cost/step drops **below** the 1.0 survive bonus (`log_std` −0.6931) | ~**73** | ~**71** | — |
+| crosses the empirical boundary **−0.9645** | ~**102** | ~**99** | **89-114** ✓ |
+| first locomotes (+18-27 epochs) | ~120-129 | ~117-126 | 107-141 ✓ |
+
+**Both inside the predicted window**, and the two arms agree to 3 epochs.
+
+**One difference from the MLP worth flagging: the decay is not slowing.**
+Segment rates are −0.00864 → −0.00976 (`s1`) and −0.00828 → −0.01002 (`s2`) —
+flat to slightly *accelerating*. The MLP's slowed sharply over the same kind of
+span (−0.0231 over epochs 0-40, −0.0043 over 100-399). §3g-iii named this as a
+third outcome distinct from both bullets: **if the GNN's decay keeps
+accelerating the crossing comes earlier than 102**, and the +17% bias
+correction borrowed from the MLP would be the wrong adjustment to have applied.
+It is left in place rather than retuned mid-flight; the crossing epoch will
+settle it.
+
+**Everything else is where the prediction says it should be — which is to say,
+nothing is happening.** At `eval@49`: goal 0.00 on both arms, forward progress
+**0.20 / 0.24 m** (flat since epoch 14), `net_dx` **−2.26 / −2.32 m** — still
+being bulldozed backwards. The MLP was at `net_dx` −2.19 at epoch 30 and did
+not turn positive until ~epoch 50, so the controls are tracking the same
+trajectory shape roughly 2.4x slower in σ, exactly as §3g-ii's rates imply.
+
 *This is a prediction about **when**, from two measured rates and one measured
 lag. It assumes the GNN's decay stays linear — it need not; the MLP's did not
 (−0.0231/epoch over 0-40, −0.0043/epoch over 100-399). If the GNN's decay

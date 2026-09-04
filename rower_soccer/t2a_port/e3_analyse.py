@@ -65,6 +65,88 @@ def fmt(v, f="{:.2f}", na="--"):
     return na if v is None else f.format(v)
 
 
+def series(cfg):
+    """The per-epoch JSONL each trainer writes, joined on epoch.
+
+    This is what pre-registration reading A's SECOND trigger needs -- "the
+    morphology series correlates with fall rate" -- and it has to be computed
+    from the same rows for both, so the join happens here rather than by eye
+    over two wandb panels. Evaluations run every `--eval-every` epochs while
+    morphology runs every epoch, so only the epochs carrying both are used.
+    """
+    f = f"/workspace/Transform2Act/results/{cfg}/e3_epochs.jsonl"
+    if not os.path.exists(f):
+        return None
+    rows = []
+    for line in open(f):
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        if "eval" not in d or not d.get("mean_action_design"):
+            continue
+        m = d["mean_action_design"]
+        rows.append(dict(
+            epoch=d["epoch"], alpha=d.get("alpha"),
+            fall=d["eval"]["fall_rate"], goal=d["eval"]["goal_rate"],
+            fwd=d["eval"]["max_fwd"], R=d["eval"]["R_mean"],
+            designfail=d["eval"].get("design_fail_rate", 0.0),
+            n_bodies=m["n_bodies"], n_motors=m["model_nu_ours"],
+            mass=m["model_mass_ours"], limb_len=m["limb_length"]["mean"],
+            limb_sum=m["limb_length"]["sum"], gear=m["gear"]["mean"],
+            distinct=d["census"]["distinct_topologies"],
+            top_share=d["census"]["top_topology_share"]))
+    return rows
+
+
+def morph_vs_fall(cfgs):
+    """Pre-registration reading A, trigger 2, computed rather than eyeballed."""
+    print("\n=== the per-epoch morphology series against the fall rate ===")
+    print("  Reading A trigger 2 (D3_E3_ADVERSARIAL.md 3b): if a morphology "
+          "column moves\n  monotonically with the fall rate over the run, the "
+          "fall rate is being bought\n  with the body.")
+    cols = ["n_bodies", "n_motors", "mass", "limb_len", "limb_sum", "gear",
+            "distinct", "top_share"]
+    print(f"\n  {'arm':<14}{'n':>4}" + "".join(f"{c:>11}" for c in cols)
+          + f"{'fall@end':>10}{'goal@end':>10}")
+    for cfg in cfgs:
+        rows = series(cfg)
+        if rows is None:
+            print(f"  {cfg:<14}  (no e3_epochs.jsonl)")
+            continue
+        if not rows:
+            print(f"  {cfg:<14}  (no epoch carries BOTH an evaluation and a "
+                  f"morphology summary yet)")
+            continue
+        fall = [r["fall"] for r in rows]
+        cells = "".join(f"{fmt(corr([r[c] for r in rows], fall), '{:+.3f}'):>11}"
+                        for c in cols)
+        print(f"  {cfg:<14}{len(rows):>4}{cells}"
+              f"{rows[-1]['fall']:>10.2f}{rows[-1]['goal']:>10.2f}")
+    print("\n  r(morphology column, fall rate) across epochs, one row per arm."
+          "\n  'distinct'/'top_share' are the sampled census, not the "
+          "mean-action design.")
+
+    print("\n=== the fall-dodge pair, as the run proceeded ===")
+    print(f"  {'arm':<14}{'epochs':>8}{'r(fall,R)':>12}{'r(fwd,R)':>11}"
+          f"{'first goal>0':>14}{'max designfail':>16}")
+    for cfg in cfgs:
+        rows = series(cfg)
+        if not rows:
+            continue
+        fall = [r["fall"] for r in rows]
+        fwd = [r["fwd"] for r in rows]
+        R = [r["R"] for r in rows]
+        first = next((r["epoch"] for r in rows if r["goal"] > 0), None)
+        print(f"  {cfg:<14}{len(rows):>8}"
+              f"{fmt(corr(fall, R), '{:+.3f}'):>12}"
+              f"{fmt(corr(fwd, R), '{:+.3f}'):>11}"
+              f"{(str(first) if first is not None else 'never'):>14}"
+              f"{max(r['designfail'] for r in rows):>16.2f}")
+    print("  (epoch-level, over the whole run: E2 measured +0.989/+0.019 "
+          "across arms, E2.1 -0.517/+0.947)")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--epoch", default="400")
@@ -131,9 +213,14 @@ def main():
               f"{d.get('distinct_topologies', 0)} distinct topologies "
               f"(top {100 * d.get('top_topology_share', 0):.0f}%)")
 
+    morph_vs_fall([d["cfg"] for d in ds if d.get("design_on") is not None
+                   and d["arm"] != "idle"])
+
     if a.out:
-        json.dump([row(d, "mean_action") for d in ds], open(a.out, "w"),
-                  indent=1, default=float)
+        json.dump(dict(rows=[row(d, "mean_action") for d in ds],
+                       series={d["cfg"]: series(d["cfg"]) for d in ds
+                               if d["arm"] != "idle"}),
+                  open(a.out, "w"), indent=1, default=float)
         print(f"\n-> {a.out}")
 
 

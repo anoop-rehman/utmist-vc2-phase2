@@ -516,6 +516,14 @@ occurred.
   and is unaffected — with `force_identity_design` the escape route does not
   exist. Running now on the freed card.
 
+**Confirmed on archival checkpoints, not just the live captures**: seven
+independent 200-design probes across three seeds, two checkpoint sources and
+four epochs (17-21) give `p_act4` = **0.000** in every one. And **two of three
+seeds converged on the identical topology hash** (`9a51d315a8da`, a 5-body
+0-motor stump) — neither E0 nor E1 ever produced two seeds sharing a hash
+(Jaccard 0.75-0.82 apart). The search does not merely degrade; it converges,
+and on the same body.
+
 **A decision-rule lesson worth carrying**: the original decision epoch was 100.
 It was moved to "every checkpoint from 20" once the collapse rate was seen, and
 even that was late — the condition was already met at **epoch 17**, surfaced

@@ -585,6 +585,29 @@ Population probes of the **live** policy at epoch 17, 200 sampled designs each
 two.** The untrained baseline was `p_act4` = 0.825 with a mean of 5.71 motors
 and a maximum of 12.
 
+**Confirmed on the ARCHIVAL checkpoints, which is what the result actually
+rests on.** The live captures above came from scraping the trainer's transient
+video checkpoint; the checkpoints each arm saved on its stop-file exit are on
+disk, are re-probeable by anyone, and say the same thing:
+
+| checkpoint (saved at epoch) | readout | motors mean (max) | histogram | `p_act1` | **`p_act4`** |
+|---|---|---|---|---|---|
+| `rtg_e3_s1/epoch_0019.p` (18) | 5 bodies, 0 motors | 0.04 (2) | 0: **194**, 1: 5, 2: 1 | 0.030 | **0.000** |
+| `rtg_e3_s2/epoch_0020.p` (19) | — | 0.005 (1) | — | 0.005 | **0.000** |
+| `rtg_e3_s2/epoch_0022.p` (21) | 5 bodies, 0 motors | 0.01 (1) | 0: **197**, 1: 3 | 0.015 | **0.000** |
+| `rtg_e3_s3/epoch_0020.p` (19) | 7 bodies, 0 motors | 0.01 (1) | 0: **197**, 1: 3 | 0.015 | **0.000** |
+
+Seven independent 200-design probes across three seeds, two checkpoint sources
+and four epochs (17-21): **`p_act4` = 0.000 in every one.**
+
+**And two of the three seeds converged on the SAME degenerate body.** The
+mean-action topology hash is `9a51d315a8da` on both seed 1 and seed 2 — the
+identical 5-body, 0-motor stump, from independent seeds and independent
+initialisations. For scale, E0 measured three seeds on *their* ant landing
+0.76-0.82 Jaccard apart and E1 measured 0.75 for our ant's one pair; neither
+experiment ever produced two seeds sharing a topology hash. Here the search
+does not merely degrade — **it converges, and on the same body.**
+
 ### 3e-ii. The mechanism: it is the DENSE control cost, not the sparse fall-dodge
 
 This is the part that matters, and it is not the hazard this rung was built to

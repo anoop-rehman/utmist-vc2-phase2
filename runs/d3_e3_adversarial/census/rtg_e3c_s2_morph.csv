@@ -1,0 +1,2 @@
+epoch,alpha,n_bodies,n_motors,mass,limb_len_mean,limb_len_sum,gear_mean,max_depth,topo,distinct_topologies,top_topology_share,sampled_bodies_mean,pop_motors_mean,pop_motors_max,p_act1,p_act4,step_share_act4,design_failed,eval_fall_rate,eval_goal_rate,eval_max_fwd,eval_R_mean,eval_design_fail_rate,r_fall_return,r_fwd_return
+0,1.0,13,8,0.8787101739346321,0.3771236166328253,4.525483399593903,150.0,3,49779a2d5445,1,1.0,13.0,8.0,8,1.0,1.0,,0,,,,,,,

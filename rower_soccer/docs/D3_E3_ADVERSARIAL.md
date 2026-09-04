@@ -608,6 +608,53 @@ initialisations. For scale, E0 measured three seeds on *their* ant landing
 experiment ever produced two seeds sharing a topology hash. Here the search
 does not merely degrade — **it converges, and on the same body.**
 
+### 3e-i-b. The headline table — one instrument, both protocols, 20 episodes, plus the idle floor
+
+`e3_posthoc.py` on each arm's final saved checkpoint, `posthoc/*.json` (tracked).
+
+| arm | protocol | R | goal | lost | **fell** | ep len | **fwd** | **of the 5.0 m** | bodies | action std |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **s1** (ep 19) | mean-action | +20.8 | **0.00** | 0.00 | **1.00** | 20.8 | **0.01 m** | **0.1%** | 5.0 | 0.886 |
+| **s1** | stochastic | +20.8 | 0.00 | 0.00 | 1.00 | 20.8 | 0.01 m | 0.1% | 9.2 | 0.886 |
+| **s2** (ep 22) | mean-action | +20.8 | **0.00** | 0.00 | **1.00** | 20.8 | **0.01 m** | **0.1%** | 5.0 | 0.896 |
+| **s2** | stochastic | +20.8 | 0.00 | 0.00 | 1.00 | 20.8 | 0.01 m | 0.1% | 8.2 | 0.896 |
+| **s3** (ep 20) | mean-action | +20.8 | **0.00** | 0.00 | **1.00** | 20.8 | **0.01 m** | **0.1%** | 7.0 | 0.895 |
+| **s3** | stochastic | +20.8 | 0.00 | 0.00 | 1.00 | 20.8 | 0.01 m | 0.1% | 9.8 | 0.895 |
+| *idle, zero torque* | both | **−523.7** | 0.00 | 0.85 | 0.15 | 465.2 | **0.08 m** | 1.5% | 13.0 | 0 |
+
+**Forward progress is the primary readout on this task** (E2's lesson), and on
+it the evolved agent is **eight times worse than doing nothing**: 0.01 m
+against the zero-torque floor's 0.08 m, out of the 5.00 m required.
+
+**The mode and the population now agree exactly**, which closes §3c's loop from
+the other side. The two protocols give identical R, goal, fall, length and
+forward progress on every arm, while the *bodies* differ (mode 5-7 bodies,
+population 8.2-9.8). Earlier the mode was unrepresentative; by epoch ~20
+**the population is as incompetent as the mode**, so the distinction that
+mattered at epoch 3 no longer does.
+
+**The mirror gate still holds under the trained policy**: 96 of 134 mjModel
+arrays change across 20 episodes driven by each arm's own weights. The design
+stage was live and working the entire time — it worked *correctly*, toward the
+wrong thing.
+
+**The idle floor reproduces E2 and E2.1 to the digit**: R **−523.7 ± 307.0**,
+goal 0.00, lost 0.85, fell 0.15, ep len 465.2, forward 0.08 m — identical to
+`D3_E2_RTG.md` §7 and `D3_E21_CURRICULUM.md` §5a. Its `r(fall, R)` is
+**+0.985** and its measured fall premium **+825.8**, reproducing E2 §6's "+826".
+The instrument is unchanged and verified.
+
+**On the across-arm correlation pair — the statistic fires, and it should not be
+read.** Over these four rows `r(fall rate, return)` = **+1.000** and
+`r(forward progress, return)` = **−1.000**, which superficially looks like
+E2's +0.989 structure and like pre-registration Reading A. **It is degenerate**:
+the three E3 arms are identical, so there are only **two distinct fall rates
+(1.00 and 0.15) and two distinct returns** in the whole sample, and a
+correlation over two points is ±1 by construction. §3e-iii gives the reason the
+mechanism is not the dodge regardless. This is recorded rather than quoted
+because a table that produces `+1.000` invites exactly the misreading E2 spent
+a whole section warning about.
+
 ### 3e-ii. The mechanism: it is the DENSE control cost, not the sparse fall-dodge
 
 This is the part that matters, and it is not the hazard this rung was built to
@@ -640,6 +687,16 @@ Monotone, concave, asymptoting at **+0.78** — which is the 0-motor body's
 ceiling: `+1.0` of survive bonus per step, minus the backward drift the
 opponent imposes. The reward went up the whole time. **The run optimised its
 objective successfully and the objective was the problem.**
+
+**A second, independent confirmation of route 2, from a statistic that was
+already being logged for another reason.** If the run had taken route 1 —
+learning small actions — the learned action standard deviation would have
+collapsed, because that *is* what route 1 means. E2's published-batching MLP
+collapsed it to **0.039** and E2.1's `d2rep` arms to **0.086-0.088**, both while
+paying a real control cost. E3's GNN at epoch 19 has an action std of
+**0.8856** — essentially its initialisation. **It never learned to quieten
+down. It didn't need to: with no actuators, `0.5·Σa²` is 0 at any std.** The
+policy's noise and the reward became decoupled the moment the motors went.
 
 > **`d2rep` cannot prevent this, and that is the structural point.** `d2rep`
 > down-weights `parse` — the ±1000, the fall-dodge. **The control cost lives in

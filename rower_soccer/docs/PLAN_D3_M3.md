@@ -516,6 +516,33 @@ occurred.
   and is unaffected — with `force_identity_design` the escape route does not
   exist. Running now on the freed card.
 
+**Headline table** (`e3_posthoc.py`, one instrument, both protocols, 20
+episodes, final checkpoints; `runs/d3_e3_adversarial/posthoc/*.json`):
+
+| arm | R | goal | fell | ep len | **forward** | **of 5.0 m** | action std |
+|---|---|---|---|---|---|---|---|
+| E3 s1 / s2 / s3 (mean-action **and** stochastic, identical) | +20.8 | **0.00** | **1.00** | 20.8 | **0.01 m** | **0.1%** | 0.886-0.896 |
+| *idle, zero torque* | −523.7 | 0.00 | 0.15 | 465.2 | 0.08 m | 1.5% | 0 |
+
+**On forward progress — the primary readout — the evolved agent is eight times
+worse than doing nothing.** The two protocols agree exactly while the bodies
+differ (mode 5-7, population 8.2-9.8): by epoch ~20 the population is as
+incompetent as the mode. The mirror gate still holds under the trained policy
+(96 of 134 arrays change), so the design stage worked correctly, toward the
+wrong thing. The idle floor reproduces E2 and E2.1 to the digit (−523.7 ± 307.0,
+fall premium +825.8 against E2's +826), so the instrument is verified.
+
+*The across-arm `r(fall rate, return)` is +1.000 here and must NOT be read as
+Reading A: the three E3 arms are identical, so the sample holds two distinct
+fall rates and two distinct returns, and a correlation over two points is ±1 by
+construction.*
+
+**A second, independent confirmation of the mechanism**: had the run learned
+small actions instead of deleting motors, the action std would have collapsed —
+E2's published-batching MLP reached 0.039 and E2.1's `d2rep` arms 0.086-0.088.
+E3's GNN sits at **0.886-0.896**, essentially its initialisation. It never
+learned to quieten down because with no actuators `0.5·Σa²` is 0 at any std.
+
 **Confirmed on archival checkpoints, not just the live captures**: seven
 independent 200-design probes across three seeds, two checkpoint sources and
 four epochs (17-21) give `p_act4` = **0.000** in every one. And **two of three

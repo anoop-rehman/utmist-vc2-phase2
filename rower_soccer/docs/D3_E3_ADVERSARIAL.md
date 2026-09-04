@@ -12,6 +12,24 @@ is in "Not tested" at the end.*
 ([`D3_E21_CURRICULUM.md`](D3_E21_CURRICULUM.md)). **Morphology**: this is the
 first D3 rung where it is **not frozen**.
 
+> ### Reading the videos — the one-letter trap
+>
+> **`rtg_e3_s{1,2,3}` is the experiment (design stages LIVE). `rtg_e3c_s{1,2}`
+> is the frozen-body control.** One letter apart, completely different runs.
+> The design-ON arms were stopped at epoch ~19 (§3e) and the controls have run
+> on since, so **sorting the render directory by date shows nothing but
+> controls, whose bodies cannot change by construction.** A reader who skims
+> the newest clips and concludes "the morphology isn't changing" is looking at
+> the control and is correct about it.
+>
+> **E3's evolved bodies — the 5-body, 0-motor stumps — are visible only in the
+> `e0006`, `e0012` and `e0018` design-ON clips.** They are now also reachable
+> by the self-describing names
+> `renders/DESIGN-ON_evolved-body_seed{1,2,3}_epoch{0006,0012,0018}.mp4`, with
+> `renders/INDEX.md` as the key. Each panel is labelled `nb=` with its own body
+> count. Throughout this document the arms are named **"design ON"** and
+> **"frozen-body control"** rather than by cfg id, for the same reason.
+
 ## The question, and why it needed two gates before any compute
 
 > Can Transform2Act's design+control loop win an adversarial task?
@@ -1519,6 +1537,29 @@ Three σ points per arm now, from archival checkpoints
 | first locomotes (+18-27 epochs) | ~120-129 | ~117-126 | 107-141 ✓ |
 
 **Both inside the predicted window**, and the two arms agree to 3 epochs.
+
+**Epoch-60 checkpoints (added as they landed) — the acceleration is confirmed
+and the projection tightens again:**
+
+| arm | ep 19 | ep 39 | **ep 59** | segment rates | crosses −0.9645 |
+|---|---|---|---|---|---|
+| control s1 | −0.1842 | −0.3794 | **−0.5881** (σ 0.555, cost **1.234**) | −0.00864 → −0.00976 → **−0.01043** | ~**98** |
+| control s2 | −0.1788 | −0.3791 | **−0.5884** (σ 0.555, cost **1.233**) | −0.00828 → −0.01002 → **−0.01047** | ~**96** |
+
+**Three consecutive segments, each faster than the last, on both arms
+independently — six measurements, all consistent.** The non-slowing observation
+is now an accelerating one, and it is the opposite of the MLP's behaviour over
+the same span. Projected affordability moves to epoch **~69-70** and the
+crossing to **~96-98**, still inside the pre-registered 89-114.
+
+**A resolution problem this exposed, and the fix.** Archival checkpoints land
+every 20 epochs, so σ was only observable at 19/39/59/79 — but affordability
+(~69) and the crossing (~97) both fall *between* checkpoints, and a ±10-epoch
+bracket against a 25-epoch prediction window is nearly as wide as the thing
+being tested. `sigma_sampler.sh` now reads `log_std` out of the trainer's
+transient `_video_tmp.p` every **6** epochs (a read, deleted by the trainer as
+usual), writing `census/sigma_fine.csv`. The crossing epoch will be located to
+±3 rather than ±10.
 
 **One difference from the MLP worth flagging: the decay is not slowing.**
 Segment rates are −0.00864 → −0.00976 (`s1`) and −0.00828 → −0.01002 (`s2`) —

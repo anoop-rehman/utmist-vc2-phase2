@@ -408,7 +408,16 @@ def main():
                                  "loss_iter": agent.loss_iter,
                                  "best_rewards": agent.best_rewards,
                                  "epoch": epoch}, open(tmp, "wb"))
-                out = f"{RENDER_DIR}/{args.cfg}_e{epoch + 1:04d}_bmw.mp4"
+                # The cfg names differ by one letter (`rtg_e3_s1` design ON
+                # vs `rtg_e3c_s1` frozen control) and produce completely
+                # different experiments. A reader sorting the render directory
+                # by date sees only controls, because the design-ON arms stop
+                # early -- which did mislead a reader into concluding the
+                # morphology was not changing. The tag makes the clip
+                # self-describing.
+                tag = "DESIGN-ON" if design_on else "FROZEN-CONTROL"
+                out = (f"{RENDER_DIR}/{tag}_{args.cfg}"
+                       f"_e{epoch + 1:04d}_bmw.mp4")
                 env2 = dict(os.environ, MUJOCO_GL="osmesa",
                             CUDA_VISIBLE_DEVICES="")
                 cmd = [sys.executable,

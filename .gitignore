@@ -247,3 +247,10 @@ runs/d3_e0_ant/renders/*.mp4.json.sent
 # write-up and any later artefact source, so a result never has to be read back
 # out of a training log.
 runs/d3_e3_adversarial/renders/*.mp4
+
+# D3 M3 E3 live-policy captures. 157 MB each, copied out of the trainer's own
+# transient video checkpoint so the design population can be probed at the live
+# epoch (best.p is frozen at epochs 0-3 on these arms). Same class as any other
+# checkpoint: the RESULT of probing them is tracked in census/pop_*_LIVE.json
+# and census/population.csv; the weights are not.
+runs/d3_e3_adversarial/census/live_ckpt/

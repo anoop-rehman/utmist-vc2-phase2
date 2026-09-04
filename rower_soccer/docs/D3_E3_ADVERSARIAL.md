@@ -533,9 +533,24 @@ ordered exactly by epoch. What it actually shows is:
   My earlier statement to the effect that "the search did not collapse" is
   established **only for epochs 0-3** and I should not have written it without
   that qualifier.
-* the four rows are also **four different policies**, not a series, so the
-  0.825 → 0.790 → 0.680 → 0.300 ordering is suggestive and **not a trend**. It
-  is not extrapolated here and the rule does not rest on it.
+* the four rows are four different policies, so the
+  0.825 → 0.790 → 0.680 → 0.300 ordering **across arms** is confounded with
+  epoch and is not a trend.
+
+**But one comparison in that table is NOT confounded, and it is the one that
+matters.** Seed 1 supplies **both endpoints on its own**: untrained
+`p_act4` = **0.825** and its own epoch-3 checkpoint = **0.300**. That is a
+**within-seed drop of 64% in three epochs**, with no seed confound at all.
+`pop_motors_mean` moves the same way on the same seed, **5.715 → 2.51**, and
+the motor histogram's zero-motor bin goes **1/200 → 36/200**.
+
+So the honest reading is stronger and worse than "unmeasured since epoch 3":
+**the available evidence points at the population collapsing, and quickly.**
+Two points establish that a drop happened; they cannot establish its *shape* —
+decelerating, linear and accelerating are indistinguishable on two points, and
+no functional form is fitted here or extrapolated from. `e3_pact_series.py`
+prints the series with exactly that caveat attached, and refuses to name a
+shape the data cannot support.
 
 **`best.p` is therefore useless as a progress tracker on these arms** and the
 real series is the archival checkpoints. `population_watcher.sh` probes each of
@@ -549,7 +564,49 @@ lengths: `p·491 / (p·491 + (1−p)·20.9)`. At `p` = 0.05 the step share is
 already **0.55**; at `p` = 0.015 it is 0.26. A design share that looks
 negligible is not negligible in the batch.
 
-### The decision, at epoch 100
+### 3c-0. THE DECISION POINT MOVED: epoch 100 was 83 epochs too late
+
+*Written when the first live-policy measurement came back, before the other two
+seeds had been probed, because the relocation is justified by the rate of change
+alone and does not depend on how the other seeds land.*
+
+**Seed 2, epoch 17** (`census/pop_rtg_e3_s2_LIVE.json`, captured from the
+trainer's own transient video checkpoint — see below):
+
+| | epoch 1 (`best.p`) | **epoch 17 (live)** |
+|---|---|---|
+| readout | 6 bodies, 0 motors | 6 bodies, 0 motors |
+| `pop_motors_mean` | 4.45 | **0.015** |
+| motor histogram | 0-motor bin 3/200 | **0-motor bin 197/200**, max 1 |
+| `p_act1` | 0.985 | **0.015** |
+| **`p_act4`** | **0.680** | **0.000** |
+| step share of ≥4-motor designs | 0.980 | **0.000** |
+| distinct topologies | 196 / 200 | 90 / 200 |
+| sampled bodies (mean) | 13.76 | 7.82 |
+
+**All three of §3c row 1's conditions are already satisfied on this seed at
+epoch 17.** The quantity the epoch-100 rule was going to read has gone from
+0.825 (untrained) to 0.000 in seventeen epochs. **A rule that fires 83 epochs
+after its own outcome is settled is not a decision rule**, so it moves:
+
+> **Revised: the decision is evaluated at EVERY checkpoint from epoch 20
+> onward — archival (20/40/60/80/100…) and any live capture — and fires the
+> first time §3c's table resolves on ≥ 2 of 3 seeds at a common checkpoint.**
+
+The three conditions are unchanged; only the *when* moves, and it moves from a
+fixed epoch to "as soon as the evidence exists on two seeds". The ≥2-of-3
+requirement is kept, which is why one seed at 0.000 does not stop the run on
+its own.
+
+**How a live-epoch measurement was obtained at all.** `best.p` is frozen at
+epochs 0-3 and the first archival checkpoint is epoch 20, so neither could
+answer this. `train_e3_gnn.py` writes `models/_video_tmp.p` every 6 epochs,
+hands it to the renderer and deletes it in a `finally`;
+`runs/d3_e3_adversarial/catch_live_ckpt.sh` polls at 1 s and copies it out
+while it exists. That is a read, it cannot perturb the trainer, and it needed
+no change to a running arm.
+
+### The decision, at epoch 100 — SUPERSEDED BY §3c-0, kept for the reasoning
 
 Made on `runs/d3_e3_adversarial/census/<cfg>_morph.csv` (the readout, live) and
 `census/pop_<cfg>_e0100.json` (the population, from the epoch-100 checkpoint).
@@ -655,10 +712,21 @@ Removing fall-termination under the flat reward gives a scoring gradient of
 scoring incentive once the dodge is removed structurally: **`d2rep` is 10.6x
 worse than flat at rewarding a goal under rule (ii).** Two component
 corrections to the derivation, both small and both in the same direction: the
-lying blob banks **368.7** of dense, not ~491, because the opponent bulldozes
-it backwards (`dx` −1.6 to −2.0 m, so `Σforward` ≈ −129); and the competent
-ant measures **+1351.8** here rather than E2.1's stored +1599, on different
-episode seeds at goal 0.90 rather than 0.95/1.00.
+lying blob banks **368.7** of dense, not ~491; and the competent ant measures
+**+1351.8** here rather than E2.1's stored +1599, on different episode seeds at
+goal 0.90 rather than 0.95/1.00.
+
+**The first correction has a mechanism worth recording on its own, because the
+same assumption would misprice any future rule that lets a fallen agent lie in
+the opponent's path.** The natural derivation assumes a fallen body just sits
+there, so `Σforward` ≈ 0 and `dense` ≈ 491 × the survive bonus. It does not sit
+there. `D3_E2_RTG.md` §1 established that the scripted opponent is **effectively
+infinitely massive** — its entire state is overwritten after every control step,
+so contacts push our agent and the reaction on the opponent is discarded — and a
+body lying in its lane is therefore **bulldozed backwards**: `dx` −1.6 to −2.0 m
+over the episode, i.e. `Σforward` = −1.94/0.015 ≈ **−129**. The measured
+`dense` is 491 − 129 ≈ 362, and 368.7 is what the grid reports. Under rule (ii)
+a fallen agent is not a neutral object in the arena; it is a puck.
 
 **But rule (ii) has a defect neither of us anticipated, and it is visible only
 because the idle floor was in the grid.** Under `nofall` the upright gradient

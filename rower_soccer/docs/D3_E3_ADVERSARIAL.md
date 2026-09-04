@@ -1407,6 +1407,55 @@ candidate points the wrong way.
 > smaller — **has not been checked and is not asserted here.** Marked
 > unexplained rather than filled with the next plausible candidate.
 
+#### Is the gap just curve position? No — it survives, and grows
+
+**The objection is real and had to be tested.** The decay rate is strongly
+σ-dependent *within a single run* — the MLP's own local rate runs −0.0263 at
+epoch 10 and −0.0027 at epoch 300, a **10x change inside one run**
+(`e3_matched_sigma.py`, central difference over ±5 epochs on its stored
+per-epoch series). So comparing "MLP rate at epoch 40" with "GNN rate at
+epoch 40" compares two different positions on that curve, and a 2x gap could be
+nothing but position.
+
+Recomputed at **matched σ** — the MLP's local rate at the very `log_std` each
+GNN arm reaches, taken from the stored series rather than interpolated:
+
+| GNN arm | `log_std` | GNN epoch | GNN rate | MLP epoch | MLP rate | **ratio** |
+|---|---|---|---|---|---|---|
+| `ctl_s1` | −0.1842 | 19 | −0.00864 | 5 | −0.02897 | **3.35x** |
+| `ctl_s1` | −0.3794 | 39 | −0.00976 | 13 | −0.02512 | **2.57x** |
+| `ctl_s2` | −0.1788 | 19 | −0.00830 | 5 | −0.02897 | **3.49x** |
+| `ctl_s2` | −0.3791 | 39 | −0.01002 | 13 | −0.02512 | **2.51x** |
+| `e3_s1` (design ON) | −0.1215 | 18 | −0.00611 | 3 | −0.03028 | **4.96x** |
+| `e3_s2` (design ON) | −0.1096 | 21 | −0.00472 | 3 | −0.03028 | **6.42x** |
+
+> **The gap does not vanish at matched σ — it grows.** Design-off arms:
+> **2.51-3.49x** (mean 2.98x), against ~2.1x at matched epoch. Design-on arms:
+> **4.96-6.42x** (mean 5.69x). The design-on/design-off ratio is 1.9x, which is
+> the same halving already established, now measured at matched σ instead of
+> matched epoch.
+
+**So the curve-position explanation is closed off**, and that is worth having:
+it was the most economical way to dismiss the whole observation, and it does
+not work.
+
+**But matched-σ is not a clean control either, and the doc should not pretend
+it is.** At matched σ the two runs have seen very different amounts of data —
+the MLP is at epoch 5-13 where the GNN control is at 19-39. If the decay rate
+depends on experience as well as on σ (and both are plausible), matched-σ
+confounds in the *opposite* direction to matched-epoch. The honest statement is
+therefore:
+
+> **The gap is robust to both controls and clean under neither. Matched epoch
+> gives ~2.1x, matched σ gives ~2.98x, and the two bracket the effect.** It is
+> not an artifact of either confound, which is what makes it worth explaining;
+> it is not measured to better than "2-3x", and n = 2 arms per architecture.
+
+The remaining candidates are unchanged and still unchecked: a genuine
+gradient-scale difference between the two policy parameterisations, or the
+GNN's value function being poorer early. **Still unexplained — now more
+sharply.**
+
 ### 3g-iii. The prediction, and its falsifier
 
 Composing the GNN's own measured decay rate with the MLP's measured lag:

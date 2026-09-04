@@ -258,6 +258,27 @@ sense**, carried over from E1.1 and stated so they are not mistaken for it:
    actions the env throws away**, which is inherent to "run but forced to
    identity". Whether SKIPPING the design stages would close any gap is
    untested here, exactly as in E1.1.
+4. **The policy learning rates differ 6x** — added 2026-09-04 from
+   `D3_E3_ADVERSARIAL.md` §3g-ii, which found this list incomplete. The MLP
+   arm trains at `policy_lr = 3e-4` and the GNN at `5e-5`. §9 below already
+   recorded both numbers; what was missing is that they belong *here*, among
+   the differences that are not architecture in the narrow sense.
+
+   **Note for anyone checking this**: the two values do not both come from the
+   cfgs. All 30 files in `design_opt/cfg/` carry `policy_lr: 5.e-5`, and the
+   MLP arm **never reads it** — `train_e11_mlp.py:262` uses its own
+   `args.policy_lr`, whose default is 3e-4. The authoritative record is the
+   `args` dict stored inside each MLP checkpoint, which reads
+   `policy_lr = 0.0003` on every MLP arm run on this project. A `grep` over the
+   cfgs shows the arms matched and is wrong.
+
+   Like the other three, this is each architecture at its **own published
+   configuration** rather than a handicap chosen here — `train_e11_mlp.py`'s
+   docstring states the reasoning ("their 5e-5 is tuned for their GNN; handing
+   the MLP the same number would be tuning the baseline down") — and E1.1 ran
+   the MLP at both batchings for exactly that reason. But "the only difference
+   between arms is the policy architecture" is too strong a sentence, and this
+   is the fourth reason why.
 
 **Protocol** (`e2_eval.evaluate`, called from all three places):
 

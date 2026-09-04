@@ -1311,18 +1311,82 @@ crossing before anything moves, and it is two arms of one architecture under
 one reward regime. But the σ story is not bypassed by the MLP; it is
 **confirmed** by it, at a boundary derived independently from E3.
 
-### 3g-ii. Why the GNN is slower, and by how much
+### 3g-ii. Why the GNN is slower — PARTLY explained, and the residual is not
 
-| | MLP (E2.1 `d2rep`) | GNN (E3) |
+**The measurements, which are not in question:**
+
+| | `log_std` decay | source |
 |---|---|---|
-| `log_std` decay, epochs 0-40 | **−0.0231/epoch** | **−0.0047 to −0.0064/epoch** |
-| `policy_lr` | **3e-4** | **5e-5** |
+| MLP (E2.1 `d2rep`), epochs 0-40 | **−0.0231/epoch** | `log.jsonl`, per epoch |
+| GNN **controls** (design OFF) | **−0.0126 / −0.0099/epoch** | checkpoints |
+| GNN **E3 arms** (design ON) | **−0.0047 / −0.0064/epoch** | checkpoints |
 
-**The GNN's σ falls ~4x slower, and its policy learning rate is 6x lower.**
-`control_log_std` is an ordinary policy parameter updated by that optimiser, so
-the ratio is close to the mechanism rather than a coincidence — though `lr` is
-not the only difference between the arms and this is an association, not an
-isolated cause.
+**Design-on halves it at matched architecture and matched lr** (−0.0112 mean
+against −0.0055). That part is sound: the design heads take gradient from the
+same update, and E3's arms spend six of every ~27 steps in stages whose reward
+is identically 0.
+
+**The GNN-vs-MLP gap is where an explanation was asserted and it needs
+correcting.**
+
+*An earlier version of this section read "`policy_lr` **3e-4** vs **5e-5** …
+the ratio is close to the mechanism". **The number is right; the attribution
+was wrong, and the conclusion drawn from it does not follow.***
+
+* **Wrong attribution.** I implied the two lrs come from the cfgs. They do not.
+  Every one of the 30 files in `design_opt/cfg/` carries `policy_lr: 5.e-5` and
+  `value_lr: 3.e-4` — **the MLP arm never reads either.**
+  `train_e11_mlp.py:262-263` uses `args.policy_lr` / `args.value_lr`, its own
+  argparse arguments, and the cfg's `policy_specs` block is inert for it (the
+  cfg says so in its own header).
+* **The fact stands, from a better source than either cfg.** Read out of the
+  `args` stored inside the checkpoints the runs actually produced: **every MLP
+  arm — `rtg_mlp_s1_d2rep`, `s2_d2rep`, `rtg_mlp_s1`, `rtg_mlp_s1_pub` —
+  trained at `policy_lr = 3e-4`**, against the GNN's `5e-5` from cfg. The
+  6x difference is real.
+* **So the GNN-vs-MLP arms are NOT learning-rate matched**, and a cfg `grep`
+  cannot show that they are, because it reads a field one of the two arms
+  ignores. That is the same class of error this section is correcting, landing
+  on the other side of it.
+* **But it is not a hidden confound.** It was chosen deliberately and written
+  down before any of these runs: `train_e11_mlp.py`'s own docstring says
+  *"Their 5e-5 is tuned for their GNN; handing the MLP the same number would be
+  tuning the baseline down"*, its `--policy-lr` help says *"published
+  PPO-MuJoCo default (SB3/CleanRL), not the GNN arm's 5e-5"*, and
+  `D3_E2_RTG.md` §9 records *"the MLP uses the published 3e-4 …; the GNN uses
+  Transform2Act's 5e-5"*. E1.1's premise was **each architecture at its own
+  published configuration**, and it ran the MLP at *both* batchings precisely
+  because that configuration choice was known to matter — and it flipped the
+  verdict.
+* **One correction to carry back**: `D3_E2_RTG.md` §4 lists *"three differences
+  between the arms that are NOT architecture in the narrow sense"* —
+  observation normalisation, action spaces, design heads. **The 6x policy
+  learning rate is a fourth**, and belongs on that list.
+
+**Does lr explain the decay gap? No — it over-predicts.** A 6x learning rate
+produces only a **2.1x** decay difference (−0.0231 against the controls'
+−0.0112 mean). Direction yes, magnitude no.
+
+**And the first candidate offered for the residual is refuted by inspection.**
+The suggestion was that `control_log_std` might be per-body-type in the GNN,
+splitting its gradient. It is the reverse:
+
+| | parameter | shape | numel |
+|---|---|---|---|
+| GNN | `control_action_log_std` | **(1, 1)** | **1** — one global scalar for all 8 actuators |
+| MLP | `log_std` | **(8,)** | **8** — one per actuator |
+
+The GNN's is a *single* scalar accumulating gradient from all eight actuators'
+log-prob terms, which if anything should move it **faster**, not slower. This
+candidate points the wrong way.
+
+> **So: the design-on/design-off halving is explained; the GNN-vs-MLP ~2x at
+> matched design-off is NOT.** `lr` is real and directionally right but
+> quantitatively too large; the `log_std` parameterisation points the wrong
+> way. The remaining suggestion — that the GNN's value function is poorer
+> early, making advantages noisier and the consistent component of the gradient
+> smaller — **has not been checked and is not asserted here.** Marked
+> unexplained rather than filled with the next plausible candidate.
 
 ### 3g-iii. The prediction, and its falsifier
 

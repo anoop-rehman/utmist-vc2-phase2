@@ -40,7 +40,8 @@ for pf in glob.glob(os.path.join(cendir, f"pop_{cfg}_e*.json")):
                    c.get("p_act1"), c.get("p_act4"),
                    d.get("step_share_act4"))
 
-cols = ["epoch","alpha","n_bodies","n_motors","mass","limb_len_mean",
+cols = ["epoch","alpha","control_log_std","attr_log_std",
+        "n_bodies","n_motors","mass","limb_len_mean",
         "limb_len_sum","gear_mean","max_depth","topo",
         "distinct_topologies","top_topology_share","sampled_bodies_mean",
         "pop_motors_mean","pop_motors_max","p_act1","p_act4","step_share_act4",
@@ -59,6 +60,7 @@ for line in open(src):
     pm, px, p1, p4, ss = pop.get(ep, (None, None, None, None, None))
     rows.append([
         ep, d.get("alpha"),
+        d.get("control_log_std"), d.get("attr_log_std"),
         m.get("n_bodies"), m.get("model_nu_ours"), m.get("model_mass_ours"),
         (m.get("limb_length") or {}).get("mean"),
         (m.get("limb_length") or {}).get("sum"),

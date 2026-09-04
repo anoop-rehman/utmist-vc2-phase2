@@ -1,0 +1,50 @@
+{
+ "rtg_e3_s1": [
+  {
+   "epoch": 3,
+   "file": "best.p",
+   "control_action_log_std": -0.02977926802240523,
+   "attr_action_log_std": -2.29716441899986
+  },
+  {
+   "epoch": 18,
+   "file": "epoch_0019.p",
+   "control_action_log_std": -0.12152925142797388,
+   "attr_action_log_std": -2.3053299186117338
+  }
+ ],
+ "rtg_e3_s2": [
+  {
+   "epoch": 1,
+   "file": "best.p",
+   "control_action_log_std": -0.015239719225352482,
+   "attr_action_log_std": -2.3015615512431373
+  },
+  {
+   "epoch": 19,
+   "file": "epoch_0020.p",
+   "control_action_log_std": -0.10807512370246525,
+   "attr_action_log_std": -2.3065416822078006
+  },
+  {
+   "epoch": 21,
+   "file": "epoch_0022.p",
+   "control_action_log_std": -0.10961614908572745,
+   "attr_action_log_std": -2.3086680771347172
+  }
+ ],
+ "rtg_e3_s3": [
+  {
+   "epoch": 19,
+   "file": "best.p",
+   "control_action_log_std": -0.11116939720713775,
+   "attr_action_log_std": -2.313001720189294
+  },
+  {
+   "epoch": 19,
+   "file": "epoch_0020.p",
+   "control_action_log_std": -0.11116939720713775,
+   "attr_action_log_std": -2.313001720189294
+  }
+ ]
+}

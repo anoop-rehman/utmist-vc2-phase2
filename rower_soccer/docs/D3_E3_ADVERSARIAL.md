@@ -1116,6 +1116,67 @@ already flipped back to DELETE. The constant is doing real work.
 it changes CompetEvo's reward function, so E3.1 would no longer be comparable
 to D2, E2, E2.1 or E3 on return. Same effect, worse provenance.
 
+### 3f-iv-a. `log_std_crit` is a BASIN BOUNDARY, not a precision requirement
+
+`control_log_std` is a **learned parameter**, not a fixed hyperparameter, and
+that changes what the constant means. Below the boundary the gradient is
+self-reinforcing — lower σ → lower cost → higher return → lower σ still, which
+is the ride E2.1's arms took down to σ = 0.086. Above it the same gradient runs
+the other way, toward deleting actuators. So the question is **which side you
+initialise on**, which is a far more robust property than a knife-edge, and
+"0.116 of margin" was the wrong frame.
+
+**But it makes one thing load-bearing that E3 did not monitor: σ must actually
+go down.** Measured from E3's own checkpoints (`e3_logstd_trace.py`,
+`posthoc/logstd_trace.json`):
+
+| arm | epoch | `control_log_std` | σ | cost/step | vs −0.8837 |
+|---|---|---|---|---|---|
+| s1 | 3 | −0.0298 | 0.971 | 3.769 | **above** |
+| s1 | 18 | −0.1215 | 0.886 | 3.137 | **above** |
+| s2 | 1 | −0.0152 | 0.985 | 3.880 | **above** |
+| s2 | 21 | −0.1096 | 0.896 | 3.213 | **above** |
+| s3 | 19 | −0.1112 | 0.895 | 3.203 | **above** |
+
+> **σ did go down — at −0.0047 to −0.0061 per epoch. At that rate reaching the
+> boundary takes 125 to 164 more epochs. The design head deleted the actuators
+> in 17.**
+
+That is the race, measured rather than argued: **route 2 (delete) is roughly
+8-10x faster than route 1 (quieten down)**, and it is why E3's null was decided
+before `log_std` had moved a tenth of the way to where it needed to be. It also
+explains why the null was so uniform across seeds — the race is not close.
+
+**Is an entropy bonus pushing σ up? No — there is none.** Checked rather than
+assumed: `grep -rn "entropy" design_opt/ khrylib/rl/` returns nothing, the PPO
+objective is `-min(surr1, surr2).mean()` with no entropy term, and no cfg
+carries an entropy coefficient. Nothing in this stack opposes σ falling, which
+is a precondition for candidate (2) and is now on the record.
+
+**Now monitored, from epoch 0 and to disk.** `train_e3_gnn.py` writes
+`control_log_std`, `attr_log_std`, σ and the predicted cost/step into its
+per-epoch JSONL and into wandb under `policy/`; the census sidecar carries them
+into `<cfg>_morph.csv`. E3 had to have this reconstructed from checkpoints
+afterwards; E3.1 will not.
+
+*(The two frozen-body control arms now running were launched before this change
+and do not log it per epoch. Their σ is recoverable from their archival
+checkpoints via `e3_logstd_trace.py`, and it matters far less for them: with
+`force_identity_design` the actuator-deletion route does not exist.)*
+
+### 3f-iv-b. The boundary falsifier, pre-registered
+
+Alongside the `p_act4` falsifier already recorded, and it fires **earlier**:
+
+> **If `control_log_std` exceeds −0.8837 at any point in the first 20 epochs,
+> candidate (2) has failed and the arm is stopped.**
+
+This tests the mechanism directly rather than waiting for its consequence. σ
+rising above the boundary means the run is back in the basin where deleting
+actuators pays, and every number measured after that point would be measured on
+a run that had already lost. It is checkable per epoch from
+`census/<cfg>_morph.csv` with no wandb.
+
 ### 3f-iv. Recommendation
 
 > **Primary: `control_log_std` from 0 to −1** (σ = 0.368, cost 0.541/step).

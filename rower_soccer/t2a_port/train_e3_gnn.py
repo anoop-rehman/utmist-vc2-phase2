@@ -294,8 +294,29 @@ def main():
             payload["e3/dodge_worth"] = float((1.0 - agent.cur_alpha) * 1000.0)
 
         # ---- morphology, every epoch, from epoch 0 -----------------------
+        # D3 M3 E3.1: `control_log_std` is a LEARNED parameter, so
+        # `log_std_crit` (D3_E3_ADVERSARIAL.md 3f) is a BASIN BOUNDARY rather
+        # than a precision requirement -- below it the gradient is
+        # self-reinforcing, above it the same gradient runs toward deleting
+        # actuators. That makes "sigma actually goes down" load-bearing and it
+        # was unmonitored in E3: the trajectory had to be reconstructed from
+        # checkpoints afterwards. Logged per epoch, to disk, from epoch 0.
+        sd = agent.policy_net.state_dict()
+        cls = sd.get("control_action_log_std")
+        als = sd.get("attr_action_log_std")
+        cls = float(cls.mean().item()) if cls is not None else None
+        als = float(als.mean().item()) if als is not None else None
         row = {"epoch": epoch, "total_steps": total_steps,
-               "alpha": agent.cur_alpha}
+               "alpha": agent.cur_alpha,
+               "control_log_std": cls, "attr_log_std": als}
+        if cls is not None:
+            payload["policy/control_log_std"] = cls
+            payload["policy/control_sigma"] = float(np.exp(cls))
+            # the quantity 3f's threshold is stated in
+            payload["policy/ctrl_cost_per_step_pred"] = float(
+                0.5 * 8 * np.exp(2.0 * cls))
+        if als is not None:
+            payload["policy/attr_log_std"] = als
         if args.morph_every and epoch % args.morph_every == 0:
             t0 = time.time()
             with e3_morph.rng_guard(env), to_cpu(agent.policy_net), \

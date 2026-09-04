@@ -257,3 +257,103 @@ finish, at whatever seed count the card allows.
 * **The termination rule is unchanged**, as in E3. §3d's separate finding —
   that charging the fall −1000 while keeping the termination dominates on every
   axis — is a different rung and is not part of this one.
+
+## The growth ceiling — read, not assumed
+
+**Body count is bounded at 29, and the bound is tight.** `AntEnv.allow_add_body`
+permits a child only when `min_body_depth ≤ depth < max_body_depth − 1` and the
+body has fewer than `max_nchild` children. With this cfg's
+`min_body_depth 1 / max_body_depth 4 / max_nchild 2` and our ant's initial tree
+(depths `{0:1, 1:4, 2:4, 3:4}`), driving every body to ADD every step saturates:
+
+| add-step | bodies | depth histogram | still addable |
+|---|---|---|---|
+| initial | **13** | `{0:1, 1:4, 2:4, 3:4}` | 4 |
+| 1 | 21 | `{0:1, 1:4, 2:8, 3:8}` | 4 |
+| 2 | 25 | `{0:1, 1:4, 2:8, 3:12}` | 4 |
+| 3 | **29** | `{0:1, 1:4, 2:8, 3:16}` | **0** |
+| 4, 5 | 29 | — | 0 |
+
+**29 = 1 root + 4 at depth 1 + 8 at depth 2 + 16 at depth 3**, and the root
+itself can never add (depth 0 < `min_body_depth`), so the four original legs are
+structurally fixed. This also confirms `D3_E1_ANT.md`'s count from the other
+direction: 29 − 13 = **16 possible additions**, of which it measured 12 as
+passive dead weight.
+
+**So the memory demand terminates.** `skel_transform_nsteps` is 5, more than the
+3 steps needed to saturate, so 29 is reachable within a single episode's design
+phase — the ceiling is not merely asymptotic. The projection therefore has a
+finite worst case rather than an open-ended one, and the question is only
+whether two arms fit *at 29*.
+
+### The memory projection — and why the obvious fit is invalid
+
+**Asked for a projection of GPU bytes against body size. The data does not
+support one, and the first fit I produced was an artifact.** Fitting
+`MiB = a + b·bodies_mean` across both arms gave a slope of **2,085 MiB per
+body** and an intercept of **−31,896 MiB** — physically meaningless. It was
+fitting the *between-arm* difference, not body size:
+
+| | `bodies_mean` | peak MiB |
+|---|---|---|
+| `rtg_e31_s2` | 18.5 | **7,450** |
+| `rtg_e31_s3` | 18.1 | **4,756** |
+
+**A 2,694 MiB gap at 0.4 bodies' difference.** Body count cannot explain it —
+PyTorch's caching allocator holds each process's own high-water mark and
+`nvidia-smi` reports *reserved* memory, not live tensors. And within each arm,
+over 17.4 → 18.9 bodies, there is **no detectable growth**; the 2,596-7,450 MiB
+spread inside one arm is the sampling-trough-to-update-peak cycle, not body
+size.
+
+**What the numbers do support:**
+
+| | arms | `bodies_mean` | total peak | per arm |
+|---|---|---|---|---|
+| earlier | 3 | ~16 | 18,862 MiB | 6,287 |
+| now | 2 | ~18 | 12,206 MiB | 6,103 |
+
+> **Per-arm peak went 6,287 → 6,103 MiB while `bodies_mean` went 16 → 18.** The
+> pressure that forced shedding `s1` was **arm count, not body growth**, and
+> body growth over the observed range produced no measurable increase. That is
+> reassuring for 18 → 29 but it is not proof, because the observed range is
+> 1.5 bodies wide and the ceiling is 11 away.
+
+`gpu_longitudinal.sh` now records each arm's peak over a full 2-minute window
+against its `bodies_mean` every cycle, so the curve accumulates as bodies rise
+toward 29 and the question gets answered by measurement rather than
+extrapolation.
+
+### The mitigation ladder, decided in advance
+
+**Ordered by cost, cheapest first. Note that the first rung costs no science at
+all**, which is why it comes before shedding anything:
+
+1. **Shrink the update chunk — results-neutral.**
+   `transform2act_agent.update_params` and `update_policy` each hold a
+   `chunk = 10000` forward pass over the 50,000-state batch. Both run under
+   `to_test(*update_modules)` + `torch.no_grad()`, there is no batch norm, and
+   `RunningNorm` does not update in test mode — so each element's forward is
+   independent and **chunk size changes peak memory and iteration count, not
+   numerics.** Dropping to 2,500 cuts that peak ~4x. Cost: one epoch, because
+   it needs the arm restarted from its checkpoint with `--epoch N`.
+2. **Shed the higher-peak arm** — currently `s2` at 7,450 MiB against `s3`'s
+   4,756, re-measured over ≥60 s at the time rather than assumed from these
+   numbers, since the two swap places between phases.
+3. **Do NOT run a single arm to 400.** n = 1 supports no claim about seed
+   variance, and this project has recorded that limitation three times already.
+   If rung 2 is reached, **stop both arms and report n = 2 at whatever epoch
+   they reached** in preference to a lone seed running on.
+
+**Trigger**: total sustained update-phase peak above **17,500 MiB** (85%),
+measured over ≥60 s — not a single sample. That leaves ~3 GB of margin against
+the 19.95 GB at which E1 lost D1.
+
+### The third seed is suspended, not abandoned
+
+`rtg_e31_s1` stopped by stop-file at epoch 4 with **`epoch_0005.p` saved**, and
+`train_e3_gnn.py --epoch 5` resumes it. If the longitudinal curve shows the
+bodies plateauing below the ceiling, or once one arm finishes, **resuming
+restores n = 3 for most of the run**. "n = 2, resource-limited" and "n = 2, one
+seed suspended and resumable" are different claims about how much this result
+can be strengthened later, and it is the second.

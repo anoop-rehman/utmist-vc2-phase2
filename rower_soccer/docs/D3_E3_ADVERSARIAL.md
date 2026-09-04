@@ -617,6 +617,16 @@ task", and the reading is fixed here too:
   zero-torque floor** through the same code path.
 * **Forward progress, not return, is the primary readout.** E2's whole lesson
   was that return tracked falling.
+* **The LIVE evaluation series is the MODE, not the population.** The inline
+  `e3/eval_*` curve calls `e2_eval.gnn_actor(..., mean_action=True)`, so with
+  the design stages live it evaluates the mean-action design — the very
+  readout §3c establishes is unrepresentative. That is a real limitation of
+  the live curve and it is not fixable without restarting the arms. **The
+  post-hoc (`e3_posthoc.py`) runs both protocols**, and for a design-on arm the
+  **stochastic column is the population** and is the one the write-up leads
+  with. The live curve is a progress indicator, not a result — which was
+  already the rule (`D3_E2_RTG.md` §5: no number in the results table comes
+  from a training log), and now has a second reason.
 * **Per-epoch morphology**: mean-action design (topology, body/motor count,
   mass, limb lengths, radii, gears, depth histogram, full genome) plus a
   20-design sampled census (distinct topologies, most-common share, body-count
@@ -711,6 +721,17 @@ ran at 01:22-01:27:
 and `r(mean-action body count, T_sample)` over the same epochs is +0.56/+0.70/
 **−0.08** — no consistent relationship, so body size does not explain it.
 **Under a 10.2-CPU quota my own post-hoc probes are a first-class tenant.**
+
+**This attribution is not yet confirmed, and the confirming test is stated
+before its result.** Probes ran continuously from 01:22 to 01:34:42 (three blob
+probes, then four population probes), and epochs 6-9 all finished inside that
+window at 99-119 s. The falsifier is simple: **if the cause was the probes,
+`T_sample` returns toward 61 s from epoch 10 onward, when only the light
+5-minute CSV sidecar is left.** If it stays near 115 s the attribution is wrong
+and the cost is intrinsic — most likely the sampled designs having grown
+(`sampled_bodies_mean` 8.65-13.76 against the readout's 5), which the
+mean-action body count used above would not see. Result recorded when epoch 10
+lands.
 
 Consequences, applied: population probes run **one seed at a time and `nice -n
 19`**, never three at once. And the general lesson is the one this project

@@ -91,7 +91,25 @@ def main():
         cen = e3_morph.census(ag.env, ag.policy_net, a.designs, False,
                               ag.running_state)
 
-    out = dict(cfg=a.cfg, ckpt=a.ckpt, designs=a.designs,
+    # The checkpoint's OWN epoch, not the epoch the probe ran at. `best.p` is
+    # written whenever `exec_R_eps` improves, and on these arms that statistic
+    # plateaus almost immediately at the blob's survive-bonus return -- so
+    # `best.p` can be many epochs stale and a probe against it must say which
+    # epoch it actually measured.
+    ckpt_epoch = None
+    if a.ckpt != "untrained":
+        try:
+            import pickle
+            ckpt_epoch = pickle.load(open(
+                f"/workspace/Transform2Act/results/{a.cfg}/models/{a.ckpt}.p",
+                "rb")).get("epoch")
+        except Exception:
+            pass
+    else:
+        ckpt_epoch = -1
+
+    out = dict(cfg=a.cfg, ckpt=a.ckpt, ckpt_epoch=ckpt_epoch,
+               designs=a.designs,
                mean_action_n_motors=ma.get("model_nu_ours"),
                mean_action_n_bodies=ma.get("n_bodies"),
                mean_action_gear_mean=(ma.get("gear") or {}).get("mean"),
@@ -99,7 +117,7 @@ def main():
                census=cen,
                step_share_act1=step_share(cen["p_act1"]),
                step_share_act4=step_share(cen["p_act4"]))
-    print(f"\n{a.cfg} @ {a.ckpt}")
+    print(f"\n{a.cfg} @ {a.ckpt} (checkpoint saved at epoch {ckpt_epoch})")
     print(f"  MEAN-ACTION (the greedy readout): "
           f"{out['mean_action_n_bodies']} bodies, "
           f"{out['mean_action_n_motors']} motors, "

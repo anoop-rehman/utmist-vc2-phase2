@@ -41,5 +41,7 @@
   "sampled_genome_rows": 2552
  },
  "step_share_act1": 0.9993522037985447,
- "step_share_act4": 0.9803622184115948
+ "step_share_act4": 0.9803622184115948,
+ "ckpt_epoch": 1,
+ "ckpt_epoch_provenance": "recovered post-hoc from the same best.p the probe read; its mtime predates the probe run and is unchanged since"
 }

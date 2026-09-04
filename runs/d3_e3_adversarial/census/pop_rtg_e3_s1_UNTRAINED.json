@@ -43,5 +43,6 @@
   "sampled_genome_rows": 2751
  },
  "step_share_act1": 0.9997861452840943,
- "step_share_act4": 0.9910516046558567
+ "step_share_act4": 0.9910516046558567,
+ "ckpt_epoch": -1
 }

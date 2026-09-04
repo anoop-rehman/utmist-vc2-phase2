@@ -103,6 +103,18 @@ def main():
     p.add_argument("--episodes", type=int, default=10)
     p.add_argument("--seed-base", type=int, default=1000)
     p.add_argument("--out", default=None)
+    p.add_argument("--no-fall-done", action="store_true",
+                   help="COUNTERFACTUAL: remove the fall from the termination "
+                        "condition, by dropping stand_z to -1e9 so "
+                        "`fell = s[2] < stand_z` can never fire. This is the "
+                        "real form of 'remove the penalty for falling': there "
+                        "is no fall PENALTY in the reward -- a fall "
+                        "contributes exactly 0 and appears only in `done` "
+                        "(`run_to_goal.py`) -- so what a fall actually costs "
+                        "is the rest of the episode's SURVIVE_BONUS. This "
+                        "probe measures what happens if it costs nothing. It "
+                        "touches only this process; the live arms run the "
+                        "unmodified rule.")
     a = p.parse_args()
     torch.set_default_dtype(torch.float64)
     torch.set_num_threads(1)
@@ -115,18 +127,35 @@ def main():
 
     cfg, env_design, make, std = load_gnn(a.cfg, a.ckpt)
     alpha = alpha_at(a.epoch_for_alpha, a.curriculum_steps, cfg.min_batch_size)
+    ckpt_epoch = None
+    try:
+        import pickle
+        ckpt_epoch = pickle.load(open(
+            f"/workspace/Transform2Act/results/{a.cfg}/models/{a.ckpt}.p",
+            "rb")).get("epoch")
+    except Exception:
+        pass
     maxs = cfg.done_condition.get("max_nsteps", 500) + 5
     act_fn, _ = make(True)
 
     # the same weights, on a body the design stages may not touch
     cfg_f = Config(a.frozen_cfg, tmp=True)
     env_frozen = env_dict[cfg_f.env_name](cfg_f, agent=None)
+    if a.no_fall_done:
+        # `fell = self.state_vector()[2] < self.stand_z` is the ONLY place the
+        # fall enters, and it enters `done` alone -- never the reward. Putting
+        # stand_z below any reachable height removes the fall from termination
+        # exactly, with no code change and nothing else touched.
+        env_design.stand_z = -1e9
+        env_frozen.stand_z = -1e9
     W = env_frozen.control_action_dim + env_frozen.attr_design_dim + 1
     zero = np.zeros((len(env_frozen.robot.bodies), W))
 
-    print(f"\n{a.cfg} checkpoint '{a.ckpt}', alpha at epoch "
-          f"{a.epoch_for_alpha} = {alpha:.6f}, {a.episodes} episodes, "
-          f"mean-action\n")
+    print(f"\n{a.cfg} checkpoint '{a.ckpt}' (saved at epoch {ckpt_epoch}), "
+          f"alpha at epoch {a.epoch_for_alpha} = {alpha:.6f}, "
+          f"{a.episodes} episodes, mean-action"
+          + ("   [COUNTERFACTUAL: fall removed from `done`]"
+             if a.no_fall_done else "") + "\n")
     print("  arm        body            | episode        | reward split"
           "                            | objective              | progress")
 
@@ -161,7 +190,8 @@ def main():
               f"from 'bad control'.")
     if a.out:
         os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-        json.dump(dict(cfg=a.cfg, ckpt=a.ckpt, alpha=alpha,
+        json.dump(dict(cfg=a.cfg, ckpt=a.ckpt, ckpt_epoch=ckpt_epoch,
+                       alpha=alpha, no_fall_done=bool(a.no_fall_done),
                        epoch_for_alpha=a.epoch_for_alpha,
                        episodes=a.episodes, arms=arms), open(a.out, "w"),
                   indent=1)

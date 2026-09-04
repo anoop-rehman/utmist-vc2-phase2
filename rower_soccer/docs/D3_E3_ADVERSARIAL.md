@@ -493,29 +493,55 @@ sampled with a 0.05-0.10 top share**, while the mean-action `topo` hash has
 been a single value (`9a51d315a8da`) since epoch 5, and `sampled_bodies_mean`
 sits at 9.65-12.45 against the mean-action design's 5.
 
-**Measured** (`e3_population_probe.py`, 200 sampled designs per row,
-`census/pop_*.json`):
+**Definition, fixed before it is judged.** `p_act1` is the fraction of sampled
+designs with **≥ 1** motor; **`p_act4` is the fraction with ≥ 4** — one per
+original leg, the minimum that could plausibly walk. **`p_act4` is the number
+§3c's rule uses**, and every "% actuated" figure below is `p_act4` unless it
+says otherwise.
 
-| | mean-action readout | pop. motors mean (max) | p(≥1 motor) | **p(≥4 motors)** | **step share of ≥4-motor designs** | distinct topologies |
-|---|---|---|---|---|---|---|
-| **untrained baseline** | 19 bodies, **7 motors** | 5.71 (12) | 0.995 | **0.825** | 0.991 | 199 / 200 |
-| seed 1 @ `best` | 5 bodies, **0 motors**, gear 0.0 | 2.51 (9) | 0.820 | **0.300** | 0.910 | 186 / 200 |
-| seed 2 @ `best` | 6 bodies, **0 motors**, gear 0.0 | 4.45 (10) | 0.985 | **0.680** | 0.980 | 196 / 200 |
-| seed 3 @ `best` | 6 bodies, **0 motors**, gear 0.0 | 5.26 (10) | 0.995 | **0.790** | 0.989 | 198 / 200 |
+**Measured** (`e3_population_probe.py`, 200 sampled designs per row).
+Provenance: `census/pop_rtg_e3_s1_UNTRAINED.json` and
+`census/pop_rtg_e3_s{1,2,3}_best.json`, all committed, and aggregated into
+`census/population.csv`.
 
-> **The greedy readout collapsed on all three seeds; the search did not collapse
-> on any of them.** The mean-action design is a 0-motor blob everywhere, while
-> the population it is the mode of still puts **30% / 68% / 79%** of its mass on
-> designs with four or more motors — and seeds 2 and 3 are barely below the
-> **untrained** baseline of 0.825. Because a blob dies at 20.9 control steps
-> while an actuated body runs to ~491, those designs supply **91% / 98% / 99%
-> of each epoch's training steps**.
->
-> **Stopping on the readout alone would have ended a run whose gradient is
-> made almost entirely of bodies that can act**, and it would have done so on
-> three seeds that disagree with each other by a factor of 2.6 on the quantity
-> that matters (`p_act4` 0.300 vs 0.790) while agreeing perfectly on the
-> quantity that does not (`n_motors` = 0, three times).
+| checkpoint | **epoch it was saved at** | mean-action readout | pop. motors mean (max) | `p_act1` | **`p_act4`** | **step share of ≥4-motor designs** | distinct topos |
+|---|---|---|---|---|---|---|---|
+| seed 1, untrained | — | 19 bodies, **7 motors** | 5.71 (12) | 0.995 | **0.825** | 0.991 | 199 / 200 |
+| seed 3 `best.p` | **0** | 6 bodies, **0 motors** | 5.26 (10) | 0.995 | **0.790** | 0.989 | 198 / 200 |
+| seed 2 `best.p` | **1** | 6 bodies, **0 motors** | 4.45 (10) | 0.985 | **0.680** | 0.980 | 196 / 200 |
+| seed 1 `best.p` | **3** | 5 bodies, **0 motors** | 2.51 (9) | 0.820 | **0.300** | 0.910 | 186 / 200 |
+
+**A correction to my own reading of this table, and it is not a small one.**
+When first written these rows were labelled "seed 1/2/3 @ `best` (~epoch 7)"
+and read as a seed spread — "three seeds that disagree by a factor of 2.6 on
+`p_act4` while agreeing perfectly on `n_motors`". **That was wrong.**
+`best.p` is written whenever `exec_R_eps` improves, and on these arms that
+statistic plateaus almost immediately at the blob's survive-bonus return
+(~21), so the three checkpoints are frozen at **epochs 0, 1 and 3** —
+recovered from the pickles, whose mtimes (00:58, 01:04, 01:14) all predate the
+probe runs (01:32-01:34) and are unchanged since.
+
+So the table is **not three seeds at one epoch**; it is three different seeds
+at three different, very early epochs, and the apparent "seed disagreement" is
+ordered exactly by epoch. What it actually shows is:
+
+* **at epochs 0-3 the readout was already a 0-motor blob while the population
+  was still 30-79% actuated.** That claim stands, and it is what makes §3c's
+  change from readout to population correct.
+* **whether the population has collapsed by now is UNMEASURED.** The three
+  arms are past epoch 12 and there is no population measurement after epoch 3.
+  My earlier statement to the effect that "the search did not collapse" is
+  established **only for epochs 0-3** and I should not have written it without
+  that qualifier.
+* the four rows are also **four different policies**, not a series, so the
+  0.825 → 0.790 → 0.680 → 0.300 ordering is suggestive and **not a trend**. It
+  is not extrapolated here and the rule does not rest on it.
+
+**`best.p` is therefore useless as a progress tracker on these arms** and the
+real series is the archival checkpoints. `population_watcher.sh` probes each of
+epochs 20/40/60/80/100/200/300/400 as it appears; **epoch 20 is the first
+measurement of the population under a meaningfully trained policy**, and the
+first that can support any statement about whether the search is collapsing.
 
 **Step share is the quantity the rule uses**, because the gradient sees
 episodes and not designs. Converting a design share `p` with the measured
@@ -560,7 +586,8 @@ measure two different creatures**:
 * **mean-action = the MODE of the design distribution.** One body, the greedy
   readout, currently a 0-motor blob.
 * **stochastic = the POPULATION.** Bodies drawn the way training draws them —
-  presently 82-99.5% actuated, mean 2.51-5.26 motors, up to 10.
+  at epochs 0-3, `p_act1` 0.820-0.995 and mean 2.51-5.26 motors, up to 10.
+  (Unmeasured since; see §3c.)
 
 For E2 and E2.1 that distinction was empty: the body was frozen, so both
 protocols ran the same creature and the only difference was action noise. For
@@ -583,6 +610,99 @@ other, on the model side and the robot side, to produce this.
 Stopping is by **stop-file** (`/tmp/stop_e3_s{1,2,3}`), never by signal.
 
 ---
+
+### 3d. THREE TERMINATION RULES x TWO REWARD REGIMES, measured
+
+*Prompted by the user's proposal to "remove the penalty for falling". Read from
+source, **there is no fall penalty**: a fall contributes exactly 0 to the
+reward and appears only in `done` (`run_to_goal.py`), so what a fall costs is
+the rest of the episode's `SURVIVE_BONUS`. The real form of the proposal is
+removing `fell` from the termination condition — rule (ii) — and it turns out
+to be a better idea than it first looked, for a reason that also makes `d2rep`
+a liability.*
+
+`e3_termination_grid.py`, 10 mean-action episodes, alpha 0.997696,
+`posthoc/termination_grid.json`. **Probe only — the three live seeds ran the
+unmodified rule throughout.**
+
+* **rule (i) `current`** — a fall ends the episode and pays nothing.
+* **rule (ii) `nofall`** — a fall does not end the episode.
+* **rule (iii) `charged`** — a fall ends the episode **and** is charged −1000.
+
+Rule (iii) needs no separate rollout and that is exact, not an approximation:
+under rule (i) a fallen episode's `parse` is 0 by construction, so (iii) is
+(i)'s trajectory with −1000 added on exactly the fallen episodes.
+
+Arms: the **blob** (each seed's own design and control head), the **competent
+ant** — E2.1's trained `d2rep` MLP on the frozen 13-body ant, the only policy
+on this project that plays this task — and the **zero-torque floor**.
+
+#### The two gradients that decide it
+
+| rule | regime | **scoring gradient**<br>(competent − blob) | **upright gradient**<br>(idle ant − blob) | episodes per 50k batch | blob's dead steps |
+|---|---|---|---|---|---|
+| current | flat | +1330.6 | **−486.8** | 2392 | 0% |
+| current | **d2rep** | +531.2 | +310.6 | 2392 | 0% |
+| nofall | flat | +1983.1 | **−1.9** | **102** | **95.7%** |
+| nofall | d2rep | **+186.9** | **−1.9** | **102** | **95.7%** |
+| **charged** | **flat** | **+2330.6** | **+313.2** | **2392** | **0%** |
+| charged | d2rep | +533.5 | +312.5 | 2392 | 0% |
+
+**The coordinator's central claim is confirmed, and by more than predicted.**
+Removing fall-termination under the flat reward gives a scoring gradient of
+**+1983** (predicted ~2100), while the same rule under `d2rep` gives **+187**
+(predicted ~100). Down-weighting the sparse term to 0.2% does throw away the
+scoring incentive once the dodge is removed structurally: **`d2rep` is 10.6x
+worse than flat at rewarding a goal under rule (ii).** Two component
+corrections to the derivation, both small and both in the same direction: the
+lying blob banks **368.7** of dense, not ~491, because the opponent bulldozes
+it backwards (`dx` −1.6 to −2.0 m, so `Σforward` ≈ −129); and the competent
+ant measures **+1351.8** here rather than E2.1's stored +1599, on different
+episode seeds at goal 0.90 rather than 0.95/1.00.
+
+**But rule (ii) has a defect neither of us anticipated, and it is visible only
+because the idle floor was in the grid.** Under `nofall` the upright gradient
+collapses to **−1.9** — a fallen body and a standing one score within two
+points of each other, in *both* regimes (blob dense 368.7 against idle's
+366.8). Removing fall-termination does not create a preference for staying up;
+**it makes lying down and standing up equivalent.** The scoring gradient
+survives, but the gradient toward the *prerequisite* for scoring does not, and
+a policy that cannot yet score sees nothing telling it to stay on its feet.
+
+**And it costs 23x the sample efficiency.** Every episode runs to the full 491
+steps, so a 50,000-step batch buys **102 episodes against 2,392**. For the blob
+**95.7% of every episode is dead state** — 470 of 491 steps after the fall,
+paying only the survive bonus into a body that cannot self-right.
+
+#### The recommendation for E3.1: charge the fall, keep the termination, drop `d2rep`
+
+**Rule (iii) with the flat reward dominates on every axis measured** — the
+largest scoring gradient (+2330.6), a restored upright gradient (+313.2), full
+sample efficiency (2392 episodes per batch), and no dead state. It has rule
+(ii)'s incentive structure without rule (ii)'s two costs.
+
+Three further things the grid says:
+
+1. **A competent policy is indifferent to the rule.** The competent ant scores
+   1351.8 under all three rules, identically, because its fall rate is 0.00.
+   Changing the termination rule costs a working policy exactly nothing, which
+   is what makes rule (iii) safe to adopt.
+2. **`d2rep` neuters rule (iii).** The −1000 charge enters the objective scaled
+   by `(1 − alpha)` = 0.0023, so it is worth −2.3 and `charged` (18.8) is
+   indistinguishable from `current` (21.2). The two fixes are alternatives, not
+   complements: **whichever one is used, the other should be dropped.**
+3. **Fall-termination was a sample-efficiency device doing double duty as a
+   broken reward rule**, and the grid separates the two jobs. Keeping the
+   termination preserves the 23x efficiency; charging it supplies the incentive
+   the termination alone never did. E2's entire null, and E2.1's need for
+   `d2rep` at all, trace to those two jobs having been fused.
+
+**What this does NOT say.** It is a scoring of fixed policies under six reward
+definitions, not six training runs — it measures the *incentive landscape*,
+not what PPO does in it. No arm has been trained under rule (ii) or (iii), and
+E2.1 established that a curriculum's realised behaviour can differ sharply from
+its nominal shape. The blob checkpoints are from epochs 0/1/3 (§3c), the
+competent arm is an MLP where E3 is a GNN, and it is 10 episodes per cell.
 
 ### What the frozen-body GNN control decides
 

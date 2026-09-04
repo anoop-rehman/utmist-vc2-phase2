@@ -74,6 +74,11 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 RENDER_DIR = "/workspace/utmist-vc2-phase2/runs/d3_e3_adversarial/renders"
+# D3 M3 E3.1 renders go to their own directory. E3's render dir already mixes
+# design-ON and frozen-control clips that differ by one letter of cfg name and
+# misled a reader once (see runs/d3_e3_adversarial/renders/INDEX.md); a third
+# family in the same directory would be worse.
+RENDER_DIR_E31 = "/workspace/utmist-vc2-phase2/runs/d3_e31_fix/renders"
 VIDEO_CKPT = "_video_tmp"
 
 
@@ -416,8 +421,9 @@ def main():
                 # morphology was not changing. The tag makes the clip
                 # self-describing.
                 tag = "DESIGN-ON" if design_on else "FROZEN-CONTROL"
-                out = (f"{RENDER_DIR}/{tag}_{args.cfg}"
-                       f"_e{epoch + 1:04d}_bmw.mp4")
+                rd = RENDER_DIR_E31 if args.cfg.startswith("rtg_e31") else RENDER_DIR
+                os.makedirs(rd, exist_ok=True)
+                out = f"{rd}/{tag}_{args.cfg}_e{epoch + 1:04d}_bmw.mp4"
                 env2 = dict(os.environ, MUJOCO_GL="osmesa",
                             CUDA_VISIBLE_DEVICES="")
                 cmd = [sys.executable,

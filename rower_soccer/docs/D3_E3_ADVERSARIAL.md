@@ -12,23 +12,34 @@ is in "Not tested" at the end.*
 ([`D3_E21_CURRICULUM.md`](D3_E21_CURRICULUM.md)). **Morphology**: this is the
 first D3 rung where it is **not frozen**.
 
-> ### Reading the videos — the one-letter trap
+> ## READ THIS FIRST — what happened, in order
 >
-> **`rtg_e3_s{1,2,3}` is the experiment (design stages LIVE). `rtg_e3c_s{1,2}`
-> is the frozen-body control.** One letter apart, completely different runs.
-> The design-ON arms were stopped at epoch ~19 (§3e) and the controls have run
-> on since, so **sorting the render directory by date shows nothing but
-> controls, whose bodies cannot change by construction.** A reader who skims
-> the newest clips and concludes "the morphology isn't changing" is looking at
-> the control and is correct about it.
+> **1. Evolution ran first, and it failed in 19 epochs.** Three seeds with the
+> skeleton and attribute stages LIVE (`rtg_e3_s{1,2,3}`). The design search
+> **deleted every actuator**: `p_act4` = 0.000 on 3 of 3 seeds, not one design
+> in 600 with four motors, two seeds converging on the identical 5-body 0-motor
+> stump. Stopped at epoch ~19 by its own pre-registered rule. **This is the
+> headline** — §3e.
 >
-> **E3's evolved bodies — the 5-body, 0-motor stumps — are visible only in the
-> `e0006`, `e0012` and `e0018` design-ON clips.** They are now also reachable
-> by the self-describing names
-> `renders/DESIGN-ON_evolved-body_seed{1,2,3}_epoch{0006,0012,0018}.mp4`, with
-> `renders/INDEX.md` as the key. Each panel is labelled `nb=` with its own body
-> count. Throughout this document the arms are named **"design ON"** and
-> **"frozen-body control"** rather than by cfg id, for the same reason.
+> **2. The frozen-body controls existed to say whose fault that was.** With
+> `force_identity_design` the body cannot be edited, so the failure route is
+> closed by construction. They ran 400 epochs and **solved the task**: goal
+> **1.00**, forward **5.02 m**, fell **0.00**, R ≈ **+1510**, matching E2.1's
+> frozen-body MLP. **The GNN controller can do this task, so E3's null is the
+> design loop's, not the controller's** — §3g.
+>
+> **3. E3.1 is the fix**, derived before running: `control_log_std` 0 → −1.5,
+> plus a structural actuator floor on a second arm — §3f.
+>
+> **So if you are looking for the evolved bodies, they are the 5-body 0-motor
+> stumps in `renders/DESIGN-ON_evolved-body_seed{1,2,3}_epoch{0006,0012,0018}.mp4`.**
+> Everything in that directory dated later is a **frozen-body control** whose
+> morphology *cannot* change — sorting by date shows only those, and a reader
+> who concludes from them that "the morphology isn't changing" is looking at
+> the control and is right about it. `renders/INDEX.md` is the key. Throughout
+> this document the arms are called **"design ON"** and **"frozen-body
+> control"** rather than by cfg id, because `rtg_e3_s1` and `rtg_e3c_s1` differ
+> by one letter and are different experiments.
 
 ## The question, and why it needed two gates before any compute
 

@@ -1,1 +1,2 @@
 cfg,epoch,control_log_std,sigma,cost_per_step,below_survive,below_boundary
+rtg_e3c_s1,65,-0.645515,0.524392,1.099950,0,0

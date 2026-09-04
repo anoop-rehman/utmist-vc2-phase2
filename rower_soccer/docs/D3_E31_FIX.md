@@ -138,6 +138,14 @@ The first tests the mechanism directly and fires earlier; the second tests its
 consequence and is the statistic that stopped E3. Both are readable per epoch
 from `runs/d3_e31_fix/census/` with no wandb.
 
+**Both watch for COLLAPSE only.** The mirror failure — the design head pinning
+at the 29-body ceiling — is neither of them, and is recorded separately as
+**Outcome C** below: a regime to classify rather than a trigger to halt.
+**Every report of the falsifier table must carry forward progress and goal rate
+beside the morphology columns**, because a body that is growing *and* walking
+and one that is only growing are different results and the falsifiers as
+written cannot tell them apart.
+
 ## Epoch 0 — the first evidence, and it is not yet a result
 
 | | E3 (`log_std` 0) | **E3.1 s1 / s2 / s3** |
@@ -357,3 +365,74 @@ bodies plateauing below the ceiling, or once one arm finishes, **resuming
 restores n = 3 for most of the run**. "n = 2, resource-limited" and "n = 2, one
 seed suspended and resumable" are different claims about how much this result
 can be strengthened later, and it is the second.
+
+## Outcome C — ceiling saturation, the failure neither falsifier watches for
+
+*Added before the epoch-20 verdict, because the pre-registration had a gap and
+the arms are walking into it: readout bodies are at 24-26 of a hard ceiling of
+29, up from 12 at epoch 0.*
+
+**Both falsifiers watch for collapse** — `p_act4` → 0, `log_std` rising above
+−0.9645. **Neither watches for the mirror failure**: the design head pinning at
+the ceiling. "Grows to 29 and stays there" is not self-evidently success. It
+could be the fix working — E1 already found this creature evolves away from a
+quadruped — or it could be a second degenerate optimum pointing the other way:
+instead of deleting everything to escape the control cost, adding everything
+because bodies are cheap.
+
+**They are cheap, and that is measurable.** `dense = forward − 0.5·Σa² + 1.0`
+has **no mass or size term at all**. Only *actuated* bodies cost anything, via
+`Σa²`. And `D3_E1_ANT.md` established that **12 of our ant's 16 possible
+additions are jointless clones** — passive dead weight that the reward cannot
+see. So the sharp sub-signal is not body count but the **passive fraction**,
+`passive = n_bodies − 1 − n_motors`:
+
+| | bodies | motors | **passive** | `max_fwd` | goal |
+|---|---|---|---|---|---|
+| initial ant | 13 | 8 | **4** | — | — |
+| s2 epoch 0 | 12 | 6 | 5 | — | — |
+| **s2 epoch 9** | **26** | **11** | **14** | **0.12 m** | 0.00 |
+| s3 epoch 0 | 12 | 6 | 5 | — | — |
+| **s3 epoch 8** | **18** | **9** | **8** | **0.16 m** | 0.00 |
+
+**s2 has added 14 bodies and 5 motors: roughly three passive bodies for every
+actuated one.**
+
+### The definition
+
+> **Outcome C fires when** readout `n_bodies` ≥ **27** (within 2 of the ceiling)
+> **sustained over ≥ 5 consecutive epochs** with `p_act4` ≥ 0.9.
+
+### What distinguishes healthy growth from a second degenerate optimum
+
+The discriminator is whether the body is being *used*, and the honest test is
+against the frozen-body control's own timeline, because that arm shows what
+this task's learning curve looks like without any design freedom:
+
+* **C1, healthy growth** — saturation with **forward progress rising**:
+  `max_fwd` trending up and crossing ~1.0 m by around epoch 84, which is where
+  the frozen-body controls' `net_dx` first turned positive, or any goal > 0.
+  Bodies growing *while the task gets solved* is the fix working.
+* **C2, a second degenerate optimum** — saturation with `max_fwd` **flat below
+  ~0.5 m past epoch ~90** (the controls' locomotion onset plus margin) and goal
+  0.00, **with the passive fraction still rising**. A body that is only growing.
+
+**At epoch 9 this is not yet distinguishable and must not be read as either.**
+The controls sat at `max_fwd` 0.21 / 0.14 m at epoch 9 and did not locomote
+until epochs 84 / 79. E3.1's 0.12-0.16 m is squarely on that trajectory, so
+flat forward progress now is exactly what the reference arm did.
+
+### What follows in each case
+
+* **C1** — nothing. Continue to 400.
+* **C2** — the design head is accumulating bodies the reward cannot see. The
+  analogue of §3c's actuator floor is a **size cost, not a reward-mix change**:
+  `dense` has no mass or body-count term, so passive bodies are free by
+  construction. The candidate next rung is a per-body or per-unit-mass cost, or
+  tightening `add_body_condition`. **Not** a change to `d2rep`, and **not** a
+  termination-rule change — for the same reason as E3, neither touches what is
+  actually being exploited.
+
+**This is recorded as an outcome to classify, not a trigger to halt.** Growth
+toward a larger body may simply be correct, and stopping the run on it would
+throw away the result that distinguishes C1 from C2.

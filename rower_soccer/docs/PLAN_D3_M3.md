@@ -524,6 +524,52 @@ is **1020000/100000 = 10.2 CPUs**, and `vmstat` under five arms shows 25-34
 runnable against 20-21% of 48 busy. E2.1's recorded slowdown (`T_sample`
 31 -> 41 -> 83 s as arms were added) is the same throttle.
 
+### E3.1 — repair the termination rule instead of out-weighting it (proposed 2026-09-04)
+
+**Not started, and deliberately not started while E3 runs.** Recorded here
+because E3's own instrumentation produced the case for it, and because E2 §6
+left "decide about the termination rule" open for E3 to answer. E3 answered it
+by *keeping* the rule (so that E3 is one change, not two); E3.1 is where the
+rule itself is tested.
+
+**The measurement that motivates it** — `D3_E3_ADVERSARIAL.md` §3d, three
+termination rules crossed with two reward regimes, scored on fixed policies:
+
+| rule | regime | scoring gradient | upright gradient | episodes / 50k |
+|---|---|---|---|---|
+| current | flat | +1330.6 | **−486.8** | 2392 |
+| current | **d2rep** (what E2.1 and E3 run) | +531.2 | +310.6 | 2392 |
+| no-fall-termination | flat | +1983.1 | **−1.9** | **102** |
+| no-fall-termination | d2rep | **+186.9** | **−1.9** | **102** |
+| **fall charged −1000** | **flat** | **+2330.6** | **+313.2** | **2392** |
+| fall charged −1000 | d2rep | +533.5 | +312.5 | 2392 |
+
+* **There is no fall *penalty* to remove.** A fall contributes exactly 0 to the
+  reward and appears only in `done`; what it costs is the rest of the episode's
+  survive bonus. So "remove the penalty" really means "remove `fell` from the
+  termination condition".
+* **Doing that works on incentives and fails on two other axes**: the upright
+  gradient collapses to −1.9 (a fallen body and a standing one score within two
+  points), and a 50,000-step batch buys 102 episodes instead of 2,392, with
+  95.7% of a fallen episode a dead state.
+* **Charging the fall −1000 while keeping the termination dominates on every
+  axis measured** — and a competent policy is *indifferent* to the rule
+  (E2.1's trained ant scores 1351.8 under all three, fall rate 0.00), which is
+  what makes it safe to adopt.
+* **`d2rep` and the rule repair are alternatives, not complements.** Under
+  `d2rep` the −1000 charge enters scaled by `(1 − alpha)` = 0.0023 and is worth
+  −2.3, so the repair does nothing. **Whichever is used, drop the other.**
+
+**Proposed spec**: E3's arms re-run with the fall charged −1000 and the **flat**
+env reward, everything else identical, so the comparison against E3 isolates
+the rule. Falsifier: if the rule repair does not move the goal rate, the
+blocker is not the termination rule and E2's null needs a third explanation.
+
+**The caveat that must travel with it**: §3d scores *fixed policies under six
+reward definitions*. It measures the incentive landscape, not what PPO does in
+it. No arm has been trained under either alternative rule, and E2.1 established
+that a schedule's realised behaviour can differ sharply from its nominal shape.
+
 ### E4 — Self-play, both sides evolving, run-to-goal 1v1
 
 * Both agents run skeleton -> attribute -> execution, both learn, opponent

@@ -505,9 +505,34 @@ occurred.
 * **This is the third outcome named in §3b *before* the data** — "the search
   removed the ability to act" — not Reading A (there is no optimisation
   *toward* falling; the blob's `parse` is 0.0) and not Reading B.
-* **The next rung is a constrained design space**: a floor on actuator count,
-  or a control cost charged per actuator *present* rather than per action
-  emitted, so amputation does not zero it. **Not** a termination-rule change.
+* **The next rung's fix is DERIVED, before running**
+  (`D3_E3_ADVERSARIAL.md` §3f, `posthoc/ctrl_break_even.json`). *A control cost
+  charged per actuator "present" was proposed first and is **retracted**: a
+  0-motor body has none present, so it pays 0 — unchanged. Normalising by
+  actuator count fails identically. Any strictly positive control cost makes
+  actuators worse than none until forward progress pays, and at init it does
+  not.*
+
+  Measured at init: `E[Σμ²] = 0` exactly, `ctrl_cost` **3.8874/step** =
+  `0.5 × 7.7749` with residual 0.000e+00, against a survive bonus of 1.0.
+  **σ is the only lever.** The naive break-even (cost = survive) is
+  `log_std = −0.6931` and is **too permissive** — the design head chooses
+  between two *episodes* differing 22× in length, not between per-step
+  rewards. Setting `334.4 − 458.5·cost = 21.2`:
+
+  > **`cost_crit` = 0.6831/step, `log_std_crit` = −0.8837, σ_crit = 0.4132**;
+  > equivalently `CTRL_COST_COEF_crit` = 0.0854, a 5.9× cut. The analogue of
+  > E2.1's `a_crit`, and an **upper bound** (a noisy policy falls sooner).
+
+  All three candidates evaluated alone: **(1) an actuator floor ALONE does not
+  work** — at `log_std = 0` a 4-motor ant pays 2.0/step so falling early still
+  beats standing (−20.9 vs −582.6), converting E3's morphology failure back
+  into **E2's fall-dodge**. **(2) `log_std = −1` alone does work**: STAND +86.2
+  > DELETE +21.2 > fall +9.6, with only 0.116 of margin (at −0.75 it flips
+  back). **(3) cutting `CTRL_COST_COEF` works arithmetically** but changes
+  CompetEvo's reward and breaks comparability with D2/E2/E2.1.
+  **Recommendation: (2) as primary, (1)+(2) as a second arm, not (3).**
+  **Not** a termination-rule change.
 * **E3.1 as recorded below needs revisiting**: dropping `d2rep` raises the
   sparse weight and leaves `dense` untouched, so on its own it does not address
   this. An actuator floor is the prerequisite for any design-on rung on this
@@ -542,6 +567,16 @@ small actions instead of deleting motors, the action std would have collapsed �
 E2's published-batching MLP reached 0.039 and E2.1's `d2rep` arms 0.086-0.088.
 E3's GNN sits at **0.886-0.896**, essentially its initialisation. It never
 learned to quieten down because with no actuators `0.5·Σa²` is 0 at any std.
+
+**Diversity was PRESERVED; only actuation was eliminated** — a sharper claim
+than "the search collapsed", and better supported. At epoch 17-21 the census
+shows **90-149 distinct topologies of 200** (most-common share 2.5-6.5%) and
+`bodies_mean` 7.78-9.39, against 199/200 and 14.76 untrained. That is *more*
+topological diversity than E1's ant had at epoch 100 (63 and 101) and far more
+than E0's (34/20/27 at 20-41%). Body count fell by a third; **actuation fell to
+exactly zero in every one of seven probes**. The design head has not converged
+on a shape — it has specifically learned not to attach actuators to any of them,
+which is what makes the control-cost family of fixes the right one.
 
 **Confirmed on archival checkpoints, not just the live captures**: seven
 independent 200-design probes across three seeds, two checkpoint sources and

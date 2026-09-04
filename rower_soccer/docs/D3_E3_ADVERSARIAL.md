@@ -753,12 +753,44 @@ series**: `train_R`, 18-21 points per seed, is smooth, monotone and concave to
 an asymptote (§3e-ii). That is a claim about the reward the search was
 climbing, not about `p_act4`, and the two should not be conflated.
 
+### 3e-iv-b. Diversity was PRESERVED; only actuation was eliminated
+
+The sharper claim, which the census supports and "the search collapsed" does
+not. Across every probe at epoch ≥ 17:
+
+| | untrained | epoch 0-3 | **epoch 17-21** |
+|---|---|---|---|
+| distinct topologies of 200 | 199 | 186-198 | **90-149** |
+| most-common share | 1.0% | 1.0-1.5% | **2.5-6.5%** |
+| `bodies_mean` | 14.76 | 11.42-14.32 | **7.78-9.39** |
+| **`p_act4`** | **0.825** | 0.300-0.790 | **0.000, every probe** |
+| `pop_motors_mean` | 5.715 | 2.51-5.26 | **0.005-0.055** |
+
+**The design head has not converged on a shape. It has specifically learned not
+to attach actuators to any of them.** 90-149 distinct topologies of 200 with a
+most-common share of 2.5-6.5% is *more* topological diversity than E1's ant had
+at epoch 100 (63 and 101 distinct) and far more than E0's ant (34/20/27 at
+20-41% most-common). Body count fell by about a third, from 14.76 to 7.78-9.39
+— real but modest. Actuation fell to **exactly zero, in every one of seven
+probes**.
+
+So the failure is **specific**, not a general degeneration: it is a targeted
+elimination of one attribute of the body plan while the plan itself keeps
+varying. That is what makes §3f's family of fixes — the control-cost arithmetic
+and the actuator floor — the right ones, and it is why nothing touching the
+termination rule would help.
+
 ### 3e-v. What this says for the ladder
 
-* **The next rung is a constrained design space**, exactly as §3c row 1
-  prescribed: a **floor on actuator count** (or a control cost that does not
-  reward amputation — e.g. cost per actuator *present* rather than per action
-  emitted, so deleting a motor does not reduce the cost to zero).
+* **The next rung is §3f's derived fix.** *(An earlier version of this bullet
+  proposed "a control cost charged per actuator **present** rather than per
+  action emitted". **That is wrong and is retracted**: a 0-motor body has no
+  actuators present, so it would pay exactly 0 — identical to today, and it
+  changes nothing. Normalising by actuator count fails for the same reason:
+  `0.5·Σa²/n` leaves the blob at 0 while any actuated body pays something
+  strictly positive. **Any strictly positive control cost makes actuators worse
+  than none until forward progress actually pays, and at initialisation it does
+  not.** §3f derives what does work.)*
 * **It is NOT a termination-rule change.** §3d's rule (iii) recommendation
   stands on its own merits for the *fall-dodge*, but it would not have
   prevented this: the blob never collects the sparse term at all.
@@ -996,6 +1028,118 @@ not what PPO does in it. No arm has been trained under rule (ii) or (iii), and
 E2.1 established that a curriculum's realised behaviour can differ sharply from
 its nominal shape. The blob checkpoints are from epochs 0/1/3 (§3c), the
 competent arm is an MLP where E3 is a GNN, and it is 10 episodes per cell.
+
+## 3f. THE FIX, DERIVED BEFORE RUNNING — `log_std_crit = −0.8837`
+
+*E2.1's `a_crit = 0.739` is the precedent and also the criticism its own
+write-up accepted: it "was derived after seeing the result, not before". This
+is the same class of constant for the failure E3 actually hit, and it is
+derived first. `e3_ctrl_break_even.py`, `posthoc/ctrl_break_even.json`.*
+
+### 3f-i. Measured at initialisation
+
+| | |
+|---|---|
+| `control_action_log_std` | **0.0000** (σ = 1.0) |
+| actuated nodes of the GNN's output | **8 of 13** (the other 5 are discarded) |
+| `E[Σμ²]` over those rows (mean action) | **0.0000** |
+| `E[Σa²]` over those rows (sampled) | **7.7749** (predicted `n·σ²` = 8.0) |
+| **measured `ctrl_cost`/step** | **3.8874** = `0.5 × 7.7749`, residual **0.000e+00** |
+| against `SURVIVE_BONUS` = 1.0 | **net −2.8874 per step** |
+
+`E[Σμ²] = 0` exactly: at initialisation the whole control cost is *noise*, so
+**σ is the only lever**, which is what makes candidate (2) a lever at all.
+
+*(The first version of this measurement summed the policy's whole 13-node
+output column and read `E[Σa²]` = 12.64 against an env `ctrl_cost` implying
+7.77. The residual line caught it: the env writes only the 8 rows that have an
+actuator. Fixed; the residual is now exactly zero.)*
+
+### 3f-ii. The naive break-even is the wrong one
+
+Setting `cost/step = SURVIVE_BONUS` gives
+`log_std = ½·ln(1/(0.5·8))` = **−0.6931**, σ = 0.5. **It is too permissive**,
+and by a wide margin: at it a standing ant banks **−124.1** over an episode
+against the blob's **+21.2**, so the blob still wins.
+
+The design head is not choosing between a positive and a negative *per-step*
+reward. It is choosing between **two whole episodes**, and they differ in
+length by 22×:
+
+* **delete the actuators** → topples at **20.9** steps, banks **+21.2**, pays
+  no control cost at any σ (measured, identical on all three seeds);
+* **keep them** → stands for **458.5** steps, banks
+  `334.4 − 458.5 × cost` (the measured idle floor's dense, minus the cost).
+
+Setting those equal:
+
+> **`cost_crit` = (334.4 − 21.2) / 458.5 = 0.6831 per step**
+> **`log_std_crit` = ½·ln(0.6831/(0.5·8)) = −0.8837**, **σ_crit = 0.4132**
+> equivalently, at `log_std = 0`, **`CTRL_COST_COEF_crit` = 0.0854** — a
+> **5.9× reduction** from the current 0.5.
+
+**This is an upper bound, not a target.** `L_ant` is the *zero-torque* episode
+length; a policy emitting noise falls sooner, so the true threshold is
+stricter. And `forward` is held at the idle floor's measured value (the
+opponent bulldozes a passive ant backwards, `Σforward ≈ −124`); a policy that
+learns to walk earns more and relaxes the constraint — but it cannot learn to
+walk if the actuators are gone first, which is the entire failure.
+
+### 3f-iii. All three candidates, each evaluated ALONE
+
+At each setting the search has three options. **A fix works only if STAND is
+the best of them.**
+
+| candidate | n | `log_std` | cost/step | **STAND** | delete (blob) | fall with n motors | best |
+|---|---|---|---|---|---|---|---|
+| baseline (E3 as run) | 8 | 0.000 | 4.000 | −1499.6 | **+21.2** | −62.7 | **DELETE** |
+| **(1)** floor n ≥ 4, `log_std` unchanged | 4 | 0.000 | 2.000 | −582.6 | — | **−20.9** | **fall** |
+| **(1)** floor n ≥ 8, `log_std` unchanged | 8 | 0.000 | 4.000 | −1499.6 | — | **−62.7** | **fall** |
+| **(2)** `log_std = −1`, no floor | 8 | −1.000 | 0.541 | **+86.2** | +21.2 | +9.6 | **STAND** |
+| **(2)** `log_std = −0.75`, no floor | 8 | −0.750 | 0.893 | −74.8 | **+21.2** | +2.2 | **DELETE** |
+| **(3)** `CTRL_COST_COEF` 0.5 → 0.05 | 8 | 0.000 | 0.400 | **+151.0** | +21.2 | +12.5 | **STAND** |
+| **(1)+(2)** floor n ≥ 4 **and** `log_std = −1` | 4 | −1.000 | 0.271 | **+210.3** | — | +15.2 | **STAND** |
+
+**(1) alone does not work, and this is the finding that changes the
+recommendation.** A structural floor removes the 0-motor option but not the
+incentive: at `log_std = 0` a 4-motor ant pays 2.0/step, so **falling early
+still beats standing (−20.9 against −582.6)**. It converts E3's morphology
+failure straight back into **E2's fall-dodge**, reached through control instead
+of through the body. A floor bounds the damage; it does not fix the sign.
+
+**(2) alone does work**, and note how tight it is: `log_std = −1` gives
+STAND +86.2 > DELETE +21.2 > fall +9.6, with only **0.116** of margin below
+`log_std_crit`. At `log_std = −0.75` — a change of a quarter — the ordering has
+already flipped back to DELETE. The constant is doing real work.
+
+**(3) works arithmetically** and is rejected on grounds other than arithmetic:
+it changes CompetEvo's reward function, so E3.1 would no longer be comparable
+to D2, E2, E2.1 or E3 on return. Same effect, worse provenance.
+
+### 3f-iv. Recommendation
+
+> **Primary: `control_log_std` from 0 to −1** (σ = 0.368, cost 0.541/step).
+> Least invasive of the three — it touches neither the reward, nor the search
+> space, nor CompetEvo's task definition, only the policy's initialisation. It
+> is not an exotic value: E2.1's `d2rep` arms *converged* to σ ≈ 0.086, and
+> Transform2Act's own `attr_log_std` default is −2.3.
+>
+> **Secondary, and worth running as a second arm: (1)+(2) together.** The floor
+> costs nothing when (2) is already in place (+210.3 against +86.2, and the
+> blob is unreachable), and it removes the failure mode structurally rather
+> than pricing it — which matters because §3f-ii's threshold is an upper bound
+> that a noisier or shorter-lived body pushes down.
+>
+> **Not (3)**, unless (1) and (2) both fail.
+
+**What this is and is not.** It is an incentive-landscape calculation over
+fixed measured quantities, exactly like `a_crit` — a *first-order* argument, not
+a proof, and not a prediction of what PPO does in that landscape. It is offered
+before the runs so that it can be wrong in public. The falsifier is direct: at
+`log_std = −1` the population's `p_act4` should **not** collapse to 0 by epoch
+20 the way it did here.
+
+---
 
 ### What the frozen-body GNN control decides
 

@@ -1,0 +1,22 @@
+{
+ "cfg": "rtg_e3c_s1",
+ "steps": 300,
+ "log_std_init": 0.0,
+ "mu2_sum": 8.004495432680277e-07,
+ "e_sum_a2": 7.774878737838152,
+ "measured_ctrl_cost_per_step": 3.887439368919076,
+ "naive_log_std_break_even": -0.6931471805599453,
+ "critical_cost_per_step": 0.6830970556161395,
+ "log_std_crit": -0.883706344349881,
+ "sigma_crit": 0.41324842879802326,
+ "ctrl_cost_coef_crit": 0.08538713195201744,
+ "constants": {
+  "CTRL_COST_COEF": 0.5,
+  "SURVIVE": 1.0,
+  "N_MOTORS": 8,
+  "L_BLOB": 20.9,
+  "R_BLOB": 21.2,
+  "L_ANT": 458.5,
+  "DENSE_ANT_FREE": 334.4
+ }
+}

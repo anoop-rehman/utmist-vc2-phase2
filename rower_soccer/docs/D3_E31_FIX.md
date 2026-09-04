@@ -518,3 +518,93 @@ in opposite directions, and the population says they are doing the same thing.
 **This strengthens the case for resuming `rtg_e31_s1`** (suspended at epoch 5,
 `epoch_0005.p` saved, `--epoch 5` resumes it). A third seed is worth more when
 the two in hand disagree than when they agree — and on the readout they do.
+
+---
+
+# THE EPOCH-20 VERDICT: both falsifiers NOT FIRED, and growth self-limited
+
+*The pre-registered window has closed on both arms (s2 at epoch 24, s3 at 23).*
+
+## The falsifiers
+
+| | `rtg_e31_s2` | `rtg_e31_s3` |
+|---|---|---|
+| **F1** — `log_std` > −0.9645 within epoch 20 | **NOT FIRED** (worst −1.5033) | **NOT FIRED** (worst −1.5061) |
+| **F2** — `p_act4` → 0 by epoch 20 | **NOT FIRED** (min 0.80) | **NOT FIRED** (min 0.95) |
+| **Outcome C** — population ≥ 26 for ≥ 5 epochs | not saturated (18.60) | not saturated (16.85) |
+
+**`log_std` never approached the boundary** — it fell monotonically from −1.503
+to −1.583, moving *away* the whole time. **`p_act4` has been 1.000 continuously
+since epoch 3** on both arms: every one of 20 sampled designs carries four or
+more motors, at every epoch, for twenty consecutive epochs.
+
+**Against E3, on the same instrument at the same epochs:**
+
+| | E3 (`log_std` 0) | **E3.1 (`log_std` −1.5)** |
+|---|---|---|
+| readout motors | **0** from epoch 0 | **7-11** throughout |
+| `p_act4` at epoch 3 | 0.300 | **1.000** |
+| `p_act4` at epoch 17 | **0.000** | **1.000** |
+| population `motors_mean` | → 0.005-0.055 | 5.4-6.0 → ~9 |
+
+> **The fix works.** The failure that stopped E3 at epoch 19 — the design search
+> deleting every actuator — does not occur when the control cost is affordable
+> from step 0. The derivation in §3f predicted this before the run and the run
+> did not contradict it.
+
+## Growth self-limited — the size cost is unnecessary
+
+The mass question raised against Outcome C is answered, and the answer is that
+**the remedy would have been a mistake.** Both arms grew, peaked, and receded:
+
+| | readout peak | now | mass peak | now | population peak | now |
+|---|---|---|---|---|---|---|
+| s2 | **26** @ ep9 | **21** | **1.363** @ ep9 | **1.196** | 19.55 @ ep11 | 18.60 |
+| s3 | **21** @ ep7 | **15** | **1.186** @ ep12 | **0.948** | 19.40 @ ep9 | 16.85 |
+
+*(original ant: 0.879 kg, 13 bodies; ceiling 29)*
+
+**Neither arm approached the ceiling.** Both turned around near epoch 9-12 and
+have been shedding bodies and mass since — s3's mass is back to 0.948 against
+the original 0.879. **Outcome C did not fire and, on this evidence, will not.**
+
+**And the mechanism is visible.** Forward progress bottomed on both arms at
+exactly the epoch mass peaked, and recovered as mass came back down:
+
+| | `r(mass, max_fwd)` | n |
+|---|---|---|
+| s2 | **−0.855** | 5 |
+| s3 | **−0.880** | 4 |
+| *pooled* | *−0.605* | *9* |
+
+*The pooled figure is weaker than either arm because the two carry different
+mass offsets — the same between-group dilution that made the GPU-vs-bodies fit
+invalid earlier in this document. **The within-arm correlations are the valid
+ones.***
+
+**What this does and does not establish.** It does not establish causation:
+n = 4-5 per arm, both series are time-indexed, and forward progress at epochs
+4-24 is still dominated by "the policy cannot walk yet". What is robust and
+does not depend on the correlation is the **behaviour** — both arms grew,
+peaked and receded without any size term in the reward. **Physics is already
+charging for mass, the design search found the charge, and adding a per-body or
+per-mass cost would double-charge it.** That check was worth doing before
+proposing the remedy rather than after.
+
+## Where E3.1 stands against the frozen-body control
+
+At matched epoch 19, `max_fwd`: **s3 0.279 m, s2 0.137 m** against the controls'
+**0.19 / 0.12 m**. So E3.1 is tracking the reference arm's early trajectory,
+one seed slightly ahead. The controls did not locomote until epochs 79-84 and
+did not reach goal 0.5 until 144-149, so **nothing about the task being solved
+is knowable yet** — goal rate is 0.00 on both arms, exactly as expected here.
+
+## What is still open
+
+* **The rung's actual question** — does the design+control loop win the task —
+  is unanswered and cannot be answered before ~epoch 150.
+* **n = 2**, with `rtg_e31_s1` suspended at epoch 5 and resumable.
+* **The floor arm** (`rtg_e31f_s*`) has not started.
+* The morphology **direction** for the mean-action readout remains
+  unestablished: both arms now recede, but from different peaks (26 and 21) to
+  different levels (21 and 15).

@@ -20,9 +20,17 @@ while true; do
     "$P" - "$f" "$D/census/${c}_morph.csv" <<'PY'
 import json, sys
 src, dst = sys.argv[1], sys.argv[2]
+# `n_motors`/`gear_mean` are the MEAN-ACTION readout -- the MODE of the design
+# distribution, not the distribution. Section 3c is about not deciding on them
+# alone: at epoch 7 the readout was a 0-motor blob while 30% of sampled designs
+# carried >= 4 motors and supplied 91% of the training steps. The population
+# columns (`pop_motors_*`, `p_act1`, `p_act4`) come from e3_population_probe.py
+# against a checkpoint and land in census/pop_<cfg>_<ckpt>.json; they are blank
+# here for arms launched before e3_morph.census gained them.
 cols = ["epoch","alpha","n_bodies","n_motors","mass","limb_len_mean",
         "limb_len_sum","gear_mean","max_depth","topo",
         "distinct_topologies","top_topology_share","sampled_bodies_mean",
+        "pop_motors_mean","pop_motors_max","p_act1","p_act4",
         "design_failed","eval_fall_rate","eval_goal_rate","eval_max_fwd",
         "eval_R_mean","eval_design_fail_rate","r_fall_return","r_fwd_return"]
 rows = []
@@ -42,7 +50,10 @@ for line in open(src):
         max((int(k) for k in (m.get("depth_hist") or {})), default=None),
         m.get("topo"),
         c.get("distinct_topologies"), c.get("top_topology_share"),
-        c.get("bodies_mean"), c.get("design_failed"),
+        c.get("bodies_mean"),
+        c.get("motors_mean"), c.get("motors_max"),
+        c.get("p_act1"), c.get("p_act4"),
+        c.get("design_failed"),
         e.get("fall_rate"), e.get("goal_rate"), e.get("max_fwd"),
         e.get("R_mean"), e.get("design_fail_rate"),
         dg.get("r_fall_return"), dg.get("r_fwd_return")])

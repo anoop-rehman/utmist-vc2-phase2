@@ -187,7 +187,7 @@ def census(env, policy, episodes, mean_action=False, running_state=None):
     previous designs just moved. `D3_E0_ANT.md` 3 measured what that costs.
     """
     counts, bodies, failed = {}, [], 0
-    genomes = []
+    genomes, motors = [], []
     for _ in range(episodes):
         if not run_design_stages(env, policy, mean_action, running_state):
             failed += 1
@@ -195,12 +195,22 @@ def census(env, policy, episodes, mean_action=False, running_state=None):
         key, names = topo_key(env)
         counts[key] = counts.get(key, 0) + 1
         bodies.append(len(names))
+        # THE POPULATION'S MOTOR COUNT, not the mean-action design's. The
+        # skeleton stage is stochastic, so the greedy readout can be a
+        # 0-motor blob while the distribution it is the mode of still holds
+        # actuated bodies -- and E1 measured that our ant's topology
+        # distribution is NOT concentrated at epoch 100 (63/101 distinct of
+        # 200, 5.5-7.0% most-common), so at the horizon this experiment
+        # decides at, the readout is provably not the population.
+        motors.append(sum(1 for nm in env.model.actuator_names
+                          if not nm.startswith(OPP_PREFIX)))
         g = np.asarray(env.get_attr_design())
         if len(g) > 1:
             genomes.append(g[1:])          # drop the root: it pads with zeros
     n = sum(counts.values())
     top = max(counts.values()) if counts else 0
     pop = np.concatenate(genomes, axis=0) if genomes else np.zeros((0, 5))
+    mo = np.asarray(motors, dtype=float)
     return {
         "sampled": n, "design_failed": failed,
         "distinct_topologies": len(counts),
@@ -208,6 +218,12 @@ def census(env, policy, episodes, mean_action=False, running_state=None):
         "bodies_mean": float(np.mean(bodies)) if bodies else 0.0,
         "bodies_min": int(min(bodies)) if bodies else 0,
         "bodies_max": int(max(bodies)) if bodies else 0,
+        "motors_mean": float(mo.mean()) if mo.size else 0.0,
+        "motors_max": int(mo.max()) if mo.size else 0,
+        "motors_hist": {str(int(k)): int((mo == k).sum())
+                        for k in np.unique(mo)} if mo.size else {},
+        "p_act1": float((mo >= 1).mean()) if mo.size else 0.0,
+        "p_act4": float((mo >= 4).mean()) if mo.size else 0.0,
         "sampled_genome_std": (pop.std(axis=0, ddof=1).tolist()
                                if pop.shape[0] > 1 else [0.0] * 5),
         "sampled_genome_rows": int(pop.shape[0]),

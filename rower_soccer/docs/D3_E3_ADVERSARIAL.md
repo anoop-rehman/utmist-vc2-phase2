@@ -323,8 +323,12 @@ The result is **ambiguous, and will be reported as ambiguous**, if any of:
 * **the goal rate is 0.00 on every seed with a fall rate below ~0.3** — that is
   neither the dodge nor a working loop, it is "the design search made the task
   harder", which is a third outcome and gets its own name;
-* **the mean-action design ends with `morph/n_motors` at or near 0** — call
-  this outcome **"the search removed the ability to act"**. It is a third
+* **the design POPULATION ends with `p_act4` below 0.05 and a step share below
+  0.25** — call this outcome **"the search removed the ability to act"**.
+  *(Originally written as "the mean-action design ends with `morph/n_motors` at
+  or near 0"; corrected in §3c, because the readout collapsed to a 0-motor
+  blob at epoch 5 while 30% of sampled designs still carried four or more
+  motors and supplied 91% of the training steps.)* It is a third
   reading, distinct from both A and B, and it is named here because it is
   already visible at epoch 4 (see below). A body with no actuators cannot
   reach the goal and cannot exploit the dodge deliberately either: it simply
@@ -358,6 +362,11 @@ design, with `morph/n_bodies` falling 6 → 5 and mass 0.51 → 0.47 kg. Fall ra
 is 1.00 and forward progress 0.01 m, which a 0-motor body explains completely
 without any appeal to the dodge. `design_fail_rate` is 0.00, so these bodies
 compile and run; they simply cannot act.
+
+**Superseded in part by §3c: this is the MEAN-ACTION readout, and the
+population it is the mode of is 82% actuated.** The note is left standing
+because it is what was seen and when, and because naming the outcome is what
+prompted the measurement that corrected it.
 
 Two reasons not to read anything into it yet. It is **epoch 4 of 400**, and the
 policy is barely off its initialisation. And under `d2rep`'s alpha ≈ 0.998 the
@@ -412,11 +421,15 @@ Two things fall out of this that the argument did not contain:
    control head.** Same policy, one body evolved and one not, 21.2 against
    319.2.
 2. **Under the FLAT reward the ranking REVERSES.** Read the `env R` column: the
-   blob scores **+21.2** and the standing ant **−677.8**, because the ant
-   survives to the opponent's certain goal at step 491 and pays the −1000 while
-   the blob topples at step 21 and dodges it. **On E2's reward the 0-motor blob
-   is the optimum, by +699 per episode.** Only `d2rep`'s alpha ≈ 0.998
-   suppresses the sparse term far enough to invert it.
+   blob scores **+21.2**, the same weights on the frozen ant (`ant_pol`)
+   **−677.8**, and the frozen ant at zero torque (`ant_idle`) **−465.6** —
+   because both ants survive to the opponent's certain goal at step 491 and pay
+   the −1000 while the blob topples at step 21 and dodges it. **On E2's reward
+   the 0-motor blob is the optimum: by +699.0 against `ant_pol` and by +486.8
+   against `ant_idle`.** *(Two different comparisons; both are stated because
+   quoting one figure alone invites it being read against the other row.)*
+   Only `d2rep`'s alpha ≈ 0.998 suppresses the sparse term far enough to invert
+   it.
 
 That is `D3_E2_RTG.md` §6's fall-dodge appearing through morphology in its
 purest available form, and it is a direct, quantitative vindication of taking
@@ -464,18 +477,108 @@ are fixed here.*
 * **It is checkpointed.** `additional_saves: [20, 100]` puts checkpoints at
   20/40/60/80/100, so the decision has the run-up to it, not only the endpoint.
 
-The decision is **stop early or run on**, and it is made on the mean-action
-design's `morph/n_motors` — read from
-`runs/d3_e3_adversarial/census/<cfg>_morph.csv`, which is in the repo and
-needs no wandb.
+### The rule keys on the POPULATION, not the greedy readout — and the run has already shown why
+
+The first version of this rule keyed on the **mean-action** design's
+`morph/n_motors` alone. **That was wrong, and this project's own data says so
+without needing E3 to finish.** E1 measured our ant's topology distribution at
+epoch 100 — the horizon this decision sits at — as **63 and 101 distinct
+topologies of 200 sampled, most-common share 5.5-7.0%**, against their ant's
+20-41%. At the epoch we decide at, the distribution is *provably* not
+concentrated for this creature, so the mode is not the population and a rule
+that reads only the mode is reading the wrong object.
+
+E3's live census says the same in real time: **18-20 distinct topologies of 20
+sampled with a 0.05-0.10 top share**, while the mean-action `topo` hash has
+been a single value (`9a51d315a8da`) since epoch 5, and `sampled_bodies_mean`
+sits at 9.65-12.45 against the mean-action design's 5.
+
+**Measured** (`e3_population_probe.py`, 200 sampled designs per row,
+`census/pop_*.json`):
+
+| | mean-action readout | pop. motors mean (max) | p(≥1 motor) | **p(≥4 motors)** | **step share of ≥4-motor designs** | distinct topologies |
+|---|---|---|---|---|---|---|
+| **untrained baseline** | 19 bodies, **7 motors** | 5.71 (12) | 0.995 | **0.825** | 0.991 | 199 / 200 |
+| seed 1 @ `best` | 5 bodies, **0 motors**, gear 0.0 | 2.51 (9) | 0.820 | **0.300** | 0.910 | 186 / 200 |
+| seed 2 @ `best` | 6 bodies, **0 motors**, gear 0.0 | 4.45 (10) | 0.985 | **0.680** | 0.980 | 196 / 200 |
+| seed 3 @ `best` | 6 bodies, **0 motors**, gear 0.0 | 5.26 (10) | 0.995 | **0.790** | 0.989 | 198 / 200 |
+
+> **The greedy readout collapsed on all three seeds; the search did not collapse
+> on any of them.** The mean-action design is a 0-motor blob everywhere, while
+> the population it is the mode of still puts **30% / 68% / 79%** of its mass on
+> designs with four or more motors — and seeds 2 and 3 are barely below the
+> **untrained** baseline of 0.825. Because a blob dies at 20.9 control steps
+> while an actuated body runs to ~491, those designs supply **91% / 98% / 99%
+> of each epoch's training steps**.
+>
+> **Stopping on the readout alone would have ended a run whose gradient is
+> made almost entirely of bodies that can act**, and it would have done so on
+> three seeds that disagree with each other by a factor of 2.6 on the quantity
+> that matters (`p_act4` 0.300 vs 0.790) while agreeing perfectly on the
+> quantity that does not (`n_motors` = 0, three times).
+
+**Step share is the quantity the rule uses**, because the gradient sees
+episodes and not designs. Converting a design share `p` with the measured
+lengths: `p·491 / (p·491 + (1−p)·20.9)`. At `p` = 0.05 the step share is
+already **0.55**; at `p` = 0.015 it is 0.26. A design share that looks
+negligible is not negligible in the batch.
+
+### The decision, at epoch 100
+
+Made on `runs/d3_e3_adversarial/census/<cfg>_morph.csv` (the readout, live) and
+`census/pop_<cfg>_e0100.json` (the population, from the epoch-100 checkpoint).
 
 | state at epoch 100 | rule | conclusion |
 |---|---|---|
-| **`n_motors` = 0 on ≥ 2 of 3 seeds** | **STOP the E3 arms at 100** | That is the answer for this configuration: *the search removed the ability to act*. Write E3 up as a null with that mechanism. The next rung is a **constrained design space — a floor on actuator count** — **not** a termination-rule change, because an unactuated body is not an exploitation of the fall rule (§3b). Run the frozen-body controls to confirm the controller is sound. |
-| **`n_motors` ≥ 4 on ≥ 2 of 3 seeds** | **run on to 400** | The design search kept a body that can act; readings A and B (§3b) take over at 400. If goal rate is still 0.00 at 400 with motors intact, that is the third outcome *"the design search made the task harder"*. |
-| **1 ≤ `n_motors` < 4 on ≥ 2 seeds, AND strictly increasing over the epoch-60 -> epoch-100 checkpoints** | **run on to 200 and re-decide ONCE** | Recovering but slowly. At 200 the same table is applied and there is **no second extension**: `n_motors` < 4 at 200 means the first row's conclusion. |
-| **1 ≤ `n_motors` < 4 and NOT increasing** | **STOP at 100** | Same conclusion as the first row. |
-| **any seed shows mean-action goal rate > 0** | **run on to 400 regardless of motor count** | Something is working; do not stop a run that is scoring. |
+| **all three of:** mean-action `n_motors` = 0, **`p_act4` < 0.05**, **step share of ≥4-motor designs < 0.25** — on ≥ 2 of 3 seeds | **STOP the E3 arms at 100** | The population itself has collapsed: *the search removed the ability to act*. Write E3 up as a null with that mechanism. Next rung is a **constrained design space — a floor on actuator count** — **not** a termination-rule change, because an unactuated body is not an exploitation of the fall rule (§3b). |
+| mean-action `n_motors` = 0 but **`p_act4` ≥ 0.05 or step share ≥ 0.25** | **run on to 400** | *The readout collapsed, the search did not* — a named outcome in its own right (§3c-i). It also means the **mean-action protocol is the wrong headline for this rung** and the population column is. |
+| **`n_motors` ≥ 4 on the readout** on ≥ 2 of 3 seeds | **run on to 400** | Readings A and B (§3b) take over at 400. Goal rate still 0.00 at 400 with motors intact is the third outcome, *"the design search made the task harder"*. |
+| **1 ≤ readout `n_motors` < 4, AND `p_act4` strictly decreasing** over the epoch-20/40/60/80/100 checkpoints | **run on to 200, re-decide ONCE** | At 200 the same table applies and there is **no second extension**. |
+| **any seed shows mean-action OR stochastic goal rate > 0** | **run on to 400 regardless** | Do not stop a run that is scoring. |
+
+**Thresholds justified before the data, not after.** `p_act4 < 0.05` is a
+**16.5x collapse from the measured untrained baseline of 0.825**, not a number
+chosen for convenience. `step share < 0.25` is the binding condition — it
+implies `p_act4` below ~0.015, i.e. **fewer than 3 of 200 sampled designs can
+walk** — and it is stated in the units the gradient actually works in. Both are
+reported because `p_act4` is the number a reader looks for and the step share is
+the number that decides.
+
+**What would falsify the population rule itself**: if `p_act4` at epoch 100 is
+high while every sampled actuated design still scores 0.00 and falls, then the
+population is not the limiting factor either and the answer is about control or
+about the task, not about the design search. That is why the last row exists
+and why the goal rate can override the whole table.
+
+### 3c-i. "The readout collapsed, the search did not" — a third protocol lesson
+
+E1.1 and E2 §7d each recorded the mean-action and stochastic protocols
+disagreeing, which is why this project reports both. E3 adds a sharper version
+of the same lesson, because with the design stages live **the two protocols
+measure two different creatures**:
+
+* **mean-action = the MODE of the design distribution.** One body, the greedy
+  readout, currently a 0-motor blob.
+* **stochastic = the POPULATION.** Bodies drawn the way training draws them —
+  presently 82-99.5% actuated, mean 2.51-5.26 motors, up to 10.
+
+For E2 and E2.1 that distinction was empty: the body was frozen, so both
+protocols ran the same creature and the only difference was action noise. For
+E3 it is the difference between a statistic about one degenerate body and a
+statistic about the thing being optimised. **Both columns are reported for
+every arm, as always — but for a design-on arm the stochastic column is the
+one that describes the search.**
+
+### 3c-ii. `gear_mean 0.0` — the zero-motor state confirmed from a second field
+
+Worth stating because redundancy is what makes a number trustworthy. The
+readout's zero-motor state is visible in **two independent columns** of
+`<cfg>_morph.csv` that are computed from different objects: `n_motors` counts
+entries in the compiled `mjModel`'s actuator list excluding the opponent's,
+while `gear_mean` averages `Actuator.gear` over the `Robot`'s own body
+objects. `n_motors` = 0 and `gear_mean` = 0.0 agree on every epoch of every
+seed. A bug in one would have to be mirrored by an independent bug in the
+other, on the model side and the robot side, to produce this.
 
 Stopping is by **stop-file** (`/tmp/stop_e3_s{1,2,3}`), never by signal.
 
@@ -591,6 +694,29 @@ the card and why a monitor is armed at 19,200 MiB — E1 lost D1 at 19.95 GB.
 
 ---
 
+### 5b. My own instrumentation is inside the CPU quota, measured
+
+`T_sample` on all three seeds rose together from ~61 s at epoch 5 to 99 s at
+epoch 6 and ~118 s at epoch 7. The first explanation reached for was the one
+§5a had already flagged — the bodies growing back. **It was not.** The rise
+lines up exactly with three concurrent CPU-only `e3_blob_probe.py` processes I
+ran at 01:22-01:27:
+
+| | s1 | s2 | s3 |
+|---|---|---|---|
+| e5 `T_sample` (finished 01:18-01:20, before the probes) | 61.2 | 29.1 | 61.2 |
+| e6 (finished 01:24, first probe running) | 99.1 | 28.5 | 97.9 |
+| e7 (finished 01:28, all three probes running) | 118.3 | 70.2 | 113.3 |
+
+and `r(mean-action body count, T_sample)` over the same epochs is +0.56/+0.70/
+**−0.08** — no consistent relationship, so body size does not explain it.
+**Under a 10.2-CPU quota my own post-hoc probes are a first-class tenant.**
+
+Consequences, applied: population probes run **one seed at a time and `nice -n
+19`**, never three at once. And the general lesson is the one this project
+already writes down — *check whether a discrepancy predates the thing you want
+to blame* — applied here to an instrument rather than to training.
+
 ## 6. Not tested / not claimed
 
 *(To be completed with the results. Known before the runs:)*
@@ -609,6 +735,18 @@ the card and why a monitor is armed at 19,200 MiB — E1 lost D1 at 19.95 GB.
   is E2's, which is itself E1.1's.
 * **Engine.** mujoco-py 2.1 with CompetEvo's own PGS/1000, not D1/D2's
   mujoco_warp with Newton/100.
+* **The population probe is 200 sampled designs at one checkpoint**, not a
+  continuous series: `e3_morph.census`'s motor columns were added after the
+  arms launched, so the live JSONL carries topology and body-count statistics
+  but not motor counts. The population motor distribution therefore exists at
+  the checkpoints (`untrained`, `best`, and 20/40/60/80/100/200/300/400) and
+  not at every epoch. Any live claim about motor counts before epoch 20 rests
+  on the mean-action readout, which §3c is precisely about not trusting.
+* **`step share` uses two fixed episode lengths** — the measured 20.9-step blob
+  and a 491-step actuated episode — rather than each design's own length. It is
+  a first-order correction for the length asymmetry, not a measurement of the
+  batch composition; the batch's real composition is `e3/ep_len` and
+  `e3/num_episodes`, which are logged.
 * **n = 3 seeds for E3, n = 2 for the control.** Three seeds cannot
   characterise a spread; they can show whether the seeds agree in sign. E2.1's
   `flat` arm's two seeds differed by a factor of two on goal rate, and E3's

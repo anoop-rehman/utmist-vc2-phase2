@@ -1,0 +1,45 @@
+{
+ "cfg": "rtg_e3_s2",
+ "ckpt": "best",
+ "designs": 200,
+ "mean_action_n_motors": 0,
+ "mean_action_n_bodies": 6,
+ "mean_action_gear_mean": 0.0,
+ "mean_action_topo": "d7d1805eecbc",
+ "census": {
+  "sampled": 200,
+  "design_failed": 0,
+  "distinct_topologies": 196,
+  "top_topology_share": 0.01,
+  "bodies_mean": 13.76,
+  "bodies_min": 8,
+  "bodies_max": 21,
+  "motors_mean": 4.45,
+  "motors_max": 10,
+  "motors_hist": {
+   "0": 3,
+   "1": 8,
+   "2": 30,
+   "3": 23,
+   "4": 45,
+   "5": 28,
+   "6": 31,
+   "7": 18,
+   "8": 7,
+   "9": 5,
+   "10": 2
+  },
+  "p_act1": 0.985,
+  "p_act4": 0.68,
+  "sampled_genome_std": [
+   0.2873678890197157,
+   0.2877770915890829,
+   0.11268958200596783,
+   0.09883446821685139,
+   0.05965179858825602
+  ],
+  "sampled_genome_rows": 2552
+ },
+ "step_share_act1": 0.9993522037985447,
+ "step_share_act4": 0.9803622184115948
+}

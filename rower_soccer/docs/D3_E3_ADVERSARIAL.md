@@ -680,20 +680,23 @@ did not.
 *(seed 1; seeds 2 and 3 agree to within a few seconds — seed 2 is faster at
 132.4 s by epoch 5.)*
 
-* **Shedding the two CPU-only arms cut `T_sample` from 166 s to 61 s** and the
-  epoch from 342 s to 181 s. Transform2Act's own ETA went **1 day 14 h ->
-  19 h 28 m**.
+* **Shedding the two CPU-only arms cut `T_sample` from 166 s to ~110 s** in
+  steady state and the epoch from 342 s to ~215 s. *(This bullet originally
+  read "to 61 s" and "to 181 s", from epoch 5. That was a de-phased transient
+  and §5b is the correction — the steady state is 100-118 s.)*
 * **The per-epoch instrumentation this rung adds costs 3-5 s**, video epochs
   included — 2% of the epoch, not the several minutes the first (contended)
   epochs suggested. The morphology census, the inline evaluation and the
   best/median/worst clip are not what makes this run long.
 * **Independent cross-check**: 3 epochs in a 600 s wall-clock window over the
-  same period = **200 s/epoch**, against the log's 181-199 s. Projected 400
-  epochs: **~18-21 h per seed, all three concurrent**.
+  same period = **200 s/epoch**, against the log's 181-199 s. That window
+  straddled the transient; the steady-state figure is **~215-220 s/epoch ->
+  ~24 h per seed, all three concurrent** (§5b).
 
-**The ETA is contingent, and on the thing under test.** `T_sample` is falling
-because the *bodies are shrinking* — 13 nodes to 5 — so each GNN forward is
-cheaper. If the design search grows bodies back the epochs slow down again,
+**The ETA is contingent, and on the thing under test.** `T_update` is falling
+because the *bodies are shrinking* — 161.8 s to 97.0 s as
+`sampled_bodies_mean` goes 14.4 to 7.95. If the design search grows bodies back
+the epochs slow down again,
 and so does the card: the GPU peak over the same unimpeded window was
 **17,681 MiB of 20,475 (86%)** with 5-6-body designs, against the **19.0 GB
 (93%)** measured with three seeds while designs were still near 13 bodies.
@@ -704,39 +707,74 @@ the card and why a monitor is armed at 19,200 MiB — E1 lost D1 at 19.95 GB.
 
 ---
 
-### 5b. My own instrumentation is inside the CPU quota, measured
+### 5b. Two wrong explanations for the sampling cost, and the measured one
 
-`T_sample` on all three seeds rose together from ~61 s at epoch 5 to 99 s at
-epoch 6 and ~118 s at epoch 7. The first explanation reached for was the one
-§5a had already flagged — the bodies growing back. **It was not.** The rise
-lines up exactly with three concurrent CPU-only `e3_blob_probe.py` processes I
-ran at 01:22-01:27:
+*Recorded in full, including both wrong turns, because the wrong turns are the
+instructive part and because each was killed by a falsifier written down before
+its result.*
 
-| | s1 | s2 | s3 |
-|---|---|---|---|
-| e5 `T_sample` (finished 01:18-01:20, before the probes) | 61.2 | 29.1 | 61.2 |
-| e6 (finished 01:24, first probe running) | 99.1 | 28.5 | 97.9 |
-| e7 (finished 01:28, all three probes running) | 118.3 | 70.2 | 113.3 |
+`T_sample` on seed 1 ran 165.7, 152.4, 146.6, 98.7, 71.0, **61.1**, 99.1,
+118.3, 118.6, 114.1, 101.5 over epochs 0-10. Three explanations were offered in
+order.
 
-and `r(mean-action body count, T_sample)` over the same epochs is +0.56/+0.70/
-**−0.08** — no consistent relationship, so body size does not explain it.
-**Under a 10.2-CPU quota my own post-hoc probes are a first-class tenant.**
+**Wrong answer 1 — "the bodies grew back."** §5a's own guess. Refuted by
+`r(mean-action body count, T_sample)` = +0.56 / +0.70 / **−0.08** across the
+three seeds — no consistent relationship — and, decisively, by
+`morph/sampled_bodies_mean` falling **monotonically 14.4 → 7.95** on seed 1
+across exactly the epochs where `T_sample` doubled. The bodies got *smaller*.
 
-**This attribution is not yet confirmed, and the confirming test is stated
-before its result.** Probes ran continuously from 01:22 to 01:34:42 (three blob
-probes, then four population probes), and epochs 6-9 all finished inside that
-window at 99-119 s. The falsifier is simple: **if the cause was the probes,
-`T_sample` returns toward 61 s from epoch 10 onward, when only the light
-5-minute CSV sidecar is left.** If it stays near 115 s the attribution is wrong
-and the cost is intrinsic — most likely the sampled designs having grown
-(`sampled_bodies_mean` 8.65-13.76 against the readout's 5), which the
-mean-action body count used above would not see. Result recorded when epoch 10
-lands.
+**Wrong answer 2 — "my own concurrent probes."** Three blob probes ran
+01:22-01:27 and four population probes 01:29-01:34:42, covering epochs 6-9, and
+the alignment looked convincing. **The falsifier written down with it was: if
+the probes caused it, `T_sample` returns toward 61 s from epoch 10.** Epoch 10
+sampled entirely after the last probe finished at 01:34:42 and came in at
+**101.5 s**. The attribution fails its own test. The probes were real load
+inside a 10.2-CPU quota and they are not free — that lesson stands, and
+population probes still run one seed at a time and niced — but they are not the
+sustained cause.
 
-Consequences, applied: population probes run **one seed at a time and `nice -n
-19`**, never three at once. And the general lesson is the one this project
-already writes down — *check whether a discrepancy predates the thing you want
-to blame* — applied here to an instrument rather than to training.
+**The measured answer — the 61 s was the transient, not the 101-118 s.** The
+workload per epoch has been *constant* since epoch 6 while `T_sample` swung by
+4x:
+
+| seed 1 | e0 | e3 | e5 | e7 | e9 | e10 |
+|---|---|---|---|---|---|---|
+| `ep_len` | 43.0 | 29.6 | 29.1 | 27.4 | 27.1 | 27.2 |
+| `num_episodes` | 1178 | 1718 | 1729 | 1832 | 1849 | 1844 |
+| `sampled_bodies_mean` | 14.4 | 12.1 | 9.75 | 9.15 | 8.3 | 7.95 |
+| **`T_sample`** | 165.7 | 98.7 | **61.1** | 118.3 | 114.1 | 101.5 |
+
+Identical episode counts, identical episode lengths, shrinking bodies — and a
+4x swing in wall time. That can only be contention. Two further facts pin it:
+
+* **The three seeds have converged on the same value to within 3%** — at their
+  epoch 10, `T_sample` is 101.5 / 103.8 / 101.0. Three independent processes
+  agreeing that closely is the signature of a shared resource limit, not of
+  anything about their bodies, which differ (seed 1's population is 30%
+  actuated, seed 3's 79%).
+* **Their phase offsets have stabilised.** The spread between the first and
+  last seed to finish an epoch grew 14.6 s → 231 s over epochs 0-7 and has sat
+  at 232-247 s since. Seeds 1 and 3 finish within **0-2 s of each other**;
+  seed 2 runs ~4 minutes ahead. The system has settled.
+
+So epochs 4-6 were a **de-phased, under-loaded window** right after the two
+control arms were killed, and 29-72 s was never the steady state. **The steady
+state for three concurrent E3 arms on this box is `T_sample` ≈ 100-118 s.**
+
+**Consequence for the ETA, corrected.** §5a's "~18-21 h per seed" was
+extrapolated from that transient dip and is **too optimistic**. Steady-state
+epochs are ~215-220 s (`T_sample` ~105 + `T_update` ~97 + `T_eval` ~20 +
+instrument ~3), giving **~24 h per seed, all three concurrent** — which is what
+Transform2Act's own ETA now reads (23:48). `T_update` is meanwhile falling
+independently (161.8 → 97.0) as the bodies shrink, so the total has been far
+flatter than either component.
+
+**The general lesson, which this project already writes down and I still walked
+into twice**: *a number from a still-running run is a transient.* I quoted 61 s
+as "unimpeded" one epoch after it appeared, and built an ETA on it. The check
+that would have caught it immediately is the one that eventually did: hold the
+workload columns (`ep_len`, `num_episodes`) next to the timing column and see
+whether the work changed before concluding anything about why the time did.
 
 ## 6. Not tested / not claimed
 

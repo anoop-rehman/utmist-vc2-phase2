@@ -753,6 +753,25 @@ series**: `train_R`, 18-21 points per seed, is smooth, monotone and concave to
 an asymptote (§3e-ii). That is a claim about the reward the search was
 climbing, not about `p_act4`, and the two should not be conflated.
 
+### 3e-iv-a. The population probe has a POSITIVE control now, not just a negative one
+
+`p_act4 = 0.000` on the E3 arms is only evidence if the probe can report
+anything else. It can, and the frozen-body control arm supplies the other
+extreme from the same code on the same day — `population_watcher.sh` probed
+`rtg_e3c_s1/epoch_0020.p` automatically:
+
+| arm | readout | `motors_mean` (max) | histogram | `p_act1` | `p_act4` | distinct topos |
+|---|---|---|---|---|---|---|
+| **E3, design LIVE** (s1-s3) | 5-7 bodies, **0 motors** | 0.005-0.055 (1-2) | 0: 191-197 | 0.015-0.045 | **0.000** | 90-149 / 200 |
+| **control, design IDENTITY** | 13 bodies, **8 motors** | **8.0 (8)** | **8: 200** | **1.000** | **1.000** | **1 / 200** |
+
+Exactly what `force_identity_design` must produce: every one of 200 sampled
+designs is the unevolved 13-body / 8-motor ant, one topology, no variation.
+**The instrument spans 0.000 to 1.000 and lands on the right end of the range
+in each case.** This project's rule is to verify that a probe measures what you
+think it measures; here the verification came free, from an arm that was run
+for a different reason.
+
 ### 3e-iv-b. Diversity was PRESERVED; only actuation was eliminated
 
 The sharper claim, which the census supports and "the search collapsed" does

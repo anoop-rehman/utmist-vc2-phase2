@@ -5,14 +5,26 @@
    "file": "best.p",
    "control_action_log_std": -0.0632424149731178,
    "attr_action_log_std": -2.3030368825567513
+  },
+  {
+   "epoch": 19,
+   "file": "epoch_0020.p",
+   "control_action_log_std": -0.1841651257793881,
+   "attr_action_log_std": -2.3019229619493387
   }
  ],
  "rtg_e3c_s2": [
   {
-   "epoch": 14,
+   "epoch": 15,
    "file": "best.p",
-   "control_action_log_std": -0.13810949395403208,
-   "attr_action_log_std": -2.304556463959522
+   "control_action_log_std": -0.1456410440535668,
+   "attr_action_log_std": -2.304498759345535
+  },
+  {
+   "epoch": 19,
+   "file": "epoch_0020.p",
+   "control_action_log_std": -0.17877520938407107,
+   "attr_action_log_std": -2.3050874421332703
   }
  ]
 }

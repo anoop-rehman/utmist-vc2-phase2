@@ -240,3 +240,10 @@ runs/d2_sweep_clips/
 runs/d3_e0_ant/renders/*.mp4
 runs/d3_e0_ant/renders/*.mp4.json
 runs/d3_e0_ant/renders/*.mp4.json.sent
+
+# D3 M3 E3. Same class as E0's renders: the clips are large training artifacts
+# and every one of them is already in its arm's wandb run, inline with that
+# epoch's metrics. The post-hoc JSONs are NOT ignored -- they are what the
+# write-up and any later artefact source, so a result never has to be read back
+# out of a training log.
+runs/d3_e3_adversarial/renders/*.mp4

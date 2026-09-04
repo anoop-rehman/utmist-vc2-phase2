@@ -1,0 +1,41 @@
+
+=== phase 1: the env's two reward terms ===
+  [ok ] dense + parse == env reward on every step   n=2000 max|err|=0.000e+00
+  [ok ] dense == forward - ctrl_cost - contact + survive   max|err|=0.000e+00
+  [ok ] parse only ever takes {0, +1000, -1000}   values=[-1000.0, 0.0]
+  [ok ] at least one sparse event was actually seen   n_sparse=4
+  [ok ] NEG: on a sparse step dense alone is NOT the reward   |dense - reward| = 1000.0
+
+=== phase 2: alpha, against CompetEvo's own formula ===
+  [ok ] alpha(epoch) == max((200-epoch)/200, 0) for epochs 0..399   max|err|=0.000e+00 over 400 epochs
+  [ok ] alpha starts at exactly 1.0
+  [ok ] alpha hits exactly 0 at curriculum_steps
+  [ok ] alpha is pinned at 0 after
+  [ok ] E2.1's own setting: 4M steps -> alpha 0 at epoch 80   a(0)=1.0 a(40)=0.5 a(80)=0.0
+  [ok ] D2-replication setting: alpha runs 1.0 -> 0.8464 over 400 epochs   a(0)=1.000000 a(200)=0.923200 a(400)=0.846400; D2's own end was 0.846400
+  [ok ] D2-replication: the sparse term never exceeds 15.36% weight, so the fall-dodge is worth at most 153.6 and not 1000   max premium = 153.6
+  [ok ] NEG: curriculum_steps = 0 returns None, not 1.0
+
+=== phase 3: what lands in the PPO buffer ===
+  [ok ] same seed -> bit-identical trajectory in all four conditions   n_eps=4 steps=1903
+  [ok ] flat: the buffer IS the raw env reward
+  [ok ] alpha=1 buffer + alpha=0 buffer == the flat buffer, exactly   max|err|=0.000e+00
+  [ok ] alpha=0.5 == 0.5*dense + 0.5*parse, exactly
+  [ok ] THE MECHANISM: at alpha=1 no +/-1000 reaches the buffer   flat has 3 such steps, alpha=1 has 0
+  [ok ] NEG: at alpha=0 the buffer is the sparse term ALONE
+
+=== phase 4: the fall-dodge, before and after ===
+  [ok ] flat objective - alpha=1 objective == the sparse term, exactly   per-episode gaps [-1000.0, -1000.0, -1000.0, 0.0]
+  [ok ] the removed premium is a whole number of +/-1000s   [-1000.0, 0.0]
+  [ok ] NEG: the two objectives really are different numbers   max per-episode gap = 1000.0
+  [ok ] NEG: quiet policy, FLAT reward: stopping early is worth ~+1000 in every episode -- this IS the fall-dodge   gains [1010.9, 998.8, 1001.0, 998.7, 999.3], lengths [491]
+  [ok ] quiet policy, alpha=1: the WORST prefix gain is below the BEST one under the flat reward -- the distributions do not overlap   gains [10.91, 0.0, 0.95, 0.0, 0.0] -- max 10.91 vs flat min 998.7, a factor of 422 on the means
+  [ok ] quiet policy's dense reward per step is strictly positive, so a longer episode is worth more under alpha=1   +0.630/step = +1.0 survive + forward (the opponent bulldozes it backwards, so forward is NEGATIVE) - ctrl_cost; the flat reward is -1.407/step
+       (a FRESHLY INITIALISED policy's flat reward is -4.97/step, dominated by 0.5*sum(a^2) at log_std=0 -- reported, not gated)
+
+=== phase 5: the flat arm is E2's arm ===
+  [ok ] default alpha_now is None, so an ungated caller gets the flat reward
+  [ok ] ep_rets are the RAW env return in both conditions   [-1516.988, -2708.748]
+  [ok ] NEG: past the schedule's end the BUFFER is not the env reward
+
+28 checks passed, 0 FAILED

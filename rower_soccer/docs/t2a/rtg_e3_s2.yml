@@ -1,0 +1,169 @@
+# D3 M3 E3 seed 2: Transform2Act's design+control loop on CompetEvo's
+# 1v1 run-to-goal against the SCRIPTED opponent, under E2.1's `d2rep` reward
+# regime. THE DESIGN STAGES ARE LIVE -- this is the first D3 rung where
+# morphology is optimised on an adversarial task.
+#
+# Derived from `rtg_gnn_s1.yml` (E2's GNN arm) by changing exactly four things
+# and nothing else, so a diff against it is the whole experimental delta:
+#
+#   1. `env_specs.force_identity_design` is REMOVED. E1.1 settled that the
+#      design stages are always STEPPED (skipping them would change episode
+#      length and strip the stage flag's meaning from the observation); the
+#      flag forced their action to identity. Without it the skeleton and
+#      attribute heads act, and `gate_e3.py` phase 2 proves the arrays they
+#      write are the arrays MuJoCo integrates.
+#   2. `max_epoch_num: 400` -- 20.0M env steps, E2.1's budget exactly, so the
+#      frozen-body MLP number (goal 0.95/1.00) and this one are at matched
+#      budget. Justified against the design-stage convergence data in
+#      `D3_E0_ANT.md`/`D3_E1_ANT.md`: at epoch 100 our ant is at 63-101
+#      distinct topologies of 200 with a 5.5-7.0% most-common share, where
+#      THEIR ant is at 20-41% -- i.e. our ant at 100 sits where theirs was at
+#      40-50, so 400 epochs is roughly 2x the horizon on which their ant
+#      concentrated and 5x the 80 epochs E2.1's `d2rep` needed for control.
+#   3. `save_model_interval: 100` plus `additional_saves: [20, 100]`. A GNN
+#      checkpoint here is 157 MB and /workspace has 13 GB free, so this saves
+#      at epochs 20/40/60/80/100 (E2.1's `d2rep` took off between 44 and 84,
+#      which is the window that needs resolution) and every 100 after. The
+#      video renders off a transient checkpoint instead -- see
+#      `train_e3_gnn.py`.
+#   4. `seed: 2`.
+#
+# NOT changed, deliberately: the termination rule. `D3_E2_RTG.md` 6's
+# fall-dodge is still in the task exactly as CompetEvo defines it. E2.1's
+# `d2rep` avoids it by never weighting the sparse term above 15.4%, and
+# changing the rule at the same time as turning the design stages on would
+# make an E3 null uninterpretable -- two changes, one result. It is
+# INSTRUMENTED instead, from epoch 0 (`e3_morph.py`).
+env_name: run_to_goal
+agent_specs:
+  batch_design: true
+  # [every, until]: also save at epochs 20/40/60/80/100.
+  additional_saves: [20, 100]
+# training parameters
+gamma: 0.995
+tau: 0.95
+policy_specs:
+  name: v5
+  htype: tanh
+  skel_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  skel_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  control_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  attr_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  attr_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_log_std: 0
+  attr_log_std: -2.3
+  fix_control_std: false
+  fix_attr_std: false
+policy_optimizer: 'Adam'
+policy_lr: 5.e-5
+policy_momentum: 0.0
+policy_weightdecay: 0.0
+value_specs:
+  htype: tanh
+  design_flag_in_state: true
+  onehot_design_flag: true
+  mlp: [512, 256]
+  gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+value_optimizer: 'Adam'
+value_lr: 3.e-4
+value_momentum: 0.0
+value_weightdecay: 0.0
+clip_epsilon: 0.2
+min_batch_size: 50000
+mini_batch_size: 2048
+num_optim_epoch: 10
+max_epoch_num: 400
+seed: 2
+save_model_interval: 100
+
+
+robot_param_scale: 1
+skel_transform_nsteps: 5
+
+env_specs:
+  model_xml_file: 'assets/mujoco_envs/rtg_ant.xml'
+  init_height: false
+  # CompetEvo's control rate: timestep 0.003 (in the asset) x frame_skip 5
+  # = dt 0.015 s, so 500 control steps is their 7.5 s episode.
+  frame_skip: 5
+  # The scripted opponent's speed, m/s. 5.0 m / 7.5 s = 0.667 is the speed
+  # the 500-step clock already demands; 0.68 is that advanced 2%, so the
+  # opponent CROSSES at control step 491 and running out of time is realised
+  # as a loss rather than as a silent truncation. See
+  # `design_opt/envs/run_to_goal.py`'s docstring.
+  opponent_speed: 0.68
+  goal_x: 4.0
+  stand_z: 0.28
+  # D3 M3 E3: `force_identity_design` is ABSENT here -- that
+  # is the experiment. `AntEnv.step` defaults it to False, so
+  # the skeleton and attribute actions the policy emits are
+  # applied to the body for real.
+
+done_condition:
+  # CompetEvo's truncation (multi_agent_env.py:77). Transform2Act's max_ang /
+  # min_height / max_height are deliberately NOT set: this task has its own
+  # termination rule (a fall below z=0.28, a goal, a non-finite state) and two
+  # rules for one task would be untraceable.
+  max_nsteps: 500
+
+obs_specs:
+  attr: ['depth']
+  sim: []
+  design: true
+  clip_qvel: true
+  use_projected_params: true
+  use_body_ind: true
+max_body_depth: 4
+
+add_body_condition:
+  max_nchild: 2
+
+robot:
+  param_mapping: sin
+  no_root_offset: true
+  
+  body_params:
+    offset:
+      type: 'xy'
+      lb: [-0.5, -0.5]
+      ub: [0.5, 0.5]
+
+  joint_params: {}
+
+  geom_params:
+    size:
+      lb: 0.03
+      ub: 0.10
+    ext_start:
+      lb: 0.0
+      ub: 0.2
+
+  actuator_params:
+    gear:
+      lb: 20
+      ub: 400
+  
+

@@ -1,0 +1,74 @@
+
+=== phase 1: the cfgs are the experiment, and E2's are untouched ===
+  [OK  ] E3 arms: design stages LIVE (no force_identity_design)   [False, False, False]
+  [OK  ] E3 control arms: design stages forced to IDENTITY
+  [OK  ] E2's own cfgs still force identity (NEG control on the edit)
+  [OK  ] E2's cfgs still at their own budget (100 epochs), not moved to 400   gnn 100 mlp 100
+  [OK  ] every E3 arm: 400 epochs x 50,000 = 20.0M steps, E2.1's budget   [(400, 50000), (400, 50000), (400, 50000), (400, 50000), (400, 50000)]
+  [OK  ] seeds are 1,2,3 / 1,2
+  [OK  ] every other training/design hyperparameter equals E2's GNN arm   []
+  [OK  ] the TASK is E2's, unchanged (xml, frame_skip, opponent speed, goal)
+  [OK  ] the termination rule is E2's, unchanged -- the fall-dodge is KEPT   {'max_nsteps': 500}
+
+=== phase 2: THE MIRROR GATE: design changes the body MuJoCo integrates ===
+  [OK  ] the reference model is E2's 134 mjModel arrays   134 arrays
+  [OK  ] design ON: the mjModel arrays CHANGE   96 of 134 arrays changed
+  [OK  ] design ON: the physical arrays are among them   body_mass/geom_size/actuator_gear/body_pos all changed
+  [OK  ] design ON: the body COUNT moves off 13   body counts [10, 11, 12, 13, 14, 15, 16, 17, 20, 21], motors [8, 9, 10, 11, 12, 13, 14, 15, 17]
+  [OK  ] NEG design OFF: the SAME actions change NOTHING (E2's 134 identical)   0 arrays changed, body counts [13]
+  [OK  ] every designed body exists in the compiled model   11 bodies
+  [OK  ] compiled capsule RADIUS == the designed radius   max |delta| 4.557e-07 over 11 geoms (XML is 6 dp)
+  [OK  ] compiled capsule LENGTH == the designed bone length   max |delta| 1.005e-06
+  [OK  ] compiled actuator GEAR == the designed gear   max |delta| 3.135e-07 over 3 actuators
+  [OK  ] NEG: a Robot param the simulator never compiled IS detected   the round-trip check can fail, so passing it is evidence
+  [OK  ] a targeted ADD adds exactly one body   13 -> 14
+  [OK  ] a targeted REMOVE removes exactly one body   14 -> 13, removed body index 3 of 5 the cfg allows
+  [OK  ] the attribute stage is reached   stage index 1
+  [OK  ] a targeted ATTRIBUTE action moves the genome in the named column   min |delta gear| 1.0000 over the 7 bodies that carry an actuator; physical gear 150.0 -> 390.3
+  [OK  ] and the physical gear stays inside the cfg's own bounds   gears 390.3-390.3, bounds 20-400
+
+=== phase 3: the scripted opponent survives an evolved body ===
+  [OK  ] the opponent still has all 13 bodies and 8 motors after design   bodies [13] motors [8]
+  [OK  ] the opponent's joints are still LAST in qpos/qvel   so `_opp`'s `nq - qposadr` slice stays correct as our body grows
+  [OK  ] the opponent's root x still follows 1 - v*dt*k exactly   max error 0.000e+00 over 6 designs
+  [OK  ] the opponent still crosses x = -4 at control step 491   step 491
+  [OK  ] NEG: at 1.0 m/s the crossing moves to step 334   step 334
+
+=== phase 4: the reward and the termination still measure OUR agent ===
+  [OK  ] the check saw several DIFFERENT evolved bodies and enough steps   420 steps over body counts [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21]
+  [OK  ] dense + parse == the env reward, on an EVOLVED body   max |delta| 0.000e+00 over 420 steps
+  [OK  ] dense == forward - 0.5*sum(a^2) + 1.0, on an EVOLVED body   max |delta| 0.000e+00
+  [OK  ] the fall test reads OUR root z, not the opponent's   our z 0.2456, opponent's held at 0.5347 > stand_z 0.28
+  [OK  ] NEG: an evolved body can still be commanded through all its motors   nu 11 (8 opponent + ours)
+
+=== phase 5: the d2rep curriculum, on the GNN path ===
+  [OK  ] alpha_at is BIT-IDENTICAL to E2.1's trained schedule over 400 epochs   max |delta| 0.000e+00 across cur and d2rep
+  [OK  ] d2rep runs 1.000000 -> 0.846400, D2's own realised endpoint   alpha(0) 1.000000 alpha(80) 0.969280 alpha(400) 0.846400000
+  [OK  ] d2rep never crosses E2.1's critical alpha of 0.739   min alpha 0.8464; the fall-dodge is worth at most 153.6 against +1000 flat
+  [OK  ] NEG: curriculum_steps = 0 returns None, not 1.0
+  [OK  ] alpha = 1: NOT ONE of the +/-1000 reaches the buffer   7.5
+  [OK  ] alpha = 0.8464: the sparse term enters at 15.36% weight   -147.2520
+  [OK  ] NEG alpha = 0: the buffer is the sparse term ALONE
+  [OK  ] NEG alpha = None: the buffer is the raw env reward
+  [OK  ] a design stage contributes 0 under any alpha
+  [OK  ] the LOGGED return is the RAW env return in both conditions   avg_episode_reward -2170.3519 vs -2170.3519 over 3122 steps
+  [OK  ] but the BUFFER differs, and at alpha=1 no +/-1000 is in it   flat buffer holds 5 sparse events, alpha=1 buffer holds 0; buffers differ on 5 of 3122 steps
+
+=== phase 6: the instrument does not perturb what it measures ===
+  [OK  ] rng_guard: a probe inside it leaves the stream BIT-IDENTICAL   24 values compared
+  [OK  ] NEG: the same probe outside it DOES shift the stream   18 of 24 differ
+
+=== phase 7: the fall-dodge: still in the task, and WIDER through morphology ===
+  [OK  ] frozen body: the idle control still both falls and loses   endings ['lost', 'fell', 'lost', 'lost', 'lost', 'lost', 'lost', 'lost', 'lost', 'lost']
+  [OK  ] the fall-dodge is present and the two distributions do NOT overlap   sparse term banked: on a fall [0.0], on a loss [-1000.0000000000001, -1000.0, -999.9999999999999] -- so stopping early is worth +1000 under the flat reward and 0 under alpha=1
+  [OK  ] EVOLVED bodies at zero torque fall far more than the frozen one does   fall rate 1.00 over 12 random designs (mean length 21 steps) against 0.10 on the frozen body -- the reason this rung instruments the dodge from epoch 0
+  [OK  ] dodge_stats reproduces E2's pair on a hand-checked example   r(fall,R) 1.000 premium 5.0 (E2 measured r = +0.989 across its seven arms)
+  [OK  ] NEG: a zero-variance column returns None, not 0.0 (E2.1's d2rep case)
+
+=== phase 8: the instrument reports what changed, and E2's numbers do not move ===
+  [OK  ] frozen body: bodies_exec == the initial body count, so no E2 number moves   bodies_exec 13.0 design_fail_rate 0.0
+  [OK  ] body_summary reads the OPPONENT out of every aggregate   ours 13 bodies / 8 motors, opponent 13, model 27
+  [OK  ] body_summary's mass is OUR ant's, not two ants'   ours 0.8787 kg of 1.7574 total
+  [OK  ] NEG: after a design step the summary REPORTS the change   13 bodies topo 49779a2d5445 -> 17 bodies topo 202086cdfadc, mass 0.879 -> 1.127 kg, limb len sum 4.525 -> 9.134 m
+
+=== 56 passed, 0 failed (46s) ===

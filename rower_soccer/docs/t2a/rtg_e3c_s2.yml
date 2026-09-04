@@ -1,0 +1,150 @@
+# D3 M3 E3, the FROZEN-BODY GNN CONTROL, seed 2. Same trainer, same
+# instrument, same 20.0M-step budget and same `d2rep` reward regime as the E3
+# arms, with the design stages forced to identity.
+#
+# Why this arm exists: E2.1 supplies the frozen-body MLP number under `d2rep`
+# (goal 0.95/1.00, zero falls in 40 episodes). Without the matching GNN number
+# an E3 null is ambiguous between "the design loop failed" and "the GNN
+# controller cannot do this task", and that ambiguity is not resolvable after
+# the fact. It also answers E1.1's architecture question in a regime where
+# both controllers CAN do the task, which E2 could not: at 5.0M steps on the
+# flat reward neither reached the goal in 40 episodes, so the 3.0x return gap
+# there was a mixture of fall rates and not a comparison of controllers.
+#
+# Derived from `rtg_gnn_s1.yml` by changing three things: `max_epoch_num`,
+# `save_model_interval`/`additional_saves`, and the seed.
+# `force_identity_design: true` is KEPT.
+env_name: run_to_goal
+agent_specs:
+  batch_design: true
+  # [every, until]: also save at epochs 20/40/60/80/100.
+  additional_saves: [20, 100]
+# training parameters
+gamma: 0.995
+tau: 0.95
+policy_specs:
+  name: v5
+  htype: tanh
+  skel_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  skel_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  control_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  attr_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  attr_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_log_std: 0
+  attr_log_std: -2.3
+  fix_control_std: false
+  fix_attr_std: false
+policy_optimizer: 'Adam'
+policy_lr: 5.e-5
+policy_momentum: 0.0
+policy_weightdecay: 0.0
+value_specs:
+  htype: tanh
+  design_flag_in_state: true
+  onehot_design_flag: true
+  mlp: [512, 256]
+  gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+value_optimizer: 'Adam'
+value_lr: 3.e-4
+value_momentum: 0.0
+value_weightdecay: 0.0
+clip_epsilon: 0.2
+min_batch_size: 50000
+mini_batch_size: 2048
+num_optim_epoch: 10
+max_epoch_num: 400
+seed: 2
+save_model_interval: 100
+
+
+robot_param_scale: 1
+skel_transform_nsteps: 5
+
+env_specs:
+  model_xml_file: 'assets/mujoco_envs/rtg_ant.xml'
+  init_height: false
+  # CompetEvo's control rate: timestep 0.003 (in the asset) x frame_skip 5
+  # = dt 0.015 s, so 500 control steps is their 7.5 s episode.
+  frame_skip: 5
+  # The scripted opponent's speed, m/s. 5.0 m / 7.5 s = 0.667 is the speed
+  # the 500-step clock already demands; 0.68 is that advanced 2%, so the
+  # opponent CROSSES at control step 491 and running out of time is realised
+  # as a loss rather than as a silent truncation. See
+  # `design_opt/envs/run_to_goal.py`'s docstring.
+  opponent_speed: 0.68
+  goal_x: 4.0
+  stand_z: 0.28
+  # D3 M3 E1.1: the design stages are STEPPED but forced to the identity
+  # action (`design_opt/envs/ant.py:112-122`), so the episode length, the
+  # stage flag in the observation and the reward structure are exactly E1's
+  # while the body is never edited. Gated by `gate_e11_identity.py`.
+  force_identity_design: true
+
+done_condition:
+  # CompetEvo's truncation (multi_agent_env.py:77). Transform2Act's max_ang /
+  # min_height / max_height are deliberately NOT set: this task has its own
+  # termination rule (a fall below z=0.28, a goal, a non-finite state) and two
+  # rules for one task would be untraceable.
+  max_nsteps: 500
+
+obs_specs:
+  attr: ['depth']
+  sim: []
+  design: true
+  clip_qvel: true
+  use_projected_params: true
+  use_body_ind: true
+max_body_depth: 4
+
+add_body_condition:
+  max_nchild: 2
+
+robot:
+  param_mapping: sin
+  no_root_offset: true
+  
+  body_params:
+    offset:
+      type: 'xy'
+      lb: [-0.5, -0.5]
+      ub: [0.5, 0.5]
+
+  joint_params: {}
+
+  geom_params:
+    size:
+      lb: 0.03
+      ub: 0.10
+    ext_start:
+      lb: 0.0
+      ub: 0.2
+
+  actuator_params:
+    gear:
+      lb: 20
+      ub: 400
+  
+

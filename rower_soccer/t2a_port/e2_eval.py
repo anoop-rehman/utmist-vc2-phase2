@@ -73,6 +73,12 @@ def roll(env, act, wrap, seed, max_steps=1000, render=False,
         state = wrap(state)
         if done:
             return None
+    # D3 M3 E3: `nb` above is the body count BEFORE the design stages ran --
+    # 13, always, because `reset_model` rebuilds the initial ant every episode.
+    # With the design stages live the body that actually runs the episode is
+    # this one. Under E2/E2.1's `force_identity_design` the two are equal by
+    # construction, which is why no earlier number moves.
+    nb_exec = len(env.robot.bodies)
     R, n, xs, ys, frames = 0.0, 0, [], [], []
     info = {}
     x0 = float(env.data.subtree_com[env._our_torso_id()][0])
@@ -93,6 +99,7 @@ def roll(env, act, wrap, seed, max_steps=1000, render=False,
     xs = np.asarray(xs)
     path = float(np.abs(np.diff(np.concatenate([[x0], xs]))).sum())
     return dict(R=R, n=n, x0=x0, max_fwd=float(xs.max() - x0),
+                bodies_exec=nb_exec,
                 reached=bool(info.get("reached", False)),
                 opp_reached=bool(info.get("opp_reached", False)),
                 fell=bool(info.get("fell", False)),
@@ -112,9 +119,17 @@ def evaluate(env, act, wrap, episodes=20, seed_base=1000, max_steps=1000):
             eps.append(e)
     if not eps:
         return {}
+    # D3 M3 E3: `roll` returns None when the DESIGN stages end the episode --
+    # an evolved body that fails to compile or to reset. With the body frozen
+    # that cannot happen and `n_eps == episodes` always; with the design stages
+    # live it can, and silently dropping those episodes would bias every rate
+    # in this dict toward the designs that survive. Counted, not dropped.
     g = lambda k: np.array([e[k] for e in eps], dtype=float)
     R = g("R")
-    return dict(n_eps=len(eps), R_mean=float(R.mean()), R_sd=float(R.std(ddof=1))
+    return dict(n_eps=len(eps), n_requested=int(episodes),
+                design_fail_rate=float((episodes - len(eps)) / episodes),
+                bodies_exec=float(g("bodies_exec").mean()),
+                R_mean=float(R.mean()), R_sd=float(R.std(ddof=1))
                 if len(R) > 1 else 0.0,
                 R_min=float(R.min()), R_max=float(R.max()),
                 ep_len=float(g("n").mean()),
@@ -175,6 +190,12 @@ def best_median_worst(env, act, wrap, path, episodes=9, seed_base=777,
                  max_frames=max_frames, stride=stride)
         tag = ("GOAL" if e["reached"] else
                ("lost" if e["opp_reached"] else ("fell" if e["fell"] else "--")))
+        # D3 M3 E3: with the design stages live the three panels are three
+        # DIFFERENT creatures, so the body count belongs on the label. Appended
+        # only when the design stages actually changed the body, so every E2
+        # and E2.1 clip renders byte-identically to the ones already logged.
+        if e["bodies_exec"] != e["bodies"]:
+            tag += f"  nb={e['bodies_exec']}"
         panels[pick[i]] = ([label(f, f"{pick[i]}  R={e['R']:.0f}  "
                                   f"dx={e['net_dx']:.2f}m  {e['n']}st  {tag}")
                             for f in e["frames"]], e)

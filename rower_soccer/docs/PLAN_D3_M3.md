@@ -478,6 +478,52 @@ moving part.
 * **Measure**: win rate against the fixed opponent, and whether the evolved body
   differs from E1's (same creature, different pressure — a role effect).
 
+#### E3 GATED AND LAUNCHED, 2026-09-04. See [`D3_E3_ADVERSARIAL.md`](D3_E3_ADVERSARIAL.md).
+
+Open question §3.3 is answered the way it recommended: **E2's scripted
+opponent, inherited unchanged**, precisely because it cannot be blamed.
+
+**Five arms, differing in ONE cfg field.** `rtg_e3_s{1,2,3}` run the design
+stages LIVE; `rtg_e3c_s{1,2}` force them to identity. Both use E2.1's `d2rep`
+reward regime (`--curriculum-steps 130208333`, read out of
+`runs/d3_e21_curriculum/launch.sh` rather than reverse-engineered from the
+alpha trajectory), E2's scripted opponent, one trainer and one instrument.
+
+* **Budget: 400 epochs x 50,000 = 20.0M steps per arm**, E2.1's exactly, so
+  the frozen-body MLP number (goal 0.95/1.00), the frozen-body GNN control and
+  the E3 arms are three readings at one matched budget. Justified from the
+  design-stage data, not the control data: control needed 80 epochs
+  (`d2rep` at 4.0M), while at epoch 100 our ant was still at **63/101 distinct
+  topologies of 200 with a 5.5-7.0% most-common share** where their ant was at
+  20-41% — ours at 100 sits where theirs was at 40-50, so 400 is ~2x their
+  concentration horizon and 5x what control needs.
+* **The frozen-body GNN control is the point of the rung, not an extra.**
+  Without it an E3 null is ambiguous between "the design loop failed" and "the
+  GNN controller cannot do this task". It also finally answers E1.1's
+  architecture question in a regime where both controllers CAN do the task,
+  which E2 could not.
+* **The termination rule is KEPT** — E2 §6 left E3 that choice explicitly.
+  Changing it at the same time as turning the design stages on would be two
+  changes and one result. The fall-dodge is instrumented from epoch 0 instead.
+* **`gate_e3.py`: 56 checks, 0 failed**, eight phases, each with a negative
+  control. The headline is the **mirror** of E2's gate: 20 episodes of
+  destructive random design actions change **96 of 134 mjModel arrays** with
+  body counts spanning 10-21, the compiled model IS the designed body (radius
+  4.6e-07, length 1.0e-06, gear 3.1e-07), and **the same action sequence with
+  `force_identity_design` changes 0 arrays** — E2's own result reproduced as
+  this gate's negative control. `gate_e2.py` (41/0) and `gate_e21.py` (28/0)
+  were re-run in full after the two additive edits to `e2_eval.py`.
+* **The gate's own finding, before training**: a randomly evolved body falls in
+  **12 of 12** episodes at zero torque, mean length 21 steps, against 1 of 10
+  on the unevolved ant. E2 showed a *controller* can reach the degenerate
+  ending; this shows a *design* reaches it without a controller at all.
+
+**Correction to §2 carried by this experiment: the machine does NOT have 48
+usable cores.** `nproc` says 48; the cgroup quota (`/sys/fs/cgroup/cpu.max`)
+is **1020000/100000 = 10.2 CPUs**, and `vmstat` under five arms shows 25-34
+runnable against 20-21% of 48 busy. E2.1's recorded slowdown (`T_sample`
+31 -> 41 -> 83 s as arms were added) is the same throttle.
+
 ### E4 — Self-play, both sides evolving, run-to-goal 1v1
 
 * Both agents run skeleton -> attribute -> execution, both learn, opponent

@@ -1012,3 +1012,37 @@ by (goal rate, then speed), reported alongside the epoch-400 number, and the
 two are stated separately whenever they differ. Best so far is **epoch 319,
 goal 1.00, 3.725 m/s**. If epoch 400 is within noise of it, the epoch-400
 number is the headline and the best is reported beside it.
+
+## s1 completed 400 epochs — and its headline number moved
+
+`rtg_e31_s1` was still running when E3.1 was written up, so its row was taken at
+epoch ~325. It finished, and it kept improving to the very last evaluation:
+
+| | at write-up (e325) | **final (e399)** |
+|---|---:|---:|
+| goal rate | 1.00 | 1.00 |
+| speed | 3.72 m/s | **4.224 m/s** |
+| episode length | 91 steps | **82.3** |
+| bodies / motors | 16 / 7 | **17 / 8** |
+| topology | `025ed15ce09b` | **`2b3b3b54a170`** |
+
+Epochs 350-399 average goal **1.000** and speed **3.916**, and the **best
+checkpoint is the final one** — so the best-checkpoint rule adopted above
+never had to fire, and the epoch-329 dip is now conclusively a single failed
+episode rather than the start of a decline.
+
+**Two consequences.**
+
+1. **E3.1's summary line changes**: the two solving seeds are s2 at 4.891 m/s
+   and s1 at **4.224 m/s** (not 3.72), against the frozen ant's 1.50 m/s — so
+   the margin is **2.8-3.3x**, not 1.7-3.3x. The lower end of that range was
+   an artifact of reading a still-running arm, which is exactly the transient
+   this project has a rule about.
+2. **s1's body kept evolving to the end** — 16/7 at epoch 325 became 17/8 at
+   399, a different topology. Any claim that E3.1's designs had "locked in"
+   early is wrong for s1 as well as for s3.
+
+The pre-registered E4 comparison set (`docs/t2a/e4_null/e31_comparison_set.json`)
+has been regenerated with s1 final; `all_final` is now true. The three bodies
+remain mutually **0.886 / 0.912 / 0.973** apart, every pair still above the
+0.75 DISTINCT threshold, so "three distinct bodies" survives the update.

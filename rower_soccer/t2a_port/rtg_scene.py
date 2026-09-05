@@ -78,8 +78,17 @@ def _prefix_names(node, prefix):
                 el.attrib[attr] = prefix + el.attrib[attr]
 
 
-def build(src):
-    """Return the merged tree."""
+def build(src, opponent_src=None):
+    """Return the merged tree.
+
+    `opponent_src` (D3 M3 E4): an XML whose first `<body>` becomes the
+    OPPONENT instead of a clone of ours. This is what lets the opponent be
+    another lineage's evolved body. Default None reproduces E2/E3 exactly --
+    the opponent is a deep copy of our own root body, byte for byte as before.
+
+    The opponent's actuators come from `opponent_src`'s own `<actuator>` list,
+    not ours: an evolved body has its own motor set and reusing ours would
+    silently drop or invent motors."""
     parser = XMLParser(remove_blank_text=True)
     tree = parse(src, parser)
     root = tree.getroot()
@@ -99,8 +108,27 @@ def build(src):
     ours.attrib["pos"] = "%g %g %g" % INIT_POS[0]
     ours.attrib["euler"] = "%g %g %g" % INIT_EULER[0]
 
-    # ---- the opponent: a prefixed clone, placed and yawed as agent 1 ----
-    opp = copy.deepcopy(ours)
+    # ---- the opponent: agent 1, placed and yawed ------------------------
+    if opponent_src is None:
+        opp = copy.deepcopy(ours)
+        opp_motors = [copy.deepcopy(m) for m in root.find("actuator").findall("motor")]
+    else:
+        otree = parse(opponent_src, XMLParser(remove_blank_text=True))
+        oroot = otree.getroot()
+        obody = oroot.find("worldbody").find("body")
+        assert obody is not None and obody.attrib["name"] == "0", (
+            "opponent_src's first <body> under <worldbody> must be its root, "
+            "named '0' -- same contract as ours")
+        opp = copy.deepcopy(obody)
+        oact = oroot.find("actuator")
+        # An evolved body is dumped as a MERGED scene, so its <actuator> list
+        # already contains that scene's own opp_* motors. Take only the motors
+        # belonging to its FIRST body; prefixing the stale opp_* ones would
+        # give the new opponent a second, phantom motor set.
+        opp_motors = ([copy.deepcopy(m) for m in oact.findall("motor")
+                       if not m.attrib.get("joint", "").startswith(OPP_PREFIX)]
+                      if oact is not None else [])
+        assert opp_motors, "opponent_src has no non-opponent motors"
     for cam in opp.findall("camera"):
         opp.remove(cam)
     _prefix_names(opp, OPP_PREFIX)
@@ -132,8 +160,7 @@ def build(src):
 
     # ---- the opponent's actuators ---------------------------------------
     act = root.find("actuator")
-    for m in list(act.findall("motor")):
-        m2 = copy.deepcopy(m)
+    for m2 in opp_motors:
         m2.attrib["joint"] = OPP_PREFIX + m2.attrib["joint"]
         m2.attrib["name"] = OPP_PREFIX + m2.attrib["name"]
         act.append(m2)
@@ -168,11 +195,14 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--src", default="assets/mujoco_envs/ant_competevo.xml")
     p.add_argument("--out", default="assets/mujoco_envs/rtg_ant.xml")
+    p.add_argument("--opponent-src", default=None,
+                   help="D3 M3 E4: XML whose first <body> becomes the "
+                        "opponent, instead of a clone of ours")
     p.add_argument("--report-settle", action="store_true",
                    help="also print the stance the env will measure")
     a = p.parse_args()
 
-    tree = build(a.src)
+    tree = build(a.src, a.opponent_src)
     tree.write(a.out, pretty_print=True)
     print(f"[rtg_scene] -> {a.out}")
     if a.report_settle:

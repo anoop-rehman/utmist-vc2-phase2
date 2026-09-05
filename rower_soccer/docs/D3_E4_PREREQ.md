@@ -550,7 +550,62 @@ snapshots every 10 epochs. The epoch-0 handshake retry **fired in production**
 (`partner appeared after retry` on s1a), so neither arm opened against a
 passive body.
 
-### The epoch rate, measured
+### The epoch rate, measured properly (supersedes the panic below)
+
+**The ~90 h figure below is withdrawn: it came from a bad measurement.** It was
+taken over three epochs that included process startup, the epoch-0 video, and
+CPU contention from `s3body`. Re-measured on the freed machine over epochs
+**6-13** (no startup, no epoch-0 video, `s3body` stopped), timestamping each
+epoch's arrival:
+
+| | s1a | s1b |
+|---|---:|---:|
+| per-epoch (non-video mean) | **170 s** | **181 s** |
+| per-epoch (all-in) | 168 s | 177 s |
+| spread | 150-205 s | 155-205 s |
+| trend, first half → second half | 164 → 175 s | 179 → 184 s |
+
+Neither arm is still settling; with n = 7-8 and a 55 s spread those trends are
+noise, not drift.
+
+**The E3.1 baseline, measured the identical way** — `log_eval.txt` timestamps a
+video checkpoint every 6 epochs, so consecutive intervals divided by 6 give the
+epoch rate, median-filtered to drop restart gaps:
+
+| | s1 | s2 | s3 | **mean** |
+|---|---:|---:|---:|---:|
+| E3.1 s/epoch | 141 | 131 | 149 | **141** |
+
+So **self-play costs +21% to +29%**, and the ~41 h estimate decomposes as:
+
+| | baseline | overhead | s/epoch | 3 waves |
+|---|---:|---:|---:|---:|
+| predicted | 110 s | +12% | 123 | 41 h |
+| **actual** | **141 s** | **+29%** | **181** | **60 h** |
+
+**The overhead prediction was roughly right; the error was my E3.1 baseline.**
+I quoted 110 s/epoch from an offhand observation rather than a measurement —
+the real figure across three seeds is 141 s. Most of the 41 → 60 h gap is that,
+not self-play.
+
+**A wave is 20.1 h** (the slower arm sets it, since the pair must finish
+together), so **three waves ≈ 60 h**.
+
+### Will the rate hold as the arms learn?
+
+Worth asking, because episode length collapses during training and the design
+stages plus a MuJoCo model recompile run **per episode**, not per step: E3.1 s1
+went from ~115 episodes per 50 000-step epoch to ~544, a 4.7x increase in
+per-episode work.
+
+**Measured, and it does not matter.** Over that same run E3.1 s1's epoch time
+went **144 → 141 → 139 s** (first/middle/last third) while episodes per epoch
+went **115 → 157 → 392 → 544**. Flat, in fact slightly falling. The per-episode
+recompile is negligible against the 50 000 fixed control steps, so the 170-181 s
+measured at epochs 6-13 should hold for the whole run and 60 h is a projection
+rather than an early-regime snapshot.
+
+### The earlier (withdrawn) rate estimate
 
 | | E3.1 | **E4 measured** |
 |---|---:|---:|

@@ -723,11 +723,78 @@ full series reversed.*
 | `r(fall, R)` | *undefined* (no falls) | **+0.991** |
 | fall premium | — | **+961.9** |
 
-> **The seed that solved the task is the seed whose design search converged.**
-> s2's population collapsed onto **one body plan at 93%**; s3's was still spread
-> over 9 topologies with the mode at 49% after 400 epochs. s2's winning body is
-> also *bigger and longer-limbed* — 18 bodies and 10.4 m of total limb against
-> 12 and 5.2 m — which is what a 4.95 m/s runner needs.
+> ### RETRACTED: "the seed that solved it is the seed whose design search converged"
+>
+> **That claim was wrong and is withdrawn.** It read the two final-epoch
+> 100-design probes (s2: 5 topologies / mode 93%; s3: 9 / 49%) as if they
+> characterised the runs. **The per-epoch series inverts it — s3 was *more*
+> converged than s2 in every window measured:**
+>
+> | epoch | s2 `top_share` | s3 `top_share` |
+> |---|---|---|
+> | 50 | 0.05 | 0.20 |
+> | 100 | 0.15 | 0.40 |
+> | 150 | 0.55 | **0.95** |
+> | 200 | 0.60 | 0.85 |
+> | 250 | 0.85 | **0.95** |
+> | 300 | 0.70 | **0.95** |
+> | 350 | 0.75 | 0.60 |
+> | 399 | **0.90** | 0.60 |
+>
+> | mean `top_share` | s2 | s3 |
+> |---|---|---|
+> | epochs 0-150 | 0.171 | **0.326** |
+> | epochs 150-399 | 0.739 | **0.809** |
+> | epochs 200-399 | 0.738 | **0.805** |
+> | whole run | 0.525 | **0.626** |
+>
+> s3 reached 0.95 by epoch 150 while s2 was still at 0.55, and only fell back in
+> the last ~50 epochs. **The endpoint I quoted is the one moment in 400 epochs
+> where the comparison runs the other way.**
+>
+> *Third instance in this experiment of a mechanism inferred from one time point
+> in a series that contains a reversal — after the mass correlation
+> (−0.86 early, +0.80 over the full run) and the σ "acceleration" (accelerating
+> to epoch 59, decelerating after). Same fix each time: **plot the series before
+> proposing the mechanism.** These per-epoch numbers were already on disk in
+> `census/*_morph.csv` when I wrote the claim.*
+
+### What the series does support — premature lock-in, as a hypothesis
+
+Offered as a hypothesis with its test, not as a finding.
+
+**When did each seed's modal plan stop changing, and what did it lock onto?**
+
+| | modal plan locked at | plan at lock-in | modal changes |
+|---|---|---|---|
+| **s2** | **epoch 368** | 18 bodies, 6 motors, 1.415 kg, limb 0.601 m | 45 |
+| **s3** | **epoch 145** | 12 bodies, 6 motors, 0.891 kg, limb 0.479 m | 52 (all before ep 145) |
+
+**And the ordering against each seed's own performance is the sharp part:**
+
+| | locked | first fwd > 1.0 m | first fwd > 2.5 m | first goal 1.00 |
+|---|---|---|---|---|
+| **s2** | 368 | 109 | 149 | **249** — *119 epochs before it locked* |
+| **s3** | **145** | 179 — *after locking* | **never** | **never** |
+
+> **s2 solved the task and then settled. s3 settled at epoch 145 — before it had
+> shown any locomotion at all — and spent the remaining 255 epochs on a plan
+> that never exceeded 2.5 m of the 5.0 m required.**
+
+**Neither seed ever visited the other's terminal plan** — s2's `50271e7f5d26`
+never appears in s3's modal series and s3's `901ec8c2e00b` never appears in
+s2's. They explored disjoint regions, so this is not a case of one seed finding
+the good body and the other passing it by.
+
+**On this reading convergence is not what distinguishes success — timing and
+target are, and early convergence is a liability.** But it is two runs, the
+lock-in epochs are read from the *mean-action* modal topology (the mode, not
+the population — §3c's standing caveat), and "locked onto a bad plan" and
+"failed for another reason and stopped moving" are not separable from this
+data. `rtg_e31_s1` is the tiebreaker and its `top_share` trajectory is now the
+most informative thing it will produce: at epoch 53 it is at **0.25 with 30
+modal changes**, i.e. still exploratory — closer to s2's trajectory than s3's
+at the same stage (s3 was at 0.20 by epoch 50 and 0.95 by 150).
 
 **s3 reproduces E2's correlation structure exactly**: `r(fall, R)` = **+0.991**
 with a measured **+961.9** fall premium, because it never scores and so return
@@ -736,11 +803,11 @@ statistic is undefined there — the same degenerate-at-both-ends behaviour
 E2.1's `d2rep` showed. **Return measures competence only on the arm that has
 any.**
 
-**This is a 1-of-2 result and the mechanism of the split is not established.**
+**This is a 1-of-2 result and the mechanism of the split is NOT established.**
 Both arms had identical hyperparameters, cleared both falsifiers, and held
-`p_act4` = 1.000 throughout. What differed is whether the skeleton search
-settled. Whether that is cause, consequence, or coincidence is exactly what a
-third seed is for.
+`p_act4` = 1.000 throughout. **They differed in an outcome we cannot yet
+explain.** The premature-lock hypothesis above fits the series; it is not
+established by it.
 
 ## Status and the instrumentation failure this transition produced (again)
 

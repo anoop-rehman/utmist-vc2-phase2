@@ -40,6 +40,15 @@ case "$1" in
     setsid nohup $P $T/train_e3_gnn.py --cfg rtg_e31f_$S $COMMON \
       --wandb --wandb-name d3_e31_floor_$S --stop-file /tmp/stop_e31_f_$S \
       > $L/train_f_$S.log 2>&1 & ;;
+  d_s3body|d_s2body)
+    # E3.1-D: an evolved body FROZEN, fresh controller. Separates "s3's body is
+    # incapable" from "s3's controller failed". Cheaper than a design-on arm
+    # (fixed graph), and must NOT displace rtg_e31_s1, the tiebreaker.
+    C=rtg_e31d_${1#d_}
+    # shellcheck disable=SC2086
+    setsid nohup $P $T/train_e3_gnn.py --cfg $C $COMMON \
+      --wandb --wandb-name d3_e31d_${1#d_} --stop-file /tmp/stop_e31d_${1#d_} \
+      > $L/train_${1}.log 2>&1 & ;;
   *) echo "unknown arm $1"; exit 1 ;;
 esac
 echo "launched $1 pid $!"
@@ -47,6 +56,6 @@ echo "launched $1 pid $!"
 # this experiment an instrument looked present and was collecting nothing for
 # the new arms, both times at a transition. Runs in the background so the launch
 # is not blocked, and shouts into the log if a collector is missing.
-CFG=$(case "$1" in p_*) echo "rtg_e31_${1#p_}";; f_*) echo "rtg_e31f_${1#f_}";; esac)
+CFG=$(case "$1" in p_*) echo "rtg_e31_${1#p_}";; f_*) echo "rtg_e31f_${1#f_}";; d_*) echo "rtg_e31d_${1#d_}";; esac)
 setsid nohup /workspace/utmist-vc2-phase2/runs/d3_e31_fix/assert_instruments.sh \
   "$CFG" 1200 >> "$L/instrument_assertion.log" 2>&1 &

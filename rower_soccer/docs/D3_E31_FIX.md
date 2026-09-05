@@ -825,3 +825,76 @@ than an edit**, which is why the file was written that way, and the floor arm's
 census appeared within one cycle. The lesson is now three-for-three: **every
 time new arms start, the instrumentation must be re-pointed and re-asserted,
 and the assertion is the only thing that catches it.**
+
+---
+
+# E3.1-D — why did s3 fail? Freeze its body and train a fresh controller
+
+*Pre-registered before the run, as the falsifiers were.*
+
+## The question
+
+s2 and s3 had identical hyperparameters, cleared both falsifiers, held
+`p_act4` = 1.000 — and one solved the task while the other never exceeded 0.70 m.
+Two explanations the data so far cannot separate:
+
+* **(a) the body is incapable** — s3 locked at epoch 145 onto a 12-body,
+  0.949 kg, 5.201 m-limb plan that cannot run 5 m in 491 control steps;
+* **(b) the body is fine and the controller failed** — a training failure that
+  merely coincided with an early design lock.
+
+**The frozen-body machinery separates them, and it is already calibrated**: the
+E3 controls established that a frozen 13-body ant under `force_identity_design`
+reaches goal 0.95 in 400 epochs on this exact task, regime, budget and
+instrument.
+
+## The arms
+
+| arm | body | rationale |
+|---|---|---|
+| `rtg_e31d_s3body` | s3's epoch-400 design, **frozen** | the question |
+| `rtg_e31d_s2body` | s2's epoch-400 design, **frozen** | **control** — it should score; without it a null on s3 is uninterpretable |
+| *(already done)* | unmodified 13-body ant, frozen | the E3 controls, goal **0.95** |
+
+Each cfg differs from `rtg_e3c_s1.yml` in **one field**, `model_xml_file`.
+
+## Outcomes, written down before the run
+
+* **s3's body SCORES** → the body was capable and the failure was the
+  controller or the design/control interaction. **Kills explanation (a)**, and
+  makes premature lock-in much less interesting since the plan locked onto was
+  fine.
+* **s3's body CANNOT SCORE with a fresh controller and the full budget** →
+  s3 locked onto a genuinely dead body. **Direct support for the lock-in
+  hypothesis**, and the most informative outcome available.
+* **s2's body fails to score** → the harness cannot score on *any* evolved body
+  and **a null on s3 means nothing**. This is why the control is not optional.
+
+## The caveat, stated before running
+
+**This is not the experiment s3 ran.** A fresh controller here gets a **fixed**
+target where s3 was chasing a moving one — strictly easier. So *"it scores"*
+proves the body was **not the blocker**; it does **not** prove s3 could have
+found the controller. The asymmetry runs one way: a **null** on s3's body is
+strong evidence, a **pass** is weaker.
+
+## The gate
+
+`gate_e31d.py` — **10 checks, 0 failed**. Each body loads as the evolved one
+(12/6 and 18/6 against the original ant's 13/8, matching topology hashes), mass
+and limb totals match the dumped design to 1e-3, the scripted opponent survives
+the round-trip with all 13 bodies and 8 motors and still follows
+`1 − v·Δt·k` to **0.000e+00**, and each body is **identical across 10 episodes**
+of destructive random design actions.
+
+**One tolerance, recorded rather than asserted away.** The gate originally
+demanded bit-equality with the exported XML and **failed on s3's body: 15 of 134
+arrays moved.** The cause is a `sin`/`arcsin` round-trip in the identity
+attribute step that lands **1.273e-08** off in the genome — present on *both*
+bodies — which flips the last digit where a value sits near the XML's 6-dp write
+precision. It is a **one-time snap**: `reset_robot` rebuilds from
+`init_xml_str` every episode, so it re-applies from the same start and cannot
+compound (verified identical at episodes 1, 2, 3, 10, 50, 100, 200). The
+physical size is **3.483e-08 kg on a 0.949 kg body — 3.7e-06 %**. The right
+assertion is that every episode runs the *same* body, which it does; the
+constant offset is a documented tolerance.

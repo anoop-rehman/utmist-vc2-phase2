@@ -1,0 +1,2 @@
+epoch,alpha,control_log_std,attr_log_std,n_bodies,n_motors,mass,limb_len_mean,gear_mean,topo,distinct_topologies,top_topology_share,sampled_bodies_mean,pop_motors_mean,pop_motors_max,p_act1,p_act4,design_failed,eval_fall_rate,eval_goal_rate,eval_max_fwd,eval_R_mean,r_fall_return,r_fwd_return
+0,1.0,-0.01047948274449637,-2.2996336925847074,12,6,0.9494467783436957,0.47277801200700986,192.37666533333334,901ec8c2e00b,1,1.0,12.0,6.0,6,1.0,1.0,0,,,,,,

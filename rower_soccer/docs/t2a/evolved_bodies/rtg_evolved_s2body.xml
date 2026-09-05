@@ -1,0 +1,155 @@
+<mujoco model="rtg_ant">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
+  <option integrator="RK4" timestep="0.003" solver="PGS" iterations="1000"/>
+  <default>
+    <joint armature="1" damping="1" limited="true"/>
+    <geom conaffinity="0" condim="3" density="5.0" friction="1 0.5 0.5" margin="0.01" rgba="0.98 0.87 0.67 1" material="geom"/>
+  </default>
+  <visual>
+    <headlight ambient=".1 .1 .1" diffuse=".6 .6 .6" specular="0.3 0.3 0.3"/>
+    <map znear=".01"/>
+    <quality shadowsize="1024"/>
+  </visual>
+  <worldbody>
+    <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1"/>
+    <geom conaffinity="1" condim="3" name="floor" pos="0 0 0" rgba="0.8 0.9 0.8 1" size="200 200 .125" type="plane" material="grid_new"/>
+    <body name="0" pos="-1 0 0.75" euler="0 0 0">
+      <camera name="track" mode="trackcom" pos="0 -3 0.3" xyaxes="1 0 0 0 0 1"/>
+      <geom pos="0 0 0" size="0.25" type="sphere"/>
+      <joint armature="0" damping="0" limited="false" margin="0.01" name="0_joint" pos="0 0 0" range="-30 30" type="free"/>
+      <body name="1" pos="0 0 0">
+        <geom fromto="-0.000284 -0.000263 0 0.397842 0.368335 0" size="0.057225" type="capsule"/>
+        <body name="11" pos="0.397842 0.368335 0">
+          <geom fromto="-0.00148 -0.00119 0 0.303215 0.243884 0" size="0.04568" type="capsule"/>
+        </body>
+      </body>
+      <body name="2" pos="0 0 0">
+        <geom fromto="0.000165 -0.000165 0 -0.494145 0.491931 0" size="0.092602" type="capsule"/>
+        <body name="12" pos="-0.494145 0.491931 0">
+          <joint axis="0 0 1" name="12_joint" pos="0 0 0" range="-30 30" type="hinge"/>
+          <geom fromto="0.058503 0.058447 0 -0.497571 -0.497091 0" size="0.057001" type="capsule"/>
+          <body name="112" pos="-0.497571 -0.497091 0">
+            <geom fromto="0.000056 -0.000027 0 -0.497561 0.242081 0" size="0.074924" type="capsule"/>
+            <joint axis="-0.707107 -0.707107 0" name="112_joint" pos="0 0 0" range="30 70" type="hinge"/>
+          </body>
+        </body>
+        <body name="22" pos="-0.494145 0.491931 0">
+          <geom fromto="0.035292 0.033417 0 -0.406534 -0.38493 0" size="0.070755" type="capsule"/>
+          <body name="122" pos="-0.406534 -0.38493 0">
+            <geom fromto="0.000034 -0.000022 0 -0.37009 0.245714 0" size="0.083505" type="capsule"/>
+          </body>
+          <body name="222" pos="-0.406534 -0.38493 0">
+            <geom fromto="0.000106 -0.000082 0 -0.401421 0.310594 0" size="0.071315" type="capsule"/>
+          </body>
+        </body>
+      </body>
+      <body name="3" pos="0 0 0">
+        <geom fromto="0.019455 0.018993 0 -0.499856 -0.487977 0" size="0.080398" type="capsule"/>
+        <body name="13" pos="-0.499856 -0.487977 0">
+          <joint axis="0 0 1" name="13_joint" pos="0 0 0" range="-30 30" type="hinge"/>
+          <geom fromto="0.000757 0.000775 0 -0.487367 -0.498964 0" size="0.099468" type="capsule"/>
+          <body name="113" pos="-0.487367 -0.498964 0">
+            <geom fromto="0.002282 0.002217 0 -0.499985 -0.485721 0" size="0.09896" type="capsule"/>
+            <joint axis="0.707107 -0.707107 0" name="113_joint" pos="0 0 0" range="30 70" type="hinge"/>
+          </body>
+        </body>
+        <body name="23" pos="-0.499856 -0.487977 0">
+          <geom fromto="0.081164 0.028512 0 -0.461263 -0.162039 0" size="0.099531" type="capsule"/>
+          <body name="123" pos="-0.461263 -0.162039 0">
+            <geom fromto="0.028407 0.026023 0 -0.497459 -0.455715 0" size="0.091394" type="capsule"/>
+          </body>
+          <body name="223" pos="-0.461263 -0.162039 0">
+            <geom fromto="0.000271 0.000093 0 -0.497256 -0.170676 0" size="0.097951" type="capsule"/>
+          </body>
+        </body>
+      </body>
+      <body name="4" pos="0 0 0">
+        <geom fromto="-0.000576 0.000272 0 0.473452 -0.22319 0" size="0.089097" type="capsule"/>
+        <body name="14" pos="0.473452 -0.22319 0">
+          <joint axis="0 0 1" name="14_joint" pos="0 0 0" range="-30 30" type="hinge"/>
+          <geom fromto="-0.018728 0.017868 0 0.483968 -0.461726 0" size="0.030154" type="capsule"/>
+          <body name="114" pos="0.483968 -0.461726 0">
+            <geom fromto="-0.003727 0.00368 0 0.499031 -0.492765 0" size="0.03647" type="capsule"/>
+            <joint axis="0.707107 0.707107 0" name="114_joint" pos="0 0 0" range="30 70" type="hinge"/>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="opp_0" pos="1 0 0.75" euler="0 0 180">
+      <geom pos="0 0 0" size="0.25" type="sphere" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+      <joint armature="0" damping="0" limited="false" margin="0.01" name="opp_0_joint" pos="0 0 0" range="-30 30" type="free"/>
+      <body name="opp_1" pos="0 0 0">
+        <geom fromto="0 0 0 0.2 0.2 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+        <body name="opp_11" pos="0.2 0.2 0">
+          <joint axis="0 0 1" name="opp_11_joint" pos="0 0 0" range="-30 30" type="hinge"/>
+          <geom fromto="0.0 0.0 0.0 0.2 0.2 0.0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+          <body name="opp_111" pos="0.2 0.2 0">
+            <geom fromto="0 0 0 0.4 0.4 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+            <joint axis="-0.707107 0.707107 0" name="opp_111_joint" pos="0 0 0" range="30 70" type="hinge"/>
+          </body>
+        </body>
+      </body>
+      <body name="opp_2" pos="0 0 0">
+        <geom fromto="0 0 0 -0.2 0.2 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+        <body name="opp_12" pos="-0.2 0.2 0">
+          <joint axis="0 0 1" name="opp_12_joint" pos="0 0 0" range="-30 30" type="hinge"/>
+          <geom fromto="0.0 0.0 0.0 -0.2 0.2 0.0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+          <body name="opp_112" pos="-0.2 0.2 0">
+            <geom fromto="0 0 0 -0.4 0.4 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+            <joint axis="-0.707107 -0.707107 0" name="opp_112_joint" pos="0 0 0" range="30 70" type="hinge"/>
+          </body>
+        </body>
+      </body>
+      <body name="opp_3" pos="0 0 0">
+        <geom fromto="0 0 0 -0.2 -0.2 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+        <body name="opp_13" pos="-0.2 -0.2 0">
+          <joint axis="0 0 1" name="opp_13_joint" pos="0 0 0" range="-30 30" type="hinge"/>
+          <geom fromto="0 0 0 -0.2 -0.2 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+          <body name="opp_113" pos="-0.2 -0.2 0">
+            <geom fromto="0 0 0 -0.4 -0.4 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+            <joint axis="0.707107 -0.707107 0" name="opp_113_joint" pos="0 0 0" range="30 70" type="hinge"/>
+          </body>
+        </body>
+      </body>
+      <body name="opp_4" pos="0 0 0">
+        <geom fromto="0 0 0 0.2 -0.2 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+        <body name="opp_14" pos="0.2 -0.2 0">
+          <joint axis="0 0 1" name="opp_14_joint" pos="0 0 0" range="-30 30" type="hinge"/>
+          <geom fromto="0 0 0 0.2 -0.2 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+          <body name="opp_114" pos="0.2 -0.2 0">
+            <geom fromto="0 0 0 0.4 -0.4 0" size="0.08" type="capsule" contype="0" conaffinity="1" rgba="0.60 0.68 0.98 1"/>
+            <joint axis="0.707107 0.707107 0" name="opp_114_joint" pos="0 0 0" range="30 70" type="hinge"/>
+          </body>
+        </body>
+      </body>
+    </body>
+    <geom name="rightgoal" type="cylinder" fromto="4 0 0 4 0 1" size="0.1" contype="1" conaffinity="1" condim="3" rgba="0.9 0.2 0.2 1"/>
+    <geom name="leftgoal" type="cylinder" fromto="-4 0 0 -4 0 1" size="0.1" contype="1" conaffinity="1" condim="3" rgba="0.2 0.4 0.9 1"/>
+    <camera name="pitch" mode="fixed" pos="0 -11 5.5" xyaxes="1 0 0 0 0.45 0.89"/>
+  </worldbody>
+  <actuator>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="12_joint" gear="399.160016" name="12_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="13_joint" gear="88.017042" name="13_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="14_joint" gear="337.477483" name="14_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="112_joint" gear="79.105699" name="112_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="113_joint" gear="97.02089" name="113_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="114_joint" gear="171.688966" name="114_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_11_joint" gear="150" name="opp_11_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_12_joint" gear="150" name="opp_12_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_13_joint" gear="150" name="opp_13_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_14_joint" gear="150" name="opp_14_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_111_joint" gear="150" name="opp_111_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_112_joint" gear="150" name="opp_112_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_113_joint" gear="150" name="opp_113_joint"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="opp_114_joint" gear="150" name="opp_114_joint"/>
+  </actuator>
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1=".4 .5 .6" rgb2="0 0 0" width="100" height="100"/>
+    <texture builtin="flat" height="1278" mark="cross" markrgb="1 1 1" name="texgeom" random="0.01" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" type="cube" width="127"/>
+    <texture builtin="checker" height="100" name="texplane" rgb1="0 0 0" rgb2="0.8 0.8 0.8" type="2d" width="100"/>
+    <material name="MatPlane" reflectance="0.5" shininess="1" specular="1" texrepeat="60 60" texture="texplane"/>
+    <material name="geom" texture="texgeom" texuniform="true"/>
+    <texture name="grid_new" type="2d" builtin="checker" rgb1=".1 .3 .2" rgb2=".2 .4 .3" width="1000" height="1000" mark="none" markrgb=".8 .6 .4"/>
+    <material name="grid_new" texture="grid_new" texrepeat="0.2 0.2" texuniform="true" reflectance=".2"/>
+  </asset>
+</mujoco>

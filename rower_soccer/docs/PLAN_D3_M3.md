@@ -800,23 +800,40 @@ that a schedule's realised behaviour can differ sharply from its nominal shape.
 by moving the opponent 4 m: the design-head input changes by **0.000e+00**
 while the dropped slice changes by 4.000.
 
-**So E4's headline question is unanswerable as posed**, and for a stronger
-reason than D2's. D2's head *could* be given role; this one has no simulation
-input to condition on. Two agents with identical bodies get identical
-design-head inputs, so **convergence is guaranteed by construction and an arms
-race is impossible** — neither side can perceive that it has an opponent.
+This is **upstream's architecture, not a port defect** — the file is unmodified
+from `09fc902 initial code release!` and the class declares the asymmetry in its
+own constructor.
 
-**Retrospectively**: E2's three appended opponent/goal columns never reached the
-design head, so E3 and E3.1 evolved their bodies **blind to the task**, with the
-PPO advantage the only channel from task to morphology. That the search still
-found three distinct bodies beating the fixed ant by 1.7-3.3x is a stronger
-result than it looked.
+**Retrospectively, and this is the main finding**: E2's three appended
+opponent/goal columns never reached the design head, so E3 and E3.1 evolved
+their bodies **blind to the task** — no opponent, no goal, not even their own
+joint angles or velocity — with the PPO advantage the *only* channel from task
+to morphology. Through that single channel the search still found **three
+distinct topologies each beating the fixed ant by 1.7-3.3x**. A stronger result
+than it looked.
 
-Three options are proposed in the doc — fix the head (plus an **E4.0**
-prerequisite rung re-running E3.1's primary arm with the head sighted);
-convergence-study-only; or role-in-design as D2 did — with ≥ 3 seeds,
-`control_log_std = −1.5` and a frozen-body diagnostic per seed fixed for all of
-them. **Nothing launched.**
+**What is ruled out is narrower than first written.** An earlier draft said
+convergence was "guaranteed by construction"; that is withdrawn. What is ruled
+out is **observation-conditioned specialisation**. **Return-mediated divergence
+remains available** — and it is the same channel that produced E3.1's bodies.
+It is also strong: `run_to_goal`'s sparse term is a genuine race
+(`parse = ±1000`, `done` on first arrival), and at `alpha = 0.847` the
+**win → loss swing is 306 points, 58% of the weighted buffer return**. E3.1
+never exercised it — the scripted opponent crossed at step 491 against winners
+finishing in 76-131 — so **E4 is the first rung where the sign of `parse` is in
+play**.
+
+**Revised plan: run E4 blind and faithful first**, divergence-vs-convergence as
+the measured outcome, mechanism stated in advance as return-mediated only; build
+the sighted head behind a cfg flag but leave it unused, so it is one flag away
+if the blind run converges. Shape: alternating-snapshot self-play, 2 lineages ×
+3 seeds ≈ **125 M steps / ~40 h**. Divergence is pre-registered as a
+**trajectory** criterion — `Δ(e) = D_self(e) − D_null(e)` with an internal null,
+verdict on the mean over epochs 200-400 at **±0.15 SMD (3.1 SE)** plus 80%
+sign-consistency, because the cross-seed null *rises monotonically* (0.17 → 0.93)
+and an endpoint would measure elapsed training. Draw-rate and ceiling
+saturation guards make a silenced channel report as *untestable* rather than
+null. **Nothing launched.**
 
 ### E5 — 2v2 run-to-goal
 

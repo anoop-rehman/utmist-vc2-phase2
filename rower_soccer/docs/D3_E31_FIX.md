@@ -898,3 +898,87 @@ compound (verified identical at episodes 1, 2, 3, 10, 50, 100, 200). The
 physical size is **3.483e-08 kg on a 0.949 kg body — 3.7e-06 %**. The right
 assertion is that every episode runs the *same* body, which it does; the
 constant offset is a documented tolerance.
+
+---
+
+# E3.1 FINDINGS — design+control wins, on 2 of 3 seeds, and the failure was the CONTROLLER
+
+## The headline
+
+> **Transform2Act's design+control loop solves an adversarial task, and the
+> evolved bodies beat the fixed one — on 2 of 3 seeds. The one failure was the
+> controller, not the morphology: s3's own body scores with a fresh controller,
+> and reaches goal 0.5 *earlier* than either winning seed did.**
+
+| arm | epoch | goal | speed | steps to goal | body |
+|---|---|---|---|---|---|
+| **s2** | 399 | **1.00** | **4.89 m/s** | **76** | 18 bodies / 6 motors |
+| **s1** | 321 | **1.00** | 3.72 m/s | 91 | 16 bodies / 7 motors |
+| **s3body** (s3's body, frozen, fresh controller) | 186 | **0.60** ↑ | 2.58 m/s | 131 | 12 bodies / 6 motors |
+| s3 | 399 | **0.00** | — | — | 12 bodies / 6 motors |
+| *frozen 13-body ant (E3 control)* | 400 | 0.95 | 1.50 m/s | 218 | 13 / 8 |
+| *E3, `log_std` 0* | 19 | 0.00 | — | — | 5 / **0** |
+
+## Three distinct solutions — the design space has multiple viable optima
+
+The two winning seeds did **not** converge on the same creature, and the
+diagnostic adds a third working body:
+
+* **s2 — 18 bodies, 6 motors, 1.470 kg, 10.4 m of limb**, bounding at
+  **4.89 m/s**, goal in **76 steps** of the 491 available.
+* **s1 — 16 bodies, 7 motors**, at **3.72 m/s**, 91 steps.
+* **s3's body — 12 bodies, 6 motors, 0.949 kg, 5.2 m of limb**, flipping at
+  **2.58 m/s**, 131 steps.
+
+All three beat the unmodified ant's **1.50 m/s / 218 steps**, by 1.7x to 3.3x.
+**This is not one optimum found repeatedly; it is three different bodies, none
+of which is the ant we started from, all of which work.** Neither winning seed
+ever visited the other's topology.
+
+## RETRACTED: premature lock-in as a causal story
+
+§ above hypothesised that s3 failed because it **locked at epoch 145 onto a
+12-body plan that could not do the task**. **The diagnostic kills that.**
+
+> **s3's body reaches goal ≥ 0.5 at epoch 139 with a fresh controller —
+> earlier than s1 (199) or s2 (204).** The plan s3 locked onto is not merely
+> adequate, it is **easier to train than either body that won.**
+
+The hypothesis is **withdrawn as a causal account**, not softened. What
+survives is the *timing fact* — s3's modal plan stopped changing at epoch 145,
+before it had shown any locomotion, where s2's kept moving to epoch 368 — and
+that fact now has no demonstrated consequence. **s3 failed for a controller
+reason we have not identified.**
+
+*The pre-registered caveat runs in our favour here and is restated: the
+diagnostic had the easier job (a fixed target where s3 chased a moving one), so
+"the body is capable" is the weaker of the two inferences. But goal 0.5 by
+epoch 139 clears that bar comfortably.*
+
+## What this isolates: controller-seed sensitivity
+
+Holding the body fixed and re-drawing the controller turns a total failure into
+a success **faster than either winner**. So the variance that produced E3.1's
+1-of-3 failure lives in the **controller/optimisation**, not in the design
+search. Three seeds of design+control gave two wins; the same morphology under
+a fresh controller gave a third. **Any future claim about design search on this
+task needs enough seeds to survive one dead controller** — E3.1 would have read
+as an outright failure at n = 1 had we drawn s3.
+
+## The floor arm is UNINFORMATIVE at n = 1, not negative
+
+`rtg_e31f_s1` (floor + σ) is at **goal 0.00, forward 0.66 m, epoch 193** — and
+it carried the **largest** predicted margin in §3f-iii (+210.3 against the σ
+fix alone at +86.2).
+
+**That is not evidence against the floor.** Given the controller-seed
+sensitivity just demonstrated — one of three primary seeds failed completely on
+a body that trains easily — **n = 1 cannot distinguish "floor + σ is a worse
+fix" from "drew an s3-like controller".** The base rate of controller failure
+we measured is 1 in 3; a single arm failing is entirely consistent with it.
+
+**What would settle it: 3 seeds of the floor arm**, matching the primary arm's
+n. With a 1-in-3 controller-failure rate, 3 seeds give ~70% chance of at least
+two successes if the floor is as good as the σ fix alone, against ~0% if it is
+genuinely broken. Reported as **inconclusive**, and it will stay inconclusive
+until it is run at n ≥ 3.

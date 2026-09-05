@@ -5,11 +5,31 @@
 set -uo pipefail
 CFGS="${CFGS:-rtg_e4r_s1 rtg_e4r_s2 rtg_e4r_s3}"
 GPU_TRIP="${GPU_TRIP:-17500}"
-declare -A PIDS=( [rtg_e4r_s1]=694927 [rtg_e4r_s2]=695070 [rtg_e4r_s3]=695257 )
+# Resolve PIDs by scanning /proc each pass rather than pinning them once:
+# a hardcoded map reports a deliberately deferred arm as DEAD forever, and
+# misses the new PID when that arm relaunches. Explicit /proc scan, never
+# pkill/pgrep -f (three self-matches this session).
+resolve_pid() {
+  local want="$1" p c
+  for p in $(ps -o pid= -C python); do
+    c=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || continue
+    case "$c" in *train_e4r_gnn.py*"--cfg $want "*) echo "$p"; return;; esac
+  done
+}
 while true; do
   for c in $CFGS; do
-    pid="${PIDS[$c]:-}"
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then echo "DEAD: $c (pid $pid)"; continue; fi
+    pid=$(resolve_pid "$c")
+    if [ -z "$pid" ]; then
+      # A stop-file means we stopped it on purpose. Say so instead of crying
+      # DEAD every pass -- an alarm that fires for an intended state trains
+      # the reader to ignore it.
+      if [ -e "/tmp/stop_e4b_${c#rtg_e4r_}" ]; then
+        echo "$c: stopped by stop-file (intentional; deferred, awaiting relaunch)"
+      else
+        echo "DEAD: $c has no process and no stop-file"
+      fi
+      continue
+    fi
     [ -f "/workspace/Transform2Act/results/$c/RESTART_RECOMMENDED" ] && \
       echo "$c: RESTART RECOMMENDED -- pre-registered dead-controller rule fired"
     f="/workspace/Transform2Act/results/$c/e4r_epochs.jsonl"

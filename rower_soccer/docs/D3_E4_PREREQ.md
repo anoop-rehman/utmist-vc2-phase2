@@ -542,3 +542,72 @@ the wave re-planned. Nothing is ever killed while MPS is up.
 `rtg_e31d_s3body` also carries a stop-file (`/tmp/stop_e31d_s3body`) if its
 remaining 181 epochs are ever worth trading for headroom — but on these numbers
 that trade is not needed.
+
+## Wave 1 is running — and the budget was wrong by more than 2x
+
+Launched 18:53:36: `rtg_e4_s1a` (386140) and `rtg_e4_s1b` (386224), exchanging
+snapshots every 10 epochs. The epoch-0 handshake retry **fired in production**
+(`partner appeared after retry` on s1a), so neither arm opened against a
+passive body.
+
+### The epoch rate, measured
+
+| | E3.1 | **E4 measured** |
+|---|---:|---:|
+| seconds per epoch | ~110 | **266-275** |
+| 400 epochs, per wave | ~12 h | **~30 h** |
+| three waves | ~41 h | **~90 h** |
+
+**My "+12%" projection was wrong by a factor of more than two, and the error was
+in the reasoning, not the measurement.** The per-step cost (2.614 ms vs 0.499 ms
+for physics) was measured correctly; what was wrong was dividing 131 CPU-seconds
+by 10 workers to get 13 s of wall clock. That division assumes ten idle CPUs.
+The cgroup quota is **10.2 CPUs total**, shared by three arms of ten workers
+each, so the machine was already oversubscribed and added CPU work converts to
+wall clock at close to 1:1 against *available* parallelism, not against the
+worker count. Assuming spare capacity that the cgroup does not have is the same
+mistake as reading `nproc` (48) instead of the quota — recorded in
+`PLAN_D3_M3.md` §2 — in a new costume.
+
+This is a real change to the plan and it should be a decision, not a fait
+accompli: three waves at ~30 h is ~90 h, not the ~41 h the rung was approved
+on. It should improve now that `s3body` has stopped and CPU contention has
+dropped; the rate will be re-measured on the freed machine before any
+projection is quoted again.
+
+### GPU, after acting on the trigger
+
+The 17 500 trigger fired at 19 082 MiB. Measured rather than acted on: 1 Hz
+sampling showed a **flat plateau at 17 186-17 192 MiB (84%)** with the 19 082
+transient real but rare — plateau headroom 3.3 GB, **peak headroom 1.4 GB**,
+and the plateau sitting 300 MiB *under* the trigger. Against D1's death at
+19 950 that is not real margin, so `rtg_e31d_s3body` was stopped **by
+stop-file** (never signalled; MPS is active). It exited cleanly and both E4
+arms were unaffected.
+
+| | MiB | of 20 475 | headroom |
+|---|---:|---:|---:|
+| plateau, 2 E4 arms + s3body | 17 192 | 84% | 3 283 |
+| transient peak, same | 19 082 | 93% | 1 393 |
+| **flat, 2 E4 arms alone** | **10 962** | **53.5%** | **9 513** |
+
+81 samples at 1 Hz after the stop: zero excursions above 17 500. Wave 2 will
+therefore fit on its own with ~9.5 GB spare, and does not need anything else
+stopped.
+
+### Wave 1 at epoch 4 (both arms)
+
+| | s1a | s1b |
+|---|---:|---:|
+| goal / loss / fell | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+| forward | 0.11 m | 0.12 m |
+| `p_act4` | 0.95 | 0.85 |
+| motors (mean) | 6.65 | 7.05 |
+| **draw rate** | **0.00** | **0.00** |
+| race margin | 0.06 m | 0.18 m |
+
+Untrained and barely moving, which is what epoch 4 should look like — E3.1 took
+~200 epochs to solve. The two things that matter this early both read clean:
+**`p_act4` is 0.85-0.95**, nothing like E3's collapse to 0.000 by epoch 17; and
+the **draw guard reads 0.00 rather than a spurious 1.00**, because neither side
+is reaching the line, so the race is undecided rather than drawn.

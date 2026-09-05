@@ -791,6 +791,33 @@ that a schedule's realised behaviour can differ sharply from its nominal shape.
   The equivalent question here is what Transform2Act's design head can see. It
   must be checked before this rung, not after.
 
+#### E4 PREREQUISITE CHECKED 2026-09-05, AND IT FAILS. See [`D3_E4_PREREQ.md`](D3_E4_PREREQ.md).
+
+**Transform2Act's design head sees nothing about the simulation at all.**
+`transform2act_policy.py` lines 170 and 194 slice the observation to
+`attr_fixed ++ attr_design` for both the skeleton and attribute stages — 9 of
+25 columns on our ant — dropping the entire 16-column `sim_obs` slice. Measured
+by moving the opponent 4 m: the design-head input changes by **0.000e+00**
+while the dropped slice changes by 4.000.
+
+**So E4's headline question is unanswerable as posed**, and for a stronger
+reason than D2's. D2's head *could* be given role; this one has no simulation
+input to condition on. Two agents with identical bodies get identical
+design-head inputs, so **convergence is guaranteed by construction and an arms
+race is impossible** — neither side can perceive that it has an opponent.
+
+**Retrospectively**: E2's three appended opponent/goal columns never reached the
+design head, so E3 and E3.1 evolved their bodies **blind to the task**, with the
+PPO advantage the only channel from task to morphology. That the search still
+found three distinct bodies beating the fixed ant by 1.7-3.3x is a stronger
+result than it looked.
+
+Three options are proposed in the doc — fix the head (plus an **E4.0**
+prerequisite rung re-running E3.1's primary arm with the head sighted);
+convergence-study-only; or role-in-design as D2 did — with ≥ 3 seeds,
+`control_log_std = −1.5` and a frozen-body diagnostic per seed fixed for all of
+them. **Nothing launched.**
+
 ### E5 — 2v2 run-to-goal
 
 Teams of two, still the run-to-goal task. D2 has all of this except the

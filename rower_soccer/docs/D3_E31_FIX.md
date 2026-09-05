@@ -704,3 +704,57 @@ full series reversed.*
   room. With the two completed seeds disagreeing, the third is worth more than
   it would have been.
 * The floor arm (`rtg_e31f_s*`) has still not started.
+
+## Both primary seeds are now final — and the difference is whether the design CONVERGED
+
+`rtg_e31_s3` also completed 400 epochs. Its post-hoc, same instrument:
+
+| | **s2 (solved)** | **s3 (did not)** |
+|---|---|---|
+| goal, mean-action / stochastic | **1.00 / 1.00** | **0.00 / 0.00** |
+| forward | **5.57 m (100.7%)** | 0.70 m (13.5%) |
+| fell | 0.00 | 0.20 |
+| speed | **4.950 m/s** | −0.054 m/s |
+| episode length | **75.3** | 488.4 |
+| R | **+1442.0 ± 10.1** | −347.2 ± 398.2 |
+| final body | 18 bodies, 6 motors, 1.470 kg | 12 bodies, 6 motors, 0.949 kg |
+| limb length mean / total | **0.611 / 10.395 m** | 0.473 / 5.201 m |
+| **sampled topologies (of 100)** | **5, most common 93%** | **9, most common 49%** |
+| `r(fall, R)` | *undefined* (no falls) | **+0.991** |
+| fall premium | — | **+961.9** |
+
+> **The seed that solved the task is the seed whose design search converged.**
+> s2's population collapsed onto **one body plan at 93%**; s3's was still spread
+> over 9 topologies with the mode at 49% after 400 epochs. s2's winning body is
+> also *bigger and longer-limbed* — 18 bodies and 10.4 m of total limb against
+> 12 and 5.2 m — which is what a 4.95 m/s runner needs.
+
+**s3 reproduces E2's correlation structure exactly**: `r(fall, R)` = **+0.991**
+with a measured **+961.9** fall premium, because it never scores and so return
+is still bimodal by ending. s2 has no falls at all in 20 episodes, so the
+statistic is undefined there — the same degenerate-at-both-ends behaviour
+E2.1's `d2rep` showed. **Return measures competence only on the arm that has
+any.**
+
+**This is a 1-of-2 result and the mechanism of the split is not established.**
+Both arms had identical hyperparameters, cleared both falsifiers, and held
+`p_act4` = 1.000 throughout. What differed is whether the skeleton search
+settled. Whether that is cause, consequence, or coincidence is exactly what a
+third seed is for.
+
+## Status and the instrumentation failure this transition produced (again)
+
+* `rtg_e31_s2` **complete, solved**. `rtg_e31_s3` **complete, not solved**.
+* `rtg_e31_s1` resumed from `epoch_0005.p`, now at epoch ~52 of 400.
+* **`rtg_e31f_s1` launched** — the floor arm (`min_motors = 4`), which had never
+  started. Epoch 0: 16 bodies, 8 motors, `p_act4` 1.000, `log_std` −1.506.
+
+**And the watcher was pointing at the wrong set again.** `watch.sh` was started
+with its default `CFGS` covering only the three *primary* arms, so when the
+floor arm launched it produced no CSV and no falsifier check — the third time
+in this experiment that an instrument silently kept pointing at the previous
+set of runs at a transition. It was repointed by **environment variable rather
+than an edit**, which is why the file was written that way, and the floor arm's
+census appeared within one cycle. The lesson is now three-for-three: **every
+time new arms start, the instrumentation must be re-pointed and re-asserted,
+and the assertion is the only thing that catches it.**

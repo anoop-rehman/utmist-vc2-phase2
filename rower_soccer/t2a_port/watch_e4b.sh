@@ -16,17 +16,28 @@ resolve_pid() {
     case "$c" in *train_e4r_gnn.py*"--cfg $want "*) echo "$p"; return;; esac
   done
 }
+declare -A SEEN=()
 while true; do
   for c in $CFGS; do
     pid=$(resolve_pid "$c")
+    [ -n "$pid" ] && SEEN[$c]=running
     if [ -z "$pid" ]; then
       # A stop-file means we stopped it on purpose. Say so instead of crying
       # DEAD every pass -- an alarm that fires for an intended state trains
       # the reader to ignore it.
       if [ -e "/tmp/stop_e4b_${c#rtg_e4r_}" ]; then
-        echo "$c: stopped by stop-file (intentional; deferred, awaiting relaunch)"
+        # Report an intended state ONCE, not every pass. A watcher that
+        # repeats an unchanged expected condition every 10 minutes is noise,
+        # and noise is how a real event gets missed.
+        if [ "${SEEN[$c]:-}" != "stopped" ]; then
+          echo "$c: stopped by stop-file (intentional; deferred, awaiting relaunch)"
+          SEEN[$c]=stopped
+        fi
       else
-        echo "DEAD: $c has no process and no stop-file"
+        if [ "${SEEN[$c]:-}" != "dead" ]; then
+          echo "DEAD: $c has no process and no stop-file"
+          SEEN[$c]=dead
+        fi
       fi
       continue
     fi

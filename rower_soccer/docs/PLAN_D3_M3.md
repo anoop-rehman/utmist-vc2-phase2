@@ -835,6 +835,51 @@ and an endpoint would measure elapsed training. Draw-rate and ceiling
 saturation guards make a silenced channel report as *untestable* rather than
 null. **Nothing launched.**
 
+### E4B — shared-weight self-play (SUPERSEDES E4's two-lineage arm)
+
+**Plan and literature review: [`PLAN_D3_E4B_SELFPLAY.md`](PLAN_D3_E4B_SELFPLAY.md). Nothing launched.**
+
+The user redirected from two co-evolving lineages to **one shared body and
+brain** playing both sides, with success defined as *"each new iteration should
+beat all past iterations 1v1, and be basically tied against its current
+iteration."* E4's two-lineage arm was built, gated 11/11, launched, and stopped
+by stop-file at epoch ~14/400; nothing about it was found wrong and it is
+archived under `docs/t2a/e4_twolineage_archive/`.
+
+The redirect is well-founded on our own evidence: the **design head is blind**,
+so observation-conditioned specialisation between lineages is impossible by
+construction — a handicap for the divergence question, irrelevant to a ratchet,
+and half the compute.
+
+Key points from the plan:
+
+* **Bansal et al. 2018 already specifies this.** Opponents drawn
+  `Uniform(delta*v, v)`; they tested delta in {1.0, 0.8, 0.5, 0.0} and
+  **delta = 0 (whole history) won for Ant** — our morphology. Their stated goal,
+  *"the policy at any time should be able to defeat random older versions of
+  itself"*, is the user's criterion written down eight years earlier.
+* **The opponent is never the current self.** At equilibrium a tie gives
+  `n_reached == 2` and `parse = 0`, so the competitive reward switches itself
+  off exactly where the criterion points — worth 306 of 376 dense points at
+  alpha 0.847. The mirror match is an evaluation, never a gradient.
+* **A 0-0 stalemate and a 1-1 photo finish both read as "tied".** That is the
+  most likely false success, so the mirror match reports DECISIVE / MUTUAL /
+  STALEMATE plus distance. The guard has already fired in a pipeline test
+  (epoch 3: stalemate 1.00, forward 0.14 m).
+* **Non-transitivity is measured with a win-rate matrix**, threshold 0.10
+  cyclic triples, calibrated by simulation (transitive null p99 = 0.055;
+  no-ordering reference = 0.136).
+* **PBT: recommended against**, with arithmetic. Its own ablation says
+  populations of 10 or below give higher variance; ours would be 3, where
+  "bottom 20%" is 0.6 of a member. A viable population of 20 is 249 h of
+  arm-time against ~14 h for the plan, and it would consume the seed budget
+  rather than complement it. An **early-restart rule at epoch 150** addresses
+  the same 1-in-3 controller failure for ~1/3 of a run.
+* **Budget MEASURED**: 112 s/epoch ordinary, ~124 s/epoch with amortised
+  mirror/ladder evals -> **13.8 h per seed**; ~29-41 h for 3 seeds depending on
+  concurrency. The previous budget was built on an unmeasured baseline and was
+  wrong by ~50%.
+
 ### E5 — 2v2 run-to-goal
 
 Teams of two, still the run-to-goal task. D2 has all of this except the

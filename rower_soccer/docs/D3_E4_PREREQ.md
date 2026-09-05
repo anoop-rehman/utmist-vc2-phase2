@@ -353,3 +353,105 @@ bodies" under the same rule E4 will be judged by.
   alongside Δ.
 * Anything about the **2-3x design-head σ gap** of `D3_E31_FIX.md` §3g-ii,
   which remains unexplained.
+
+## The gate — 11 assertions, all passing (2026-09-05)
+
+`rower_soccer/t2a_port/gate_e4.py`. E3's briefing warned that a design stage
+which silently no-ops would give "a clean, boring, completely wrong null that
+looks exactly like a real result". E4's version of that failure is an opponent
+that is present in the XML but inert, or one acting in the wrong frame. Either
+would produce a tidy convergence number that means nothing.
+
+| # | assertion | result |
+|---|---|---|
+| 1 | `build(src)` with no opponent override is byte-identical to the checked-in `rtg_ant.xml` | 9644 bytes, identical — E2/E3 untouched |
+| 2 | a heterogeneous opponent compiles with its source's body/motor counts | s2body 18b/6m, s3body 12b/6m |
+| 3a | our `sim_obs` == the opponent's rotated `sim_obs` in mirror-equivalent states | **max\|Δ\| = 0.000e+00** over 5 random states |
+| 3b | the two bodies stay mirror-equivalent after 20 steps of equal body-local torque | max\|Δ\| = 5.55e-17 |
+| 4 | `ctrl_cost` excludes the opponent's torques (differential **and** absolute) | identical inert vs active; == 0.5·Σa² |
+| 5 | `opponent_mode=scripted` reproduces `run_to_goal` bit for bit | ret 31.231474 both, 40 steps both |
+| 6 | the snapshot **races**: reaches its goal at the speed it trained at | **4.657 m/s in slot 1 vs 4.891 trained in slot 0 — 4.8% off** |
+
+Gate 6 is the one that matters, and it is end-to-end evidence that the rotation
+is right: s2's controller, driving s2's own evolved body, in the *opposite*
+slot from the one it trained in, runs its own race at within 5% of its training
+speed.
+
+### Six bugs the gate caught, every one of which fails quietly
+
+Recorded because the common thread is that **none of them crashes the run** —
+each yields a plausible number.
+
+1. **A free joint's `qvel[3:6]` is BODY-LOCAL**, so a world rotation must
+   **not** negate angular velocity. This was *measured* (yaw a box 90° about z,
+   set `qvel[3:6] = [1,0,0]`, recover the net rotation axis: it comes out world
+   +y, the body's own x) rather than derived. Deriving it would have negated
+   those three columns and left the opponent walking slightly wrong forever.
+2. **The execution stage flag is `2`, not `0`.** With `0` the policy ran its
+   *skeleton* head and every control column came back exactly `0.0`. Measured
+   before the fix: the opponent travelled **0.153 m in 200 steps** with
+   `max|torque| = 0.000` while its root z fell 0.831 → 0.260. It stood there
+   and collapsed, and nothing errored.
+3. **The policy consumes a batch.** A flat observation list made `forward()`
+   read the node count off the observation matrix's last row; `RunToGoalEnv`'s
+   broad `except Exception` converted that into an ordinary "fall".
+4. **Quaternion double cover.** Composing the π-z rotation with an
+   already-yawed body lands on `w = −1` where slot 0 starts at `w = +1` — the
+   same orientation, a different number to a network. Canonicalised to `w ≥ 0`.
+5. **The base env maps qpos→qvel with a fixed `−1` offset**, correct only
+   behind *one* free joint. The opponent sits behind two. Now the DOF address
+   is read off the compiled model (`jnt_dofadr`), which is exact for any number
+   of bodies.
+6. **Opponent torques must never enter the vector `ctrl_cost` sums over**, or
+   the learner is billed 0.5·Σa²_opp for its rival — the exact term that
+   deleted every actuator in E3. The opponent's control is injected downstream
+   of the cost, in `do_simulation`.
+
+Two of these — 2 and 3 — were caught only because gate 6 was tightened from
+"the outcome changed" to "the opponent reaches its goal at its trained speed".
+The weaker version **passed while the opponent was standing still**: the small
+return difference was the inert body's weight shifting the contacts. A gate
+that can pass on a dead opponent is not a gate.
+
+## Measured before launch: cost and GPU fit
+
+**The opponent's inference cost, measured.** Driving agent 1 with a policy
+instead of a kinematic write adds a GNN forward pass to every control step:
+
+| per control step | ms |
+|---|---:|
+| physics (`frame_skip` 5 substeps) | 0.499 |
+| opponent observation assembly | 0.814 |
+| opponent observation + policy forward | **2.614** |
+
+That is **5.2x the cost of physics** per step, but it parallelises with the
+rollout workers: 50 000 steps/epoch x 2.614 ms = 131 CPU-seconds, spread over
+10 workers = **~13 s of wall clock per epoch** against E3.1's ~110 s epoch, so
+**+12%**. 400 epochs x ~123 s = 13.7 h per wave, **3 waves ≈ 41 h** — the
+budget in §B survives the measurement.
+
+**GPU projection, done before wave 1 rather than discovered at 95%.** Max
+reserved per E4 arm observed in the smoke run: **6.8 GB** (E3.1 arms ran
+2.6-4.6 GB; the spread between arms is caching-allocator reserve, not a stable
+requirement, which is why the *maximum* is used for planning).
+
+| configuration | MiB | of 20 475 | |
+|---|---:|---:|---|
+| wave (2 arms) + `rtg_e31_s1` + `rtg_e31d_s3body` | 20 184 | 99% | **does not fit** |
+| wave (2 arms) + `rtg_e31d_s3body` | 15 884 | 78% | fits |
+| wave (2 arms) alone | 12 112 | 59% | fits |
+
+So a wave fits alongside **one** other design-on arm, not two. Wave 1 therefore
+starts when `rtg_e31_s1` finishes (55 epochs left when this was written, ~1.7 h)
+rather than being squeezed in at 99%. Seeds are not shed and the wave is not
+split: a seed *pair* is the smallest coherent unit, because each lineage is
+only meaningful against the other.
+
+**The opponent policy costs no GPU memory**: it is constructed on CPU and
+measured at **+0.0 MiB CUDA** across five constructions, so the ~40 refreshes
+over a run do not leak.
+
+**MPS is active on this box** (`nvidia-cuda-mps-control` + server, and the
+training arms carry `CUDA_MPS_PIPE_DIRECTORY`). Nothing is killed to make room:
+the floor arm was stopped by **stop-file**, and the smoke arms were given
+`--max-epoch 3` so they exit on their own.

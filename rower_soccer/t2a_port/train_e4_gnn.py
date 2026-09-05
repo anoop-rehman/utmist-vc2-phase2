@@ -345,6 +345,9 @@ def main():
                 0.5 * 8 * np.exp(2.0 * cls))
         if als is not None:
             payload["policy/attr_log_std"] = als
+        # which snapshot this epoch was trained against -- provenance for
+        # EVERY row, not only the ones carrying an eval
+        row["opponent"] = dict(opp_meta)
         if args.morph_every and epoch % args.morph_every == 0:
             t0 = time.time()
             with e3_morph.rng_guard(env), to_cpu(agent.policy_net), \
@@ -409,7 +412,6 @@ def main():
             # untestable rather than null.
             rs = sp.race_stats(eps, env.goal_x)
             row["race"] = rs
-            row["opponent"] = dict(opp_meta)
             for k, v in rs.items():
                 payload[f"race/{k}"] = float(v)
             for k, v in d_now.items():

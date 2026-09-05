@@ -1,0 +1,19 @@
+{
+ "mp4": "/workspace/utmist-vc2-phase2/runs/d3_e1_ant/renders/ant_e1_s1_e0020_bmw.mp4",
+ "run": "d3_e1_ant_seed1_media",
+ "project": "creature-soccer",
+ "key": "video/best_median_worst",
+ "step": 20,
+ "fps": 25,
+ "scalars": {
+  "video/best_R": 66.8791032001246,
+  "video/median_R": 22.942396624939615,
+  "video/worst_R": 2.0591877684959616,
+  "video/best_bodies": 18,
+  "video/median_bodies": 17,
+  "video/worst_bodies": 20,
+  "video/best_steps": 151,
+  "video/worst_steps": 16,
+  "epoch": 20
+ }
+}

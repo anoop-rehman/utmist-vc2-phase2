@@ -1,0 +1,16 @@
+{
+ "mp4": "/workspace/utmist-vc2-phase2/runs/d3_e11/renders/e11_mlp_s1_matched_e0059_bmw.mp4",
+ "run": "d3_e11_mlp_s1_matched_media",
+ "project": "creature-soccer",
+ "key": "video/best_median_worst",
+ "step": 59,
+ "fps": 25,
+ "scalars": {
+  "video/best_R": 2499.9225934196647,
+  "video/median_R": 2395.0853466697336,
+  "video/worst_R": 2235.806125253193,
+  "video/best_steps": 1000,
+  "video/worst_steps": 1000,
+  "epoch": 59
+ }
+}

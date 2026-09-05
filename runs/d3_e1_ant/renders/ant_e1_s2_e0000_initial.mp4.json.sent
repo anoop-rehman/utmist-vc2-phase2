@@ -1,0 +1,19 @@
+{
+ "mp4": "/workspace/utmist-vc2-phase2/runs/d3_e1_ant/renders/ant_e1_s2_e0000_initial.mp4",
+ "run": "d3_e1_ant_seed2_media",
+ "project": "creature-soccer",
+ "key": "video/initial_ant",
+ "step": 0,
+ "fps": 25,
+ "scalars": {
+  "video/best_R": 82.52611577115943,
+  "video/median_R": 1.1955453850629698,
+  "video/worst_R": -69.14943691470262,
+  "video/best_bodies": 13,
+  "video/median_bodies": 13,
+  "video/worst_bodies": 13,
+  "video/best_steps": 149,
+  "video/worst_steps": 71,
+  "epoch": 0
+ }
+}

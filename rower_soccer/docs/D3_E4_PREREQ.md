@@ -490,3 +490,55 @@ over a run do not leak.
 training arms carry `CUDA_MPS_PIPE_DIRECTORY`). Nothing is killed to make room:
 the floor arm was stopped by **stop-file**, and the smoke arms were given
 `--max-epoch 3` so they exit on their own.
+
+### Second correction: the smoke pair measured the footprint, and 89% was speculation
+
+The smoke pair ran to completion beside both live arms and pinned the card at
+**19 741 MiB (96.4%)** for five consecutive samples — not a transient. That is a
+second, independent measurement of a real E4 pair, and it agrees with the
+pessimistic reading rather than the snapshot table. **734 MiB of headroom, and
+D1 died at 19 950.**
+
+The smoke arms exited on their own 80 s later, each having written all three
+rows of `--max-epoch 3`. They were never signalled: they carried no
+`--stop-file` (the trainer only checks one when the argument is given), and
+they held CUDA contexts under active MPS, where a signal can corrupt the
+survivors rather than just the target. Both live arms verified afterwards on
+their **original** PIDs — `rtg_e31_s1` 3426432 at epoch 348/400 (goal 1.00,
+3.740 m/s, its best speed of the run) and `rtg_e31d_s3body` 3834648 at 219/400.
+
+With the pair gone, sustained total over 8 readings is **7 560-9 714 MiB
+(37-47%)**.
+
+**Re-derived from totals, because the total-vs-sum-of-parts gap is not constant**
+(1 547 MiB in one sample, 370 in another — the per-process figures and the total
+are read at different instants and every process fluctuates):
+
+| derivation of wave + `s3body` | MiB | of 20 475 |
+|---|---:|---:|
+| measured peak (A) minus s1's contribution in A | 15 439 | 75% |
+| pair per-process peak 11 276 + s3body + overhead | 15 448 | 75% |
+| pair at its *simultaneous* peak (~12 850) + s3body + overhead | 17 022 | 83% |
+| ~~"production arms cost 7 000 each"~~ | ~~18 172~~ | ~~89%~~ |
+
+**The 89% row is struck because it was an assumption, not a measurement**, and
+the assumption is false: production differs from the smoke only in video every
+6 epochs, 10-episode evals and checkpoint archiving, and **none of those touch
+the GPU**. Rendering is `MUJOCO_GL=osmesa` (software, CPU), and every eval,
+census and video block is wrapped in `to_cpu(agent.policy_net, ...)`, which
+moves the policy *off* the card for the duration. The only GPU work is the PPO
+update, and that is identical in the smoke (same `min_batch_size` 50 000, same
+`mini_batch_size`). **The smoke therefore already measured the GPU-relevant
+footprint of a production arm.**
+
+So the measured band for wave 1 + `s3body` is **15.4-17.0 GB (75-83%)** —
+under the 17 500 sustained trigger, with **3.4-5.0 GB of headroom**. That is
+real margin, so wave 1 goes when `rtg_e31_s1` finishes (52 epochs, ~1.6 h) and
+does **not** need to wait for `s3body` as well. Wave 1 launches with
+`watch_e4.sh` armed at the 17 500 trigger; if the sustained peak breaches it,
+one arm is stopped **by stop-file** (`launch_e4.sh` gives every E4 arm one) and
+the wave re-planned. Nothing is ever killed while MPS is up.
+
+`rtg_e31d_s3body` also carries a stop-file (`/tmp/stop_e31d_s3body`) if its
+remaining 181 epochs are ever worth trading for headroom — but on these numbers
+that trade is not needed.

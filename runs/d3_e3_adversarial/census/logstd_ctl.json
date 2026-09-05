@@ -1,72 +1,42 @@
 {
  "rtg_e3c_s1": [
   {
-   "epoch": 5,
+   "epoch": 252,
    "file": "best.p",
-   "control_action_log_std": -0.0632424149731178,
-   "attr_action_log_std": -2.3030368825567513
+   "control_action_log_std": -1.4519702974352082,
+   "attr_action_log_std": -2.3181567517956765
   },
   {
-   "epoch": 19,
-   "file": "epoch_0020.p",
-   "control_action_log_std": -0.1841651257793881,
-   "attr_action_log_std": -2.3019229619493387
+   "epoch": 299,
+   "file": "epoch_0300.p",
+   "control_action_log_std": -1.5755344687877448,
+   "attr_action_log_std": -2.32248015945743
   },
   {
-   "epoch": 39,
-   "file": "epoch_0040.p",
-   "control_action_log_std": -0.37944249067115776,
-   "attr_action_log_std": -2.3012254353504082
-  },
-  {
-   "epoch": 59,
-   "file": "epoch_0060.p",
-   "control_action_log_std": -0.58812361835632,
-   "attr_action_log_std": -2.299034919860316
-  },
-  {
-   "epoch": 79,
-   "file": "epoch_0080.p",
-   "control_action_log_std": -0.7634280238250495,
-   "attr_action_log_std": -2.3041746389626345
-  },
-  {
-   "epoch": 99,
-   "file": "epoch_0100.p",
-   "control_action_log_std": -0.904694006320122,
-   "attr_action_log_std": -2.30936354400617
+   "epoch": 311,
+   "file": "epoch_0312.p",
+   "control_action_log_std": -1.6067883788338921,
+   "attr_action_log_std": -2.318235618476217
   }
  ],
  "rtg_e3c_s2": [
   {
-   "epoch": 15,
+   "epoch": 214,
    "file": "best.p",
-   "control_action_log_std": -0.1456410440535668,
-   "attr_action_log_std": -2.304498759345535
+   "control_action_log_std": -1.3809069815860022,
+   "attr_action_log_std": -2.3257595909508373
   },
   {
-   "epoch": 19,
-   "file": "epoch_0020.p",
-   "control_action_log_std": -0.17877520938407107,
-   "attr_action_log_std": -2.3050874421332703
+   "epoch": 299,
+   "file": "epoch_0300.p",
+   "control_action_log_std": -1.6410049192757736,
+   "attr_action_log_std": -2.338273689353847
   },
   {
-   "epoch": 39,
-   "file": "epoch_0040.p",
-   "control_action_log_std": -0.37910201149188205,
-   "attr_action_log_std": -2.3020426285812023
-  },
-  {
-   "epoch": 59,
-   "file": "epoch_0060.p",
-   "control_action_log_std": -0.5884396187327041,
-   "attr_action_log_std": -2.3074105211265854
-  },
-  {
-   "epoch": 79,
-   "file": "epoch_0080.p",
-   "control_action_log_std": -0.7590859230034618,
-   "attr_action_log_std": -2.3171452531815797
+   "epoch": 313,
+   "file": "epoch_0314.p",
+   "control_action_log_std": -1.6801384809791584,
+   "attr_action_log_std": -2.337141662855811
   }
  ]
 }

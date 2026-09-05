@@ -5,7 +5,7 @@
 # MPS IS ACTIVE: this script never kills anything. It only reports.
 set -uo pipefail
 CFGS="${CFGS:?set CFGS to the space-separated cfg ids that should be live}"
-GPU_TRIP="${GPU_TRIP:-19000}"
+GPU_TRIP="${GPU_TRIP:-17500}"
 while true; do
   for c in $CFGS; do
     pid=$(pgrep -f "train_e4_gnn.py --cfg $c --partner" | grep -v "^$$\$" | head -1 || true)

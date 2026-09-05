@@ -1,20 +1,15 @@
   arm           checkpoint       epoch  control_log_std   sigma  cost/step    vs -0.9645
-  rtg_e3c_s1    best.p               5          -0.0632  0.9387     3.5248         above
-  rtg_e3c_s1    epoch_0020.p        19          -0.1842  0.8318     2.7676         above
-  rtg_e3c_s1    epoch_0040.p        39          -0.3794  0.6842     1.8728         above
-  rtg_e3c_s1    epoch_0060.p        59          -0.5881  0.5554     1.2337         above
-  rtg_e3c_s1    epoch_0080.p        79          -0.7634  0.4661     0.8689         above
-  rtg_e3c_s1    epoch_0100.p        99          -0.9047  0.4047     0.6550         above
-                -> -0.8415 over 94 epochs (-0.00895/epoch, 6 points)
-                   projected: cost/step < survive bonus at epoch ~75; crosses -0.9645 at epoch ~106; locomotion +18-27 -> ~124-133
-                   segment rates: 5->19 -0.00864, 19->39 -0.00976, 39->59 -0.01043, 59->79 -0.00877, 79->99 -0.00706   (the MLP's SLOWED: -0.0231 over 0-40, -0.0043 over 100-399)
-  rtg_e3c_s2    best.p              15          -0.1456  0.8645     2.9892         above
-  rtg_e3c_s2    epoch_0020.p        19          -0.1788  0.8363     2.7975         above
-  rtg_e3c_s2    epoch_0040.p        39          -0.3791  0.6845     1.8740         above
-  rtg_e3c_s2    epoch_0060.p        59          -0.5884  0.5552     1.2330         above
-  rtg_e3c_s2    epoch_0080.p        79          -0.7591  0.4681     0.8764         above
-                -> -0.6134 over 64 epochs (-0.00959/epoch, 5 points)
-                   projected: cost/step < survive bonus at epoch ~72; crosses -0.9645 at epoch ~100; locomotion +18-27 -> ~118-127
-                   segment rates: 15->19 -0.00828, 19->39 -0.01002, 39->59 -0.01047, 59->79 -0.00853   (the MLP's SLOWED: -0.0231 over 0-40, -0.0043 over 100-399)
+  rtg_e3c_s1    best.p             252          -1.4520  0.2341     0.2192  BELOW (good)
+  rtg_e3c_s1    epoch_0300.p       299          -1.5755  0.2069     0.1712  BELOW (good)
+  rtg_e3c_s1    epoch_0312.p       311          -1.6068  0.2005     0.1609  BELOW (good)
+                -> -0.1548 over 59 epochs (-0.00262/epoch, 3 points)
+                   projected: cost/step < survive bonus at epoch ~-37; crosses -0.9645 at epoch ~66; locomotion +18-27 -> ~84-93
+                   segment rates: 252->299 -0.00263, 299->311 -0.00260   (the MLP's SLOWED: -0.0231 over 0-40, -0.0043 over 100-399)
+  rtg_e3c_s2    best.p             214          -1.3809  0.2514     0.2527  BELOW (good)
+  rtg_e3c_s2    epoch_0300.p       299          -1.6410  0.1938     0.1502  BELOW (good)
+  rtg_e3c_s2    epoch_0314.p       313          -1.6801  0.1863     0.1389  BELOW (good)
+                -> -0.2992 over 99 epochs (-0.00302/epoch, 3 points)
+                   projected: cost/step < survive bonus at epoch ~-14; crosses -0.9645 at epoch ~76; locomotion +18-27 -> ~94-103
+                   segment rates: 214->299 -0.00306, 299->313 -0.00280   (the MLP's SLOWED: -0.0231 over 0-40, -0.0043 over 100-399)
 
   -> /workspace/utmist-vc2-phase2/runs/d3_e3_adversarial/census/logstd_ctl.json

@@ -43,6 +43,11 @@ RENDER_DIR = "/workspace/utmist-vc2-phase2/runs/d3_e3_adversarial/renders"
 # misled a reader once (see runs/d3_e3_adversarial/renders/INDEX.md); a third
 # family in the same directory would be worse.
 RENDER_DIR_E31 = "/workspace/utmist-vc2-phase2/runs/d3_e31_fix/renders"
+# ...and E4 gets its own for the same reason: rtg_e4_s1a vs rtg_e31_s1 differ
+# by two characters, and E4's clips show TWO moving creatures where E3's show
+# one moving and one sliding. Mixing them is the exact confusion INDEX.md
+# records.
+RENDER_DIR_E4 = "/workspace/utmist-vc2-phase2/runs/d3_e4_selfplay/renders"
 VIDEO_CKPT = "_video_tmp"
 
 
@@ -222,7 +227,7 @@ def main():
       f"opp_refresh {args.opp_refresh} dt {env.dt} "
       f"max_nsteps {env.max_nsteps} stop_file {args.stop_file}")
 
-    os.makedirs(RENDER_DIR, exist_ok=True)
+    os.makedirs(RENDER_DIR_E4, exist_ok=True)
     jsonl = os.path.join(cfg.cfg_dir, "e4_epochs.jsonl")
 
     wb = Run(args.wandb_name or f"d3_e4_{args.cfg}",
@@ -455,7 +460,9 @@ def main():
                 # morphology was not changing. The tag makes the clip
                 # self-describing.
                 tag = "DESIGN-ON" if design_on else "FROZEN-CONTROL"
-                rd = RENDER_DIR_E31 if args.cfg.startswith("rtg_e31") else RENDER_DIR
+                rd = (RENDER_DIR_E4 if args.cfg.startswith("rtg_e4")
+                      else RENDER_DIR_E31 if args.cfg.startswith("rtg_e31")
+                      else RENDER_DIR)
                 os.makedirs(rd, exist_ok=True)
                 out = f"{rd}/{tag}_{args.cfg}_e{epoch + 1:04d}_bmw.mp4"
                 env2 = dict(os.environ, MUJOCO_GL="osmesa",

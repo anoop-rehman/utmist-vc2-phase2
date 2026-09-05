@@ -608,3 +608,99 @@ is knowable yet** — goal rate is 0.00 on both arms, exactly as expected here.
 * The morphology **direction** for the mean-action readout remains
   unestablished: both arms now recede, but from different peaks (26 and 21) to
   different levels (21 and 15).
+
+---
+
+# THE E3.1 RESULT: the design+control loop WINS the adversarial task — on one seed of two
+
+*`rtg_e31_s2` completed all 400 epochs ("training done!"). `e3_posthoc.py` on
+its final checkpoint, one instrument, both protocols, 20 episodes each.*
+
+## s2 solved it, and the evolved body is 3.3x faster than the frozen one
+
+| | **E3.1 s2 (design LIVE)** | frozen-body control | E3 (design LIVE, `log_std` 0) |
+|---|---|---|---|
+| **goal, mean-action** | **1.00** | 0.95 | **0.00** |
+| **goal, stochastic** | **1.00** | 0.95 | 0.00 |
+| forward | **5.57 m (100.7%)** | 4.82 m | 0.01 m |
+| fell | **0.00** | 0.05 | 1.00 |
+| **speed** | **4.950 m/s** | 1.498 m/s | 0.000 |
+| episode length | **75.3 steps** | 217.6 | 20.8 |
+| R | **+1442.0 ± 10.1** | +1452.1 ± 285.4 | +20.8 |
+| body | **18 bodies, 6 motors** | 13 bodies, 8 motors | 5 bodies, **0 motors** |
+| mass | 1.470 kg | 0.879 | 0.470 |
+| limb length | **0.611 m mean / 10.395 total** | 0.377 / 4.525 | 0.279 / 1.118 |
+
+> **This is the first time on this project that a design+control loop has won
+> this task.** E3's question — *can Transform2Act's design+control loop win an
+> adversarial task?* — is answered **yes**, on one seed of two.
+
+**The evolved body is not merely adequate, it is better than the one it started
+from.** 4.95 m/s against the frozen ant's 1.50, finishing in **75 steps where
+the frozen ant needs 218** — a third of the time, against an opponent that
+needs 491. It got there with **fewer motors (6 against 8)** and **much longer
+limbs** (0.611 m mean against 0.377, total 10.4 m against 4.5). Return variance
+collapsed to **±10.1** against the control's ±285.4: it is not winning
+sometimes, it is winning identically every time.
+
+**And the design converged.** 100 sampled designs give **5 distinct topologies
+with the most common at 93%**, against E3's 90-149 distinct of 200. The
+skeleton search settled on one body plan and stayed there — which E0 and E1
+never observed on this creature, and which is the behaviour the rung was built
+to look for.
+
+Body freezing check inverted as it should be: **96 of 134 mjModel arrays change**
+under the trained policy, so the design stages were live throughout.
+
+## s3 did not solve it — 1 of 2, and that is the honest headline
+
+| | s2 | **s3** |
+|---|---|---|
+| first `max_fwd` > 1.0 m | epoch 109 | epoch **179** |
+| first `max_fwd` > 2.5 m | epoch 149 | **never** (349 epochs) |
+| first goal ≥ 0.5 | epoch 204 | **never** |
+| latest | **goal 1.00, 5.58 m** | **goal 0.00, 0.78 m** |
+| final body | 18 bodies, 6 motors, 1.470 kg | 12 bodies, 6 motors, 0.938 kg |
+
+Both arms cleared both falsifiers and kept `p_act4` = 1.000 throughout, so
+**neither failed the way E3 did**. But only one learned the task. Against the
+frozen-body controls — which solved it on **both** seeds — that is a real
+difference and it is the central limitation of this result.
+
+**s2 was also slower than the controls to every milestone** (locomotion 109 vs
+79-84, goal 0.5 at 204 vs 144-149). Design search costs epochs; it then
+overtakes on the final policy.
+
+## A correction to the epoch-20 report: the mass claim reverses over the full run
+
+At epoch 20 I reported `r(mass, max_fwd)` = **−0.855** / **−0.880** and
+concluded that *"physics is already charging for mass, the search found the
+charge, and a per-body cost would double-charge it."* **Over the full run that
+is wrong.**
+
+| | early window (≤ ep 24, n = 5) | **full run (n = 80 / 70)** |
+|---|---|---|
+| s2 | −0.855 | **+0.800** |
+| s3 | −0.881 | **+0.088** |
+
+**s2 grew from 1.165 to 1.470 kg *and* went from 0.15 m to 5.58 m.** Mass and
+forward progress rose together for the whole second half of the run; the
+negative correlation was an early-training transient in which the policy could
+not walk at any mass. The conclusion that survives is narrower and now better
+supported: **growth self-limited and never approached the 29-body ceiling**
+(Outcome C did not fire), so a size cost is still unnecessary — **but not for
+the reason I gave.** It is unnecessary because the search stopped on its own at
+a body that works, not because mass is being penalised.
+
+*Seventh correction in this experiment produced by more data, and the same
+shape as the others: a small early window supported a clean mechanism that the
+full series reversed.*
+
+## Status
+
+* `rtg_e31_s2` **complete**, 400 epochs, solved.
+* `rtg_e31_s3` running at epoch ~352, goal 0.00 — will complete for the record.
+* `rtg_e31_s1` **resumed** from its suspended `epoch_0005.p` now the card has
+  room. With the two completed seeds disagreeing, the third is worth more than
+  it would have been.
+* The floor arm (`rtg_e31f_s*`) has still not started.

@@ -150,3 +150,52 @@ explicit PIDs only, never `pkill -f`.
 * Whether a **sighted** design head would do better; it remains blind here, so
   morphology is shaped by return alone.
 * Transfer of the ratchet to any opponent outside its own lineage.
+
+## LAUNCHED 2026-09-05 23:15 — gate 13/13, three arms logging
+
+`rtg_e4r_s1` (694927), `rtg_e4r_s2` (695070), `rtg_e4r_s3` (695257), each with a
+stop-file. Launched by the detached `autolaunch_e4b.sh`, which measured
+worst-of-six free memory at **19 635 MiB** against its 17 000 requirement
+before committing.
+
+### GPU: measured under the predicted band
+
+| | MiB | of 20 475 |
+|---|---:|---:|
+| predicted (3 × measured 5 309 single-arm peak) | 15 871 | 78% |
+| **measured, 45 samples over 90 s** | **13 744** | **67.1%** |
+
+Flat across every sample, **zero above the 17 500 trigger**, headroom 6 731 MiB.
+The prediction was conservative in the safe direction for once — three arms
+interleave their update peaks rather than stacking them.
+
+### Opening guards, all three arms at epoch 0
+
+| | s1 | s2 | s3 |
+|---|---:|---:|---:|
+| `p_act4` | 0.80 | 0.85 | 0.90 |
+| `p_act1` | 1.00 | 1.00 | 1.00 |
+| motors (mean) | 5.55 | 5.55 | 5.75 |
+| bodies (mean) | 14.75 | 14.40 | 14.55 |
+| `control_log_std` | −1.504 | −1.504 | −1.504 |
+| ring size / draws | 1 / 0 | 1 / 0 | 1 / 0 |
+
+`p_act4` at 0.80-0.90 is nothing like E3's collapse to 0.000 by epoch 17, and
+`control_log_std` is at the −1.5 the fix specifies. **Ring draws are 0 at epoch
+0 by design** — no strictly-past member exists yet, so no opponent is installed,
+which is exactly gate F's empty-ring negative control observed in production.
+
+Instrument assertion: **OK on all three**, run in its strict form with rows
+present.
+
+### Epoch cost, full smoke sample
+
+11 epochs of the single-arm pipeline test: ordinary epochs **117 s** mean
+(110, 110, 115, 115, 120, 120, 121, 125), mirror/ladder epochs **194 s**
+(171, 200, 210).
+
+**There is a mild upward drift — 110 → 125 s — that I cannot yet separate from
+noise or from ring growth**, so the ~124 s/epoch budget is quoted with that
+caveat rather than as settled. The smoke archived every 2 epochs; production
+archives every 10, so the ring grows 5× slower. I will re-measure at epoch 50
+and report if it has moved.

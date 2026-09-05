@@ -982,3 +982,33 @@ n. With a 1-in-3 controller-failure rate, 3 seeds give ~70% chance of at least
 two successes if the floor is as good as the σ fix alone, against ~0% if it is
 genuinely broken. Reported as **inconclusive**, and it will stay inconclusive
 until it is run at n ≥ 3.
+
+## Late-training watch on s1 — checked, and it is not a regression
+
+Flagged 2026-09-05 when s1's epoch-329 eval read **goal 0.90, down from 1.00**,
+with the question of whether the final post-hoc should be taken at the best
+checkpoint rather than blindly at 400.
+
+**Aggregated before comparing, per the measurement rule, and the drop is noise
+on top of a monotone improvement:**
+
+| epochs | goal (window mean) | speed (window mean) | n evals |
+|---|---:|---:|---:|
+| 100-199 | 0.030 | 0.424 | 20 |
+| 200-249 | 0.740 | 2.601 | 10 |
+| 250-299 | 0.910 | 3.074 | 10 |
+| 300-400 | **0.983** | **3.566** | 6 |
+
+Goal rate and speed both rise monotonically across every window. The epoch-329
+reading is a **single failed episode out of 10** (`fall_rate` 0.10 on the same
+row — one fall), which is the smallest quantum a 10-episode eval can move.
+Nothing in the series supports a late-training decline: the two highest speeds
+of the whole run are epochs 319 (3.725) and 324 (3.631), both after the
+supposed onset.
+
+**The best-checkpoint rule is adopted anyway, as policy rather than as a
+response to a regression**: the final post-hoc is taken at the best checkpoint
+by (goal rate, then speed), reported alongside the epoch-400 number, and the
+two are stated separately whenever they differ. Best so far is **epoch 319,
+goal 1.00, 3.725 m/s**. If epoch 400 is within noise of it, the epoch-400
+number is the headline and the best is reported beside it.

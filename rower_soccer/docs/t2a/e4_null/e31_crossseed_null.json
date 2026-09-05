@@ -7935,5 +7935,13 @@
    "n_shared": 11,
    "same_topo": false
   }
- ]
+ ],
+ "calibration_status": "PROVISIONAL. epochs_common is [0, 328] because rtg_e31_s1 was still running when this was generated, so the 300-399 window mean rests on epochs 300-328 for every pair involving s1. MUST be regenerated (rower_soccer/t2a_port/e4_null_traj.py) once s1 reaches epoch 400 and this field set to FINAL, BEFORE the file is cited as the calibration for an E4 verdict.",
+ "threshold_derived": {
+  "pair_sd": 0.0755,
+  "se_delta": 0.049,
+  "formula": "SE(delta) = pair_sd * sqrt(1/3 + 1/12), for 3 within-run and 12 between-run role-matched pairs",
+  "threshold": 0.15,
+  "threshold_in_se": 3.1
+ }
 }

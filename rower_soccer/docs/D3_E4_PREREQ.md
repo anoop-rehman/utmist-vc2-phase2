@@ -168,7 +168,13 @@ below rather than claiming the branch is clean.
 
 ## E4 design
 
-**Not launched.** Three seeds, `control_log_std: -1.5`, `min_motors` off — the
+> **Why this rung exists, in one line:** `parse`'s sign has never once been in
+> play. E3.1's winners finished in 76-131 steps against an opponent arriving at
+> 491, so the 306-point coupled term was a near-constant +1000 for the entire
+> experiment. **E4 is the first rung on which winning and losing are both
+> reachable**, and that is a new regime, not a variant of E3.1.
+
+**Three seeds**, `control_log_std: -1.5`, `min_motors` off — the
 exact configuration of E3.1's primary arm, the one that solved 2 of 3.
 
 ### A — shape: alternating-snapshot self-play
@@ -193,6 +199,24 @@ The new code is: load a snapshot policy, write its outputs into the `opp_*`
 prescription. The gate is the mirror of E2.1's and E3's: prove the opponent's
 compiled body is the snapshot's body, and that a **non-refreshed** opponent
 reproduces E3.1 numbers exactly.
+
+**Known limit — refresh staleness.** Each lineage always faces an opponent up
+to `--opp-refresh` epochs old, so **the design bounds the *rate* of divergence
+this experiment can resolve, not whether divergence happens.** A slow arms race
+is measured faithfully; one whose characteristic timescale is under ~10 epochs
+is partly masked, because each side is reacting to a body its rival has already
+moved past. Two consequences, both stated in advance:
+
+* A **NULL verdict is weaker than a DIVERGENCE verdict.** It means "no
+  divergence at timescales above the refresh interval", not "no divergence".
+* **The refresh interval is a measured knob, not a free parameter.** Per-epoch
+  Δ is logged, so if divergence appears and is fast, a follow-up at
+  `--opp-refresh 1` is the natural next rung; if Δ is flat, staleness is the
+  first thing to rule out before accepting NULL.
+
+10 epochs is chosen because E3.1's within-lineage drift over a 10-epoch lag is
+**SMD 0.185** — the opponent is meaningfully stale but not a different body
+(the 40-epoch lag reaches 0.305, and the between-seed null is 0.89).
 
 ### B — budget
 
@@ -281,11 +305,32 @@ answer the question:**
    consecutive epochs, returns stop differentiating. Such a run's Δ is reported
    separately and not pooled.
 
-**The discriminator for the ambiguous convergence branch** (§ "honest caveat"):
-if E4 converges, compare the converged body against E3.1's three winners. If it
-matches one of them, the race merely selected the pre-existing fastest optimum
-(task-limited). If it is a fourth body that none of E3.1's seeds found,
-selection genuinely sharpened (architecture-limited). Reported either way.
+**The discriminator for the ambiguous convergence branch** (§ "honest
+caveat"), **with its comparison set and thresholds committed now** — in
+`docs/t2a/e4_null/e31_comparison_set.json`, written before any E4 run existed,
+so this is a threshold test rather than a judgement made after seeing the
+answer.
+
+The set is E3.1's three final bodies:
+
+| seed | topology | bodies/motors | note |
+|---|---|---:|---|
+| s1 | `025ed15ce09b` | 16 / 7 | **provisional** — s1 was at epoch 329; refresh at 400 |
+| s2 | `50271e7f5d26` | 18 / 6 | the 4.89 m/s winner |
+| s3 | `901ec8c2e00b` | 12 / 6 | body included on the **frozen-body diagnostic's** evidence, not s3's own controller (which scored goal 0.00) — the set is of **bodies**, not controllers |
+
+Both thresholds are measured, and they do not overlap:
+
+| verdict | rule | basis |
+|---|---|---|
+| **MATCH** | SMD to nearest set body **≤ 0.44** | pooled **p95 of within-lineage drift** over a 40-epoch lag in E3.1's late window (lag 10 → 0.281, lag 20 → 0.367, lag 40 → 0.437) — the furthest one lineage moves while still being "the same body" |
+| **DISTINCT** | SMD **≥ 0.75** | **p05 of the between-seed null** in the same window — as far apart as two independent searches get |
+| **AMBIGUOUS** | between | reported as such, never rounded to a verdict |
+
+The 1.7x gap between 0.44 and 0.75 is what makes the test meaningful. **Sanity
+check the set passes**: E3.1's three bodies are mutually **0.864 / 0.921 /
+0.973** apart — every pair above the DISTINCT line, confirming "three distinct
+bodies" under the same rule E4 will be judged by.
 
 ### E — carried forward from E3.1, unchanged
 

@@ -69,6 +69,16 @@ class RunToGoalSelfPlayEnv(RunToGoalEnv):
         self.opp_policy = None          # set by the trainer via set_opponent_policy
         self.opp_running_state = None
         self.opp_mode = es.get('opponent_mode', 'scripted')
+        # CompetEvo's opponent acts STOCHASTICALLY: `noise_rate = 1.0`
+        # (`base_runner.py:27`, never reassigned) makes `use_mean_action` False
+        # for it. The two-lineage E4 arm used a mean action; this matches
+        # theirs. Set `opponent_mean_action: true` to restore the old behaviour.
+        self.opp_mean_action = bool(es.get('opponent_mean_action', False))
+        # D3 M3 E4R: the opponent ring (shared-weight self-play). Stays None on
+        # the two-lineage E4 path, which installs a single partner snapshot.
+        self.ring = None
+        self.ring_epoch = None          # training epoch, for the sampling rule
+        self.ring_chosen = []           # which past selves were actually served
         super().__init__(cfg, agent)
         if self.opp_mode == 'policy':
             assert self.opponent_body_xml, \
@@ -77,6 +87,41 @@ class RunToGoalSelfPlayEnv(RunToGoalEnv):
             self._opp_name_cache = None
 
     # ------------------------------------------------------------- setup --
+    # NOTE on settling: `_settle_opponent` is deliberately NOT overridden.
+    # An earlier version skipped it under a policy opponent to avoid paying 3 s
+    # of simulated time on every ring swap -- but the ring path
+    # (`reset_robot`) never calls it, so there was nothing to save, and the
+    # lazy replacement measured the rest pose AFTER the design stages had
+    # recompiled the model rather than at construction. That changed the
+    # scripted opponent's stance and broke gate 5 (ret 31.231474 -> 27.160954,
+    # 40 steps -> 34). Settling stays exactly where it was.
+
+    def set_ring(self, ring):
+        """Install the opponent ring. The opponent is then redrawn at every
+        `reset_robot`, i.e. once per EPISODE, as CompetEvo does."""
+        self.ring = ring
+
+    def reset_robot(self):
+        """Draw a past self, then reset as usual.
+
+        Nearly free: `AntEnv.reset_robot` already reparses the Robot and
+        recompiles the model every episode, so pointing `init_xml_str` at a
+        ring member's cached merged scene adds no compile. Only the opponent's
+        Robot and policy are swapped, and both were cached at archive time.
+        """
+        if self.ring is not None and self.ring_epoch is not None:
+            e = self.ring.sample_epoch(self.ring_epoch)
+            if e is not None:
+                m = self.ring.get(e)
+                self.init_xml_str = open(m["merged_path"], "rb").read()
+                self.opp_robot = m["robot"]
+                self.opp_policy = m["policy"]
+                self.opponent_body_xml = m["body_path"]
+                self._opp_cache = None
+                self._opp_name_cache = None
+                self.ring_chosen.append(e)
+        super().reset_robot()
+
     def set_opponent_policy(self, policy, running_state=None):
         """Install the frozen snapshot. `policy` is a Transform2Act policy in
         eval mode; nothing here ever backprops through it."""
@@ -211,7 +256,7 @@ class RunToGoalSelfPlayEnv(RunToGoalEnv):
         # while never taking a single action. Gate 6 caught exactly this.
         with torch.no_grad():
             a = self.opp_policy.select_action(
-                [[torch.tensor(x) for x in state]], True
+                [[torch.tensor(x) for x in state]], self.opp_mean_action
             ).numpy().astype(np.float64)
         return a[:, :self.control_action_dim]
 

@@ -1,0 +1,157 @@
+# D3 M3 E4R: SHARED-WEIGHT self-play, seed 3.
+#
+# ONE agent -- one design head, one controller -- plays both sides of the 1v1.
+# Its opponent is a strictly-PAST self drawn from a ring, redrawn every episode.
+#
+# Inherited verbatim from E3.1's primary arm (the one that solved 2 of 3):
+# control_log_std -1.5, no min_motors, d2rep, batch, lr, gnn spec,
+# done_condition. The only deltas are the env class and the opponent fields,
+# which is what makes gate 5 (scripted mode reproduces run_to_goal bit for bit)
+# a meaningful regression test.
+#
+# WHY A PAST SELF AND NEVER THE CURRENT ONE. The success criterion is "beat all
+# past iterations, tie the current one". Those conflict at equilibrium: if
+# current ties current then both reach the line on the same step,
+# n_reached == 2, and run_to_goal.py scores parse = 0 -- the +/-1000 term
+# switches itself off exactly at the point we are trying to reach. Beating a
+# weaker past self is where it still pays.
+#
+# opponent_mean_action is ABSENT, so it defaults False: CompetEvo's opponent
+# acts stochastically (noise_rate = 1.0, base_runner.py:27). The two-lineage
+# E4 arm used a mean action; this matches theirs.
+env_name: run_to_goal_sp
+agent_specs:
+  batch_design: true
+  # [every, until]: also save at epochs 20/40/60/80/100.
+  additional_saves: [20, 100]
+# training parameters
+gamma: 0.995
+tau: 0.95
+policy_specs:
+  name: v5
+  htype: tanh
+  skel_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  skel_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  control_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  attr_gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+  attr_index_mlp:
+    hdims: [128, 128]
+    rescale_linear: true
+  control_log_std: -1.5
+  attr_log_std: -2.3
+  fix_control_std: false
+  fix_attr_std: false
+policy_optimizer: 'Adam'
+policy_lr: 5.e-5
+policy_momentum: 0.0
+policy_weightdecay: 0.0
+value_specs:
+  htype: tanh
+  design_flag_in_state: true
+  onehot_design_flag: true
+  mlp: [512, 256]
+  gnn_specs:
+    layer_type: graph_conv
+    hdims: [64, 64, 64]
+    aggr: add
+    bias: true
+value_optimizer: 'Adam'
+value_lr: 3.e-4
+value_momentum: 0.0
+value_weightdecay: 0.0
+clip_epsilon: 0.2
+min_batch_size: 50000
+mini_batch_size: 2048
+num_optim_epoch: 10
+max_epoch_num: 400
+seed: 3
+save_model_interval: 100
+
+
+robot_param_scale: 1
+skel_transform_nsteps: 5
+
+env_specs:
+  model_xml_file: 'assets/mujoco_envs/rtg_ant.xml'
+  # D3 M3 E4: rewritten by the trainer at each opponent refresh.
+  opponent_mode: policy
+  opponent_body_xml: 'assets/mujoco_envs/ant_competevo.xml'
+  init_height: false
+  # CompetEvo's control rate: timestep 0.003 (in the asset) x frame_skip 5
+  # = dt 0.015 s, so 500 control steps is their 7.5 s episode.
+  frame_skip: 5
+  # The scripted opponent's speed, m/s. 5.0 m / 7.5 s = 0.667 is the speed
+  # the 500-step clock already demands; 0.68 is that advanced 2%, so the
+  # opponent CROSSES at control step 491 and running out of time is realised
+  # as a loss rather than as a silent truncation. See
+  # `design_opt/envs/run_to_goal.py`'s docstring.
+  opponent_speed: 0.68
+  goal_x: 4.0
+  stand_z: 0.28
+  # D3 M3 E3: `force_identity_design` is ABSENT here -- that
+  # is the experiment. `AntEnv.step` defaults it to False, so
+  # the skeleton and attribute actions the policy emits are
+  # applied to the body for real.
+
+done_condition:
+  # CompetEvo's truncation (multi_agent_env.py:77). Transform2Act's max_ang /
+  # min_height / max_height are deliberately NOT set: this task has its own
+  # termination rule (a fall below z=0.28, a goal, a non-finite state) and two
+  # rules for one task would be untraceable.
+  max_nsteps: 500
+
+obs_specs:
+  attr: ['depth']
+  sim: []
+  design: true
+  clip_qvel: true
+  use_projected_params: true
+  use_body_ind: true
+max_body_depth: 4
+
+add_body_condition:
+  max_nchild: 2
+
+robot:
+  param_mapping: sin
+  no_root_offset: true
+  
+  body_params:
+    offset:
+      type: 'xy'
+      lb: [-0.5, -0.5]
+      ub: [0.5, 0.5]
+
+  joint_params: {}
+
+  geom_params:
+    size:
+      lb: 0.03
+      ub: 0.10
+    ext_start:
+      lb: 0.0
+      ub: 0.2
+
+  actuator_params:
+    gear:
+      lb: 20
+      ub: 400
+  
+

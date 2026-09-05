@@ -10,11 +10,21 @@ GPU_TRIP="${GPU_TRIP:-17500}"
 # misses the new PID when that arm relaunches. Explicit /proc scan, never
 # pkill/pgrep -f (three self-matches this session).
 resolve_pid() {
-  local want="$1" p c
+  # Return the MAIN process, not one of its sampler workers. khrylib forks
+  # workers that inherit the parent's argv verbatim, so a cmdline match alone
+  # picks an arbitrary one of ten -- which is how a healthy arm gets reported
+  # with a changing pid (and, in E3, how a defunct worker was mistaken for a
+  # restart). The main is the one the launcher detached, so its ppid is 1;
+  # fall back to the lowest pid if that ever fails to match.
+  local want="$1" p c ppid best=""
   for p in $(ps -o pid= -C python); do
     c=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || continue
-    case "$c" in *train_e4r_gnn.py*"--cfg $want "*) echo "$p"; return;; esac
+    case "$c" in *train_e4r_gnn.py*"--cfg $want "*) ;; *) continue;; esac
+    ppid=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+    [ "$ppid" = "1" ] && { echo "$p"; return; }
+    [ -z "$best" ] && best="$p"
   done
+  [ -n "$best" ] && echo "$best"
 }
 declare -A SEEN=()
 while true; do

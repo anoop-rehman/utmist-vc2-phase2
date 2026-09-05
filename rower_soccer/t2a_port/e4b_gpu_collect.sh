@@ -15,7 +15,7 @@ set -uo pipefail
 OUT="${OUT:-/workspace/utmist-vc2-phase2/runs/d3_e4b_ring/census/gpu_vs_bodies.csv}"
 CFGS="${CFGS:-rtg_e4r_s1 rtg_e4r_s2 rtg_e4r_s3}"
 DUR="${DUR:-100000}"
-[ -f "$OUT" ] || echo "ts,cfg,pid,mib,total_mib,bodies_mean,motors_mean,epoch" > "$OUT"
+[ -f "$OUT" ] || echo "ts,cfg,pid,mib,total_mib,bodies_mean,motors_mean,epoch,bodies_max,bodies_max_running" > "$OUT"
 end=$(( $(date +%s) + DUR ))
 while [ "$(date +%s)" -lt "$end" ]; do
   total=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)
@@ -32,16 +32,16 @@ while [ "$(date +%s)" -lt "$end" ]; do
     [ -n "$main" ] || continue
     mib="${MEM[$main]:-}"
     [ -n "$mib" ] || continue
-    read -r bm mm ep < <(python3 - "$c" <<'PY'
+    read -r bm mm ep bmax bmaxrun < <(python3 - "$c" <<'PY'
 import json,sys,os
 f='/workspace/Transform2Act/results/%s/e4r_epochs.jsonl'%sys.argv[1]
 try:
     r=[json.loads(l) for l in open(f)]
-    c=r[-1]['census']; print(c['bodies_mean'], c['motors_mean'], r[-1]['epoch'])
+    c=r[-1]["census"]; print(c["bodies_mean"], c["motors_mean"], r[-1]["epoch"], c.get("bodies_max",""), max(x["census"]["bodies_max"] for x in r))
 except Exception: print('', '', '')
 PY
 )
-    [ -n "$bm" ] && echo "$(date +%s),$c,$main,$mib,$total,$bm,$mm,$ep" >> "$OUT"
+    [ -n "$bm" ] && echo "$(date +%s),$c,$main,$mib,$total,$bm,$mm,$ep,$bmax,$bmaxrun" >> "$OUT"
   done
   sleep 5
 done

@@ -243,3 +243,73 @@ Two arms both updating would be ~12.4 GB (61%), still comfortable.
 the standing rule applied as written — smaller wave, no seeds shed — and it
 buys margin against the failure that killed D1 at 19 950 MiB on this same card
 with MPS active.
+
+## Longitudinal GPU vs body size — the premise does not hold
+
+Asked for after the two-arm peak read 15 818 MiB at epoch 8 against my earlier
+9 428, alongside `motors_mean` rising 6 → 9 and `p_act4` reaching 1.00 — the
+E3.1 pattern of bodies growing until an arm has to be shed.
+
+### First, my 9 428 was not a comparable measurement
+
+It came from **40 samples × 2 s = 80 s**. An epoch is ~117 s, so the window did
+not span one — it violated the sizing rule I had stated one message earlier.
+With two arms the joint peak needs both in their update phase at once (~32% of
+the time at a 57% duty cycle), and an 80 s window can miss it entirely. Its
+median was 7 706; the card's median now is **15 746, equal to its peak** — the
+card sits flat, so what changed is mostly what the window could see.
+
+### Second, memory does not track body size
+
+E3.1's recorder holds **1 357 samples spanning `n_bodies` 11 → 26** — nearly the
+whole range up to the ceiling of 29. Fitted **within each arm** (pooling across
+arms was the defect that invalidated the earlier attempt, since different arms
+carry different allocator reserves):
+
+| arm | `n_bodies` | per-arm peak | slope | R² |
+|---|---|---|---:|---:|
+| `rtg_e31_s1` | 13-23 | 5 440-8 862 | **+199.8** MiB/body | 0.515 |
+| `rtg_e31_s2` | 14-26 | 5 584-9 122 | **−0.4** | 0.000 |
+| `rtg_e31_s3` | 11-21 | 6 256-8 880 | **+100.1** | 0.158 |
+
+**Inconsistent in sign and magnitude, and non-monotonic in both datasets.**
+E3.1 peaked at 9 122 MiB at `bodies_mean` 18.1 but only 7 674-7 780 at 19.1-19.6.
+E4B peaked at 10 586 at 18.4 but 6 338 at 20.1. Memory here is dominated by the
+**fixed 50 000-state PPO buffer**, not by per-graph node count.
+
+So the E3.1 pattern being feared — bodies grow, memory grows, an arm must be
+shed — **is not what E3.1's own data shows**. E3.1 shed an arm because three
+arms peaked at 19 753 MiB, which is the same arithmetic that made me defer s3
+here: three arms overlap, not bodies grow.
+
+### Third, the ceiling, and where the real threshold is
+
+The 29-body ceiling carries over (E4B shares `max_body_depth 4`,
+`max_nchild 2`). **`bodies_max` running maximum is already 25 after ten
+epochs** — at most four more bodies are structurally possible.
+
+| | per-arm | two arms | of 20 475 |
+|---|---:|---:|---:|
+| joint peak observed now | — | **15 746** | 77% |
+| E3.1 max per-arm anywhere (11-26 bodies) | 9 122 | 18 244 | 89% |
+| E4B max per-arm so far | 10 586 | (21 172) | not observed jointly |
+| steepest within-arm slope, 25 → 29 bodies | +800 | +1 600 | +8 pts |
+
+**The breach threshold is not ahead of us.** Two arms cross 17 500 when both
+simultaneously exceed 8 750, and E3.1 arms individually exceeded 8 750 at
+`n_bodies` 17, 18 and 19 — counts we passed several epochs ago. Whether it
+happens depends on **coincidence of update phases, not on further growth**.
+
+**Consequence for the decision: waiting is not accruing danger.** The risk is
+roughly stationary rather than rising, so there is no deadline by which an arm
+must be shed. If the watcher does trip at 17 500, the mitigation is the one
+already used for s3 — stop one arm by stop-file and run it afterwards, costing
+wall clock and no seeds. No action now: 4.6 GB of headroom is real.
+
+### Housekeeping found along the way
+
+Two stale E3.1 recorders (`gpu_longitudinal.sh`, `watch.sh`) were still running
+after 1.5 days and 14 hours, re-appending the finished runs' final rows. Both
+were bash, not CUDA clients, and were stopped. They are what made recent
+timestamps appear under `runs/d3_e31_fix/` — **not** the E5 agent, which has
+touched only its own `PLAN_D3_E5_2V2.md`.

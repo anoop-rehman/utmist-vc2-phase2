@@ -269,6 +269,19 @@ def main():
                        agent.policy_net, body,
                        meta={"n_bodies": len(env.robot.bodies)})
         got = sp.read_partner(args.snapshot_root, args.partner_cfg)
+        # At epoch 0 the two arms race to publish. Whichever gets there second
+        # finds its partner at once; the first can miss and would then spend a
+        # whole refresh interval against a passive body while its partner
+        # faces a real policy -- an asymmetry in the first 10 epochs of a
+        # deliberately symmetric experiment. Both arms launch within seconds
+        # of each other, so a short bounded retry closes the window entirely.
+        if got is None and epoch == 0:
+            for _ in range(30):
+                time.sleep(2)
+                got = sp.read_partner(args.snapshot_root, args.partner_cfg)
+                if got is not None:
+                    L(f"  [e4] epoch 0: partner appeared after retry")
+                    break
         if got is None:
             L(f"  [e4] epoch {epoch}: partner {args.partner_cfg} has not "
               f"published yet; opponent unchanged")

@@ -447,6 +447,41 @@ rather than being squeezed in at 99%. Seeds are not shed and the wave is not
 split: a seed *pair* is the smallest coherent unit, because each lineage is
 only meaningful against the other.
 
+### Correction: the projection above was built from snapshots, and snapshots understate the peak
+
+A watcher tripped at **19 569 MiB of 20 475 (96%)** while the two smoke arms
+were still running beside the two E3.1 arms. Confirmed with a sustained
+measurement before acting, as the trigger itself demands, and the reading
+oscillates:
+
+```
+19569 -> 18391 -> 19545 -> 15423 MiB   (15 s apart)
+```
+
+so **96% is a transient peak during the PPO update**, not steady state — the
+per-process figures summed to 15.0 GB at the same moment. Every number in the
+table above came from `nvidia-smi` snapshots taken *between* those peaks, so
+**the table understates what a wave actually needs**. The honest planning
+figure is the peak, not the snapshot:
+
+| measured | MiB | of 20 475 |
+|---|---:|---:|
+| peak, 2 E3.1 arms + 2 E4 arms | **19 569** | **96%** |
+| same instant, summed per-process snapshots | 15 015 | 73% |
+
+Implication: 2 E4 arms peak at roughly **11.5-13.6 GB together**, so a wave
+alongside `rtg_e31d_s3body` should peak near **16-18 GB (78-88%)** rather than
+the 78% the snapshot table claimed. That still fits, with less margin than
+stated. The plan is unchanged — wave 1 waits for `rtg_e31_s1` — but the wave is
+launched with a peak watcher, and if the sustained peak exceeds ~19 GB one arm
+is stopped **by stop-file** (MPS is active; nothing is killed) and the wave
+re-planned rather than left to OOM.
+
+This is the same failure mode as the retracted GPU-vs-bodies fit in
+`D3_E3_ADVERSARIAL.md`: `nvidia-smi` reports the caching allocator's *reserve*,
+and reasoning from it without watching how it moves gives a confident wrong
+number.
+
 **The opponent policy costs no GPU memory**: it is constructed on CPU and
 measured at **+0.0 MiB CUDA** across five constructions, so the ~40 refreshes
 over a run do not leak.

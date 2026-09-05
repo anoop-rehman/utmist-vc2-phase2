@@ -130,7 +130,8 @@ def race_stats(eps, goal_x):
     draws = np.logical_and(reached > 0, opp > 0)
     out = {"draw_rate": float(draws.mean()),
            "decisive_rate": float(np.logical_xor(reached > 0, opp > 0).mean())}
-    if any("com_x" in e for e in eps):
+    if all(e.get("com_x") is not None and e.get("opp_com_x") is not None
+           for e in eps):
         ours_left = goal_x - g("com_x")
         theirs_left = goal_x + g("opp_com_x")
         out["margin_m"] = float(np.mean(theirs_left - ours_left))

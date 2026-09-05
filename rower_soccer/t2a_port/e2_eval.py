@@ -102,6 +102,15 @@ def roll(env, act, wrap, seed, max_steps=1000, render=False,
                 bodies_exec=nb_exec,
                 reached=bool(info.get("reached", False)),
                 opp_reached=bool(info.get("opp_reached", False)),
+                # D3 M3 E4: both torso positions at episode end, so the race
+                # margin (how much further the loser still had to run) can be
+                # computed. Additive keys -- every existing consumer looks up
+                # by name, so E2/E3 aggregation is unaffected. Without these
+                # `e4_selfplay.race_stats` silently returns no margin and one
+                # of the two pre-registered degeneracy guards is dead.
+                com_x=float(info["com_x"]) if "com_x" in info else None,
+                opp_com_x=float(info["opp_com_x"])
+                if "opp_com_x" in info else None,
                 fell=bool(info.get("fell", False)),
                 net_dx=float(xs[-1] - x0), max_x=float(xs.max()),
                 needs=float(env.goal_x - x0),

@@ -10,7 +10,17 @@ for c in $CFGS; do
   pid=$(pgrep -f "train_e4_gnn.py --cfg $c --partner" | head -1 || true)
   f="/workspace/Transform2Act/results/$c/e4_epochs.jsonl"
   if [ -z "$pid" ]; then echo "MISSING PROCESS: $c"; fail=1; continue; fi
-  if [ ! -s "$f" ]; then echo "NO JSONL YET:    $c (pid $pid)"; continue; fi
+  # Wait (bounded) for the first epoch rather than passing vacuously. The
+  # first version printed "NO JSONL YET" and still exited 0 -- an assertion
+  # that succeeds on an empty file verifies nothing, which is the same failure
+  # as a gate that passes on a dead opponent. WAIT_ROWS=0 skips the wait.
+  waited=0
+  while [ ! -s "$f" ] && [ "$waited" -lt "${WAIT_ROWS:-900}" ]; do
+    sleep 30; waited=$((waited+30))
+  done
+  if [ ! -s "$f" ]; then
+    echo "NO JSONL after ${waited}s: $c (pid $pid) -- NOT verified"; fail=1; continue
+  fi
   n=$(wc -l < "$f")
   miss=$(python3 - "$f" <<'PY'
 import json,sys

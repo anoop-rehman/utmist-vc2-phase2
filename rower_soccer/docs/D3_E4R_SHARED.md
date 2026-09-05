@@ -199,3 +199,47 @@ noise or from ring growth**, so the ~124 s/epoch budget is quoted with that
 caveat rather than as settled. The smoke archived every 2 epochs; production
 archives every 10, so the ring grows 5× slower. I will re-measure at epoch 50
 and report if it has moved.
+
+### Correction: three concurrent arms do NOT fit, and my "they interleave" claim was wrong
+
+Ninety minutes after launch the trigger fired at 18 650 MiB. Confirmed by
+sustained measurement rather than acted on, and it is **not** a one-off:
+
+| 3 arms, 36 samples / 72 s | MiB | of 20 475 |
+|---|---:|---:|
+| p50 | 13 190 | 64.4% |
+| **p90 / p99 / p100** | **18 650** | **91.1%** |
+| samples above the 17 500 trigger | **6 of 36 (17%)** | |
+| headroom at peak | **1 825** | |
+
+**The claim I made at launch — that three arms "interleave their update peaks
+rather than stacking them" — is withdrawn.** It was inferred from a 90 s window
+taken while the arms were still at epoch 0-1. The arithmetic says the opposite:
+`T_update` is ~67 s of a ~117 s epoch, a **57% duty cycle**, so three
+independent arms are all updating
+
+```
+0.57^3 = 0.185
+```
+
+**~19% of the time**, which is within noise of the 17% measured. That also
+means **staggering the launch would not help** — the overlap is statistical,
+not phase-locking, so there is no offset that avoids it.
+
+**Action: `rtg_e4r_s3` stopped by stop-file at epoch 2** (about four minutes of
+compute) and **deferred, not dropped** — it relaunches from a clean slate when
+s1 and s2 finish, under its own detached launcher which refuses if the card is
+not free. Three seeds remain the minimum that survives one dead controller, and
+all three will run.
+
+| | peak MiB | % | over trigger | headroom |
+|---|---:|---:|---:|---:|
+| 3 arms | 18 650 | 91.1% | 17% of samples | 1 825 |
+| **2 arms** | **9 428** | **46.0%** | **0%** | **11 047** |
+
+Two arms both updating would be ~12.4 GB (61%), still comfortable.
+
+**Cost of the correction:** ~34 h instead of ~29 h for all three seeds. That is
+the standing rule applied as written — smaller wave, no seeds shed — and it
+buys margin against the failure that killed D1 at 19 950 MiB on this same card
+with MPS active.

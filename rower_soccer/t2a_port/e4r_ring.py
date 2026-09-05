@@ -109,8 +109,15 @@ class OpponentRing:
         avail = sorted(e for e in self.members if e < epoch)
         if not avail:
             return None
-        start = math.floor(self.delta * epoch)
-        start = start if start > 1 else 1
+        # CompetEvo writes `start = start if start > 1 else 1`. That clamp
+        # exists because THEIR checkpoints are 1-indexed -- no model is saved
+        # before training, so there is no zeroth opponent to exclude. Our ring
+        # archives at epoch 0, which is a real past self and one the user's
+        # criterion ("beat ALL past iterations") explicitly covers. The
+        # faithful translation of their intent is therefore a clamp to 0, not
+        # to 1; for every delta > 0 the two agree exactly, and they differ only
+        # in whether the untrained zeroth self is reachable.
+        start = max(0, math.floor(self.delta * epoch))
         cand = [e for e in avail if e >= start]
         if not cand:
             cand = avail

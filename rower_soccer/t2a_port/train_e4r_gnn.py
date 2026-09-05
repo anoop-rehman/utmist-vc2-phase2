@@ -208,6 +208,11 @@ def main():
                         "for; 0.5 = the most recent half (their dev setting).")
     p.add_argument("--snapshot-root",
                    default="/workspace/Transform2Act/results/_e4_snapshots")
+    p.add_argument("--restart-check-epoch", type=int, default=150,
+                   help="pre-registered PBT substitute: if goal rate is still "
+                        "0.00 here, this seed drew a dead controller. E3.1's "
+                        "s3 was detectable this way by epoch ~140 while its "
+                        "solvers were already climbing.")
     p.add_argument("--mirror-episodes", type=int, default=20)
     p.add_argument("--ladder-episodes", type=int, default=10)
     p.add_argument("--ladder-k", type=int, default=5,
@@ -309,6 +314,32 @@ def main():
         nmem = ring.add(epoch, sd, body)
         L(f"  [ring] epoch {epoch}: archived, ring now holds {nmem}")
 
+    # ---- pre-registered dead-controller check (PBT substitute) ---------
+    # DETECTS and flags; it does NOT restart by itself. An automatic
+    # re-initialisation mid-run would change the run's semantics silently, and
+    # on this box a restart is an operator action anyway (MPS is active, so
+    # arms stop by stop-file). The marker file is what the watcher reports.
+    restart_flagged = [False]
+
+    def check_dead_controller(epoch, ev_hist):
+        if restart_flagged[0] or epoch < args.restart_check_epoch:
+            return
+        recent = [e["eval"]["goal_rate"] for e in ev_hist
+                  if e["epoch"] >= args.restart_check_epoch - 50]
+        if len(recent) < 3 or max(recent) > 0.0:
+            return
+        restart_flagged[0] = True
+        marker = os.path.join(cfg.cfg_dir, "RESTART_RECOMMENDED")
+        with open(marker, "w") as f:
+            json.dump(dict(cfg=args.cfg, epoch=epoch, n_evals=len(recent),
+                           max_goal_rate=max(recent),
+                           rule=("pre-registered: goal rate still 0.00 at "
+                                 "epoch %d" % args.restart_check_epoch)), f)
+        L(f"  *** RESTART RECOMMENDED: goal rate 0.00 across {len(recent)} "
+          f"evals through epoch {epoch}. Pre-registered dead-controller rule "
+          f"(D3 E4B section 6). Marker: {marker}")
+
+    eval_history = []
     recent_evals = []
     for epoch in range(start_epoch, cfg.max_epoch_num):
         # archive BEFORE training so epoch 0's self is in the ring, then let
@@ -451,6 +482,9 @@ def main():
                 lad = e4r_ring.ladder(env, agent, ring, e2_eval,
                                       episodes=args.ladder_episodes,
                                       k=args.ladder_k)
+            eval_history.append(dict(epoch=epoch, eval=ev))
+            check_dead_controller(epoch, eval_history)
+            row["restart_recommended"] = restart_flagged[0]
             row["mirror"] = mm
             row["ladder"] = lad
             for k2, v2 in mm.items():

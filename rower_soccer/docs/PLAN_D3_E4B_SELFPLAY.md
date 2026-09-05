@@ -321,9 +321,12 @@ production configuration), timing each epoch's arrival:
 
 | | s/epoch |
 |---|---:|
-| trainer's own `T_sample + T_update + T_eval` | **110.7** |
-| wall clock, ordinary epoch | **112** |
+| trainer's own `T_sample + T_update + T_eval` (n=6) | **112.4** |
+| wall clock, ordinary epoch (n=4) | **112** |
 | wall clock, epoch with mirror + ladder eval | 171 |
+
+The two independent clocks agree to within 0.4 s, and the ordinary-epoch
+figure is stable across every epoch measured (110, 110, 115, 115 s).
 
 The mirror/ladder eval added **59 s** at test size (18 episodes). At production
 size (20 mirror + 5×10 ladder = 70 episodes) that is ≈ 230 s, so running it

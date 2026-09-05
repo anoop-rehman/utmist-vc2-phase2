@@ -26,6 +26,29 @@ say "worst free over 60s: ${worst} MiB (need >= ${NEED_FREE})"
 if [ "$worst" -lt "$NEED_FREE" ]; then
   say "REFUSING TO LAUNCH: nothing killed, nothing started."; exit 1
 fi
+
+# NO-OVERLAP, enforced rather than incidental. A free-memory check taken at
+# relaunch time does not protect against what happens LATER: bodies grow
+# through the run, so two arms that fit now may not fit at epoch 400. s3 alone
+# is safe at any body size (one arm peaks around half the card even at the
+# ceiling); s3 OVERLAPPING a late-stage arm is the case that breaches. The wait
+# loop above already requires both to have exited, but that is re-checked here
+# immediately before launching, because the loop's condition and the launch are
+# separated by a 60 s measurement window during which an arm could have been
+# relaunched by someone else.
+alive=""
+for want in rtg_e4r_s1 rtg_e4r_s2; do
+  for p in $(ps -o pid= -C python 2>/dev/null); do
+    cl=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || continue
+    case "$cl" in *train_e4r_gnn.py*"--cfg $want "*) ;; *) continue;; esac
+    [ "$(ps -o ppid= -p $p 2>/dev/null | tr -d ' ')" = "1" ] && alive="$alive $want($p)"
+  done
+done
+if [ -n "$alive" ]; then
+  say "REFUSING TO LAUNCH: s3 must never overlap another arm, and$alive is live."
+  say "Nothing killed, nothing started."
+  exit 1
+fi
 touch "$LOCK"
 rm -f /tmp/stop_e4b_s3
 rm -rf /workspace/Transform2Act/results/rtg_e4r_s3

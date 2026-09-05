@@ -57,13 +57,27 @@ if cen.get("p_act4",1.0)<0.5: m.append("p_act4 %.2f -- actuator collapse (E3's f
 ev=[x for x in r if "eval" in x]
 if ev:
     e=ev[-1]["eval"]; mi=ev[-1].get("mirror",{}); la=ev[-1].get("ladder",{})
-    st=mi.get("stalemate_rate")
-    if st is not None and st>0.5 and (mi.get("fwd_mean",9)<2.5):
-        m.append("DEGENERATE MIRROR: stalemate %.2f at fwd %.2f m"%(st,mi.get("fwd_mean",-1)))
-    m.append("e%d goal %.2f fwd %.2f speed %.3f | mirror dec %.2f mut %.2f stale %.2f fwd %.2f | ladder win %s rho %s | ring %d"%(
-        ev[-1]["epoch"],e["goal_rate"],e["max_fwd"],e["speed"],
-        mi.get("decisive_rate",-1),mi.get("mutual_rate",-1),mi.get("stalemate_rate",-1),mi.get("fwd_mean",-1),
-        la.get("mean_win"),la.get("spearman"),last.get("ring",{}).get("size",0)))
+    st=mi.get("stalemate_rate"); ep=ev[-1]["epoch"]
+    # DEGENERATE MIRROR is a real condition but only MEANS anything once the
+    # agent could plausibly move. At epoch 4 an untrained agent tying itself
+    # 0-0 is the expected state, not a warning, and the pre-registration
+    # scopes this verdict to epochs 200-400. Fire it inside the verdict
+    # window, or earlier only as a REGRESSION -- the agent once scored and has
+    # now stopped moving, which is genuinely worth waking someone for.
+    ever_scored = max((x["eval"]["goal_rate"] for x in ev), default=0.0) > 0.5
+    if st is not None and st>0.5 and mi.get("fwd_mean",9)<2.5 and (ep>=200 or ever_scored):
+        m.append("DEGENERATE MIRROR%s: stalemate %.2f at fwd %.2f m"%(
+            " (REGRESSION -- this arm previously scored)" if ever_scored and ep<200 else "",
+            st,mi.get("fwd_mean",-1)))
+    # progress line only when a NEW eval has landed, not on every pass
+    stamp="/tmp/.watch_e4b_%s_lasteval"%c
+    prev=open(stamp).read().strip() if os.path.exists(stamp) else ""
+    if str(ep)!=prev:
+        open(stamp,"w").write(str(ep))
+        m.append("e%d goal %.2f fwd %.2f speed %.3f | mirror dec %.2f mut %.2f stale %.2f fwd %.2f | ladder win %s rho %s | ring %d"%(
+            ep,e["goal_rate"],e["max_fwd"],e["speed"],
+            mi.get("decisive_rate",-1),mi.get("mutual_rate",-1),mi.get("stalemate_rate",-1),mi.get("fwd_mean",-1),
+            la.get("mean_win"),la.get("spearman"),last.get("ring",{}).get("size",0)))
 if m: print("%s: %s"%(c,"; ".join(m)))
 PY
   done

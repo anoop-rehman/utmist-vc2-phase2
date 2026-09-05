@@ -1046,3 +1046,40 @@ The pre-registered E4 comparison set (`docs/t2a/e4_null/e31_comparison_set.json`
 has been regenerated with s1 final; `all_final` is now true. The three bodies
 remain mutually **0.886 / 0.912 / 0.973** apart, every pair still above the
 0.75 DISTINCT threshold, so "three distinct bodies" survives the update.
+
+## The s3-body diagnostic completed its argument: goal 1.00
+
+`rtg_e31d_s3body` was stopped by stop-file at epoch 294/400 to give E4 wave 1
+GPU headroom (see `D3_E4_PREREQ.md`). It is stopped **on a plateau, not
+mid-climb**, and it had already made its case more strongly than when the
+diagnostic was first written up:
+
+| | at first write-up (e186) | **at stop (e294)** |
+|---|---:|---:|
+| goal rate | 0.60 | **1.00** |
+| speed | — | **3.006 m/s** |
+| forward | — | 5.25 m |
+| episode length | — | 118 steps |
+
+Best epoch 279 (goal 1.00, 3.008 m/s); epochs 250-294 average goal **0.94**.
+First reached goal ≥ 0.5 at epoch **139**.
+
+**The conclusion is now unambiguous.** s3's 12-body evolved morphology, frozen
+and given a fresh controller, reaches the goal on essentially every episode at
+3.0 m/s — twice the frozen ant's 1.50 m/s. So s3's failure in E3.1 was **the
+controller, not the body**, and the "premature lock-in" story stays retracted.
+The remaining 106 epochs would only have refined speed, which is why this was
+the cheapest thing on the card to trade.
+
+Ranking all four bodies now measured under run-to-goal:
+
+| body | controller | goal | speed |
+|---|---|---:|---:|
+| E3.1 s2 (18b/6m) | its own | 1.00 | **4.891 m/s** |
+| E3.1 s1 (17b/8m) | its own | 1.00 | **4.224 m/s** |
+| E3.1 s3 (12b/6m) | **fresh** (this diagnostic) | 1.00 | **3.006 m/s** |
+| E3.1 s3 (12b/6m) | its own | 0.00 | −0.027 m/s |
+| frozen DeepMind ant (13b/8m) | its own | 0.95 | 1.50 m/s |
+
+All three evolved bodies beat the ant by **2.0-3.3x** once each has a
+controller that works.

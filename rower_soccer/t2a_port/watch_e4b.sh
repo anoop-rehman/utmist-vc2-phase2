@@ -18,6 +18,7 @@ resolve_pid() {
   # fall back to the lowest pid if that ever fails to match.
   local want="$1" p c ppid best=""
   for p in $(ps -o pid= -C python); do
+    [ -r "/proc/$p/cmdline" ] || continue   # worker exited between ps and read
     c=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || continue
     case "$c" in *train_e4r_gnn.py*"--cfg $want "*) ;; *) continue;; esac
     ppid=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')

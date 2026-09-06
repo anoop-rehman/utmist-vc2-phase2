@@ -531,3 +531,56 @@ Nothing changed on the running arms. Candidates, cheapest first:
    self-play from scratch does not bootstrap. We have three solved checkpoints.
 3. **Lower `CTRL_COST_COEF`** — changes the reward E3/E3.1 were measured under,
    so every cross-rung comparison breaks. Least preferred.
+
+## Warm start: it worked, and it immediately produced a new regime
+
+Epoch 4, the first eval after seeding:
+
+| | s1 (seed 4.224 m/s) | s2 (seed 4.891 m/s) |
+|---|---:|---:|
+| goal / loss | 0.00 / 0.00 | **0.50 / 0.50** |
+| fall rate | **0.90** | 0.00 |
+| speed | 1.052 | **4.303** |
+| mirror decisive / stalemate | 0.15 / 0.85 | **0.90 / 0.00** |
+| ladder win vs past selves | 0.0 | **0.70** |
+
+**s2 is the experiment working.** goal 0.50 against loss 0.50 is a *true tie
+between identical policies* — the user's success criterion satisfied at epoch 4
+rather than hoped for — with the mirror **90% decisive and 0% stalemate**. The
+degenerate mirror that dominated the cold run is gone.
+
+### s1's falls are collisions, not forgetting
+
+Tested with training removed as a variable: the **seed policy itself**, no
+gradient steps, in two conditions.
+
+| `rtg_e31_s1` seed policy | goal | **fell** | speed |
+|---|---:|---:|---:|
+| vs **inert** opponent | 1.00 | **0.00** | 4.321 |
+| vs **itself**, fully physical | 0.40 | **0.40** | 1.579 |
+
+The body is fine — 4.32 m/s, never falls, unopposed. It falls on **contact**,
+before any training.
+
+**Why E3.1 never saw this.** Its scripted opponent had its state overwritten
+every step, so it was infinitely massive and non-reactive, and it advanced at
+0.68 m/s. E4B's opponent is a fully physical body under policy control racing
+at seed speed:
+
+| | closing speed | opponent |
+|---|---:|---|
+| E3.1 | 4.9 m/s | state overwritten, cannot be deflected |
+| E4B | **8.4 m/s** | fully physical, deflectable |
+
+**This is the task becoming genuinely adversarial for the first time.** In
+E3.1 the opponent could not really contest — it arrived at step 491 against
+winners finishing at 76. Now both sides race and meet in the middle, and
+**physical robustness to a head-on collision becomes a selection pressure that
+has never previously existed in this project**. s2's 18-body plan survives it
+(fell 0.00); s1's 17-body plan does not (fell 0.40 pristine, 0.90 after four
+epochs).
+
+That is a morphological difference under adversarial contact — precisely what
+E4B exists to surface — and it is a result, not a fault. Whether the ratchet
+teaches s1 a collision-robust gait is now one of the more interesting things
+this run can answer.

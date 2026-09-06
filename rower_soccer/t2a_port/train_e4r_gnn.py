@@ -591,7 +591,7 @@ def main():
         if want_video:
             tmp = "%s/%s.p" % (cfg.model_dir, VIDEO_CKPT)
             try:
-                import pickle
+                # pickle imported at module scope (a local import here would shadow it for all of main)
                 with to_cpu(agent.policy_net, agent.value_net):
                     pickle.dump({"policy_dict": agent.policy_net.state_dict(),
                                  "value_dict": agent.value_net.state_dict(),
@@ -646,7 +646,7 @@ def main():
             L(f"stop file {args.stop_file} present -- stopping after {epoch}")
             cp = "%s/epoch_%04d.p" % (cfg.model_dir, epoch + 1)
             if not os.path.exists(cp):
-                import pickle
+                # pickle imported at module scope (a local import here would shadow it for all of main)
                 with to_cpu(agent.policy_net, agent.value_net):
                     pickle.dump({"policy_dict": agent.policy_net.state_dict(),
                                  "value_dict": agent.value_net.state_dict(),

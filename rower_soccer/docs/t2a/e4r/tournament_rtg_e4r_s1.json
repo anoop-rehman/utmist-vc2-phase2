@@ -6,7 +6,8 @@
   80,
   120,
   160,
-  200
+  200,
+  240
  ],
  "episodes": 20,
  "matrix_slot_averaged": [
@@ -16,7 +17,8 @@
    0.15000000000000002,
    0.07499999999999998,
    0.037500000000000006,
-   0.08750000000000002
+   0.08750000000000002,
+   0.012500000000000011
   ],
   [
    0.9375,
@@ -24,7 +26,8 @@
    0.36250000000000004,
    0.425,
    0.36250000000000004,
-   0.3125
+   0.3125,
+   0.0875
   ],
   [
    0.85,
@@ -32,7 +35,8 @@
    null,
    0.7,
    0.3,
-   0.2
+   0.2,
+   0.07499999999999998
   ],
   [
    0.925,
@@ -40,7 +44,8 @@
    0.3,
    null,
    0.2,
-   0.32499999999999996
+   0.32499999999999996,
+   0.0
   ],
   [
    0.9625,
@@ -48,7 +53,8 @@
    0.7,
    0.8,
    null,
-   0.425
+   0.425,
+   0.22499999999999998
   ],
   [
    0.9125,
@@ -56,21 +62,31 @@
    0.8,
    0.675,
    0.575,
+   null,
+   0.4375
+  ],
+  [
+   0.9875,
+   0.9125,
+   0.925,
+   1.0,
+   0.775,
+   0.5625,
    null
   ]
  ],
  "cyclic_triple_fraction": 0.0,
- "n_triples": 20,
+ "n_triples": 35,
  "NON_TRANSITIVE": false,
  "slot_bias": {
-  "mean_signed_d": 0.0666666666666667,
-  "se_mean": 0.040824829046386304,
+  "mean_signed_d": 0.02261904761904765,
+  "se_mean": 0.03450327796711771,
   "max_abs_d": 0.5,
-  "n_pairs": 15,
+  "n_pairs": 21,
   "se_per_pair": 0.15811388300841897,
   "note": "d_ij = S_ij + S_ji - 1; 0 under no slot bias, sign names the favoured slot. Compare mean_signed_d against se_mean, NOT against 0 alone."
  },
- "slot_asymmetry_mean_ABSOLUTE_DEPRECATED": 0.14666666666666667,
+ "slot_asymmetry_mean_ABSOLUTE_DEPRECATED": 0.1297619047619048,
  "score_vs_older": [
   {
    "epoch": 40,
@@ -96,6 +112,11 @@
    "epoch": 200,
    "mean_score_vs_older": 0.7300000000000001,
    "n": 5
+  },
+  {
+   "epoch": 240,
+   "mean_score_vs_older": 0.8604166666666667,
+   "n": 6
   }
  ],
  "raw": {
@@ -159,6 +180,18 @@
    "fwd_min": 0.9423289456290642,
    "ep_len_mean": 84.25
   },
+  "0v240": {
+   "n": 20,
+   "win_rate": 0.0,
+   "loss_rate": 1.0,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 0.0,
+   "fwd_mean": 3.168015103813439,
+   "fwd_min": 1.6875973547640188,
+   "ep_len_mean": 81.0
+  },
   "40v0": {
    "n": 20,
    "win_rate": 0.85,
@@ -218,6 +251,18 @@
    "fwd_mean": 4.18505199269881,
    "fwd_min": 2.2612166628769383,
    "ep_len_mean": 87.5
+  },
+  "40v240": {
+   "n": 20,
+   "win_rate": 0.05,
+   "loss_rate": 0.95,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 0.05,
+   "fwd_mean": 3.847087353551669,
+   "fwd_min": 2.693003692220839,
+   "ep_len_mean": 83.0
   },
   "80v0": {
    "n": 20,
@@ -279,6 +324,18 @@
    "fwd_min": 3.787939593163425,
    "ep_len_mean": 67.9
   },
+  "80v240": {
+   "n": 20,
+   "win_rate": 0.05,
+   "loss_rate": 0.95,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 0.05,
+   "fwd_mean": 4.467103252450047,
+   "fwd_min": 3.4840758357629786,
+   "ep_len_mean": 68.85
+  },
   "120v0": {
    "n": 20,
    "win_rate": 0.8,
@@ -338,6 +395,18 @@
    "fwd_mean": 4.65382099598358,
    "fwd_min": 3.8916731708132906,
    "ep_len_mean": 73.95
+  },
+  "120v240": {
+   "n": 20,
+   "win_rate": 0.0,
+   "loss_rate": 1.0,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 0.0,
+   "fwd_mean": 4.248922586529872,
+   "fwd_min": 3.6756237699570073,
+   "ep_len_mean": 69.5
   },
   "160v0": {
    "n": 20,
@@ -399,6 +468,18 @@
    "fwd_min": 2.7041139076140785,
    "ep_len_mean": 66.45
   },
+  "160v240": {
+   "n": 20,
+   "win_rate": 0.15,
+   "loss_rate": 0.85,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 0.15,
+   "fwd_mean": 4.425593167950385,
+   "fwd_min": 3.242951897632607,
+   "ep_len_mean": 64.35
+  },
   "200v0": {
    "n": 20,
    "win_rate": 0.95,
@@ -458,6 +539,90 @@
    "fwd_mean": 4.76855059195399,
    "fwd_min": 3.431521394673868,
    "ep_len_mean": 71.05
+  },
+  "200v240": {
+   "n": 20,
+   "win_rate": 0.25,
+   "loss_rate": 0.6,
+   "mutual_rate": 0.15,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 0.85,
+   "score": 0.325,
+   "fwd_mean": 4.7090687958626685,
+   "fwd_min": 3.2506575450194664,
+   "ep_len_mean": 66.25
+  },
+  "240v0": {
+   "n": 20,
+   "win_rate": 0.95,
+   "loss_rate": 0.0,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.05,
+   "decisive_rate": 0.95,
+   "score": 0.975,
+   "fwd_mean": 4.919887579933928,
+   "fwd_min": 3.822006765310299,
+   "ep_len_mean": 97.6
+  },
+  "240v40": {
+   "n": 20,
+   "win_rate": 0.85,
+   "loss_rate": 0.1,
+   "mutual_rate": 0.05,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 0.95,
+   "score": 0.875,
+   "fwd_mean": 4.937033365638668,
+   "fwd_min": 4.622526362036873,
+   "ep_len_mean": 82.65
+  },
+  "240v80": {
+   "n": 20,
+   "win_rate": 0.9,
+   "loss_rate": 0.1,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 0.9,
+   "fwd_mean": 4.965175244003819,
+   "fwd_min": 4.838428039085083,
+   "ep_len_mean": 73.35
+  },
+  "240v120": {
+   "n": 20,
+   "win_rate": 1.0,
+   "loss_rate": 0.0,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 1.0,
+   "fwd_mean": 4.987755592977145,
+   "fwd_min": 4.856606429890993,
+   "ep_len_mean": 68.55
+  },
+  "240v160": {
+   "n": 20,
+   "win_rate": 0.65,
+   "loss_rate": 0.25,
+   "mutual_rate": 0.1,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 0.9,
+   "score": 0.7000000000000001,
+   "fwd_mean": 4.871277842495298,
+   "fwd_min": 3.8707352809908278,
+   "ep_len_mean": 68.45
+  },
+  "240v200": {
+   "n": 20,
+   "win_rate": 0.45,
+   "loss_rate": 0.55,
+   "mutual_rate": 0.0,
+   "stalemate_rate": 0.0,
+   "decisive_rate": 1.0,
+   "score": 0.45,
+   "fwd_mean": 4.7763565633802845,
+   "fwd_min": 4.1943569530035605,
+   "ep_len_mean": 65.4
   }
  }
 }

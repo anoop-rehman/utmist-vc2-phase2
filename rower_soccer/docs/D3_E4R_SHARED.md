@@ -1119,3 +1119,49 @@ measured against a physical racer.
    a separate question.
 5. **No transfer claim.** A ratchet against its own history says nothing about
    performance against an agent trained differently.
+
+## Verdict tournament — both arms, 7 checkpoints, 20 episodes/pair
+
+The interim was s1-only over 6 checkpoints. This is both arms over
+0/40/80/120/160/200/240, 42 ordered pairs each, 840 episodes per arm, `nice`d
+behind the training arms.
+
+| | cyclic triples | slot bias (signed) | latest vs all older | inversions |
+|---|---|---|---|---|
+| **s1** | **0.000** of 35 | +0.0226 ± 0.0345 (**0.7 SE**) | 0.99 0.91 0.92 1.00 0.78 **0.56** | **1** (80 > 120) |
+| **s2** | **0.000** of 35 | +0.0571 ± 0.0345 (**1.7 SE**) | 0.91 1.00 0.95 0.86 0.72 **0.57** | **none** |
+
+**1. Transitive, on 70 triples across two arms, with not one cycle.** This is
+the failure mode the matrix exists to detect — Balduzzi's strategic cycling,
+AlphaStar's reason for exploiters — and it is absent at the pre-registered
+sample size on both arms independently.
+
+**2. Slot bias is now properly resolved and consistent with zero.** s1
++0.023 ± 0.035 (0.7 SE), s2 +0.057 ± 0.035 (1.7 SE). s1's interim reading was
++0.067 ± 0.041 over 15 pairs; at 21 pairs it falls to +0.023. Together with the
+pre-fix run's 2.1 SE, the scoring-protocol fix looks to have done its job.
+
+**3. Both latest checkpoints beat every predecessor** — minimum 0.56 (s1) and
+0.57 (s2), against the immediately preceding checkpoint, which is where a
+ratchet is hardest.
+
+### Correction: the non-monotonicity is s1-specific, not general
+
+In the verdict above I wrote that *"strength is not monotone in training time"*
+as though it were a property of the setup. **With both arms measured, that is
+too strong.**
+
+```
+s1:  e240 > e200 > e160 > e80 > e40 > e120 > e0      one inversion: 80 beats 120
+s2:  e240 > e200 > e160 > e120 > e80 > e40 > e0      perfectly monotone
+```
+
+**s2 is monotone in training time with no inversions at all.** s1 has exactly
+one, and it tracks its measured dip — checkpoint 120 was archived just before
+speed fell 4.054 → 2.929 with falls 0.00 → 0.20 around e134.
+
+So the accurate statement is narrower and more interesting: *monotonicity is
+not guaranteed — a run that dips will archive a locally weak self that later
+checkpoints overtake — but it is achievable, and s2 achieved it.* Transitivity
+held in both cases regardless, which is the property the criterion actually
+needs.

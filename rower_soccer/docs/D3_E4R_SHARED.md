@@ -671,3 +671,39 @@ the distribution it happened to land in. The 20-epoch window is the one to use.
 > 112) → ~11.1 h
 > **TOTAL ≈ 28 h** — against ~35 h on the cold arms and the ~25 h I quoted from
 > the short window.
+
+## The right baseline: seeds re-measured under E4B's own conditions
+
+The cost statement says every E4B claim is measured against its seed, not the
+frozen ant. But the seeds' **published** speeds (4.224, 4.891) were measured in
+E3.1's environment, against a scripted opponent that advanced at 0.68 m/s, had
+its state overwritten every step, and arrived at step 491 — it could not
+contest and could not collide meaningfully. E4B's opponent races at seed speed
+and is fully physical. **Comparing an E4B eval to a published E3.1 number is
+apples to oranges, and it understates E4B.**
+
+Both seeds re-measured in E4B's environment — the seed policy itself, no
+gradient steps, against a physical copy of itself:
+
+| seed, matched conditions | goal | fell | **speed** | published (E3.1 conditions) |
+|---|---:|---:|---:|---:|
+| `rtg_e31_s1` | 0.40 | 0.40 | **1.579** | 4.224 |
+| `rtg_e31_s2` | 0.45 | 0.05 | **3.883** | 4.891 |
+
+Against that baseline:
+
+| | seed (matched) | E4B now (last-3 mean) | change |
+|---|---:|---:|---:|
+| **s1** | 1.579 | **2.531** | **+60%** |
+| **s2** | 3.883 | **4.553** | **+17%** |
+
+**Both arms have exceeded their own seeds under the conditions they actually
+train in**, by epoch ~40. On the published numbers neither has (2.531 vs 4.224;
+4.553 vs 4.891) — which is the comparison to avoid, because it charges E4B for
+an opponent E3.1 never faced.
+
+One oddity to settle later: the s2 seed scores **goal 0.45 against loss 0.60**
+playing *itself*. For identical policies that should be symmetric. At n=20 the
+gap is ~1.4 SE so it is probably noise, but it is exactly what the tournament's
+slot-asymmetry diagnostic exists to measure, and gate 3 says the π-z rotation
+is exact — so if it persists it is a finding rather than a nuisance.

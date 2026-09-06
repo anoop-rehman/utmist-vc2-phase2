@@ -637,3 +637,37 @@ figure is extrapolated rather than measured.
 
 The rate may drift as bodies grow or episodes lengthen; s1's episodes (174-241)
 are already longer than s2's (76-132), so the pair is paced by s1.
+
+## Epoch-40 stride and the budget, re-measured on warm arms
+
+**Persist stride confirmed on the warm-started arms** (the earlier confirmation
+was on the cold pair — same code, different run):
+
+```
+[ring] epoch 10: archived, ring now holds 2 (in memory only; not persisted)
+[ring] epoch 20: archived, ring now holds 3 (in memory only; not persisted)
+[ring] epoch 30: archived, ring now holds 4 (in memory only; not persisted)
+[ring] epoch 40: archived, ring now holds 5
+```
+
+s1 holds `policy_0000` and `policy_0040` on disk (297 MB) with **6 body XMLs** —
+every archive documented, only every fourth persisted. Disk **9.6 GB free**;
+projection to epoch 400 is **1.59 GB/arm, 4.78 GB for three**.
+
+### Budget: my 7-epoch figure was optimistic
+
+| window | s1 | s2 |
+|---|---:|---:|
+| recent 7 epochs (quoted earlier) | 119.7 | 127.9 |
+| **epochs 20+, n=20/19** | **137.6** | **148.0** |
+| range | 111-178 | 119-197 |
+
+The seven-epoch window caught a fast stretch. **The same mistake as the 80 s GPU
+window**: a sample shorter than the thing's own variation reports the part of
+the distribution it happened to land in. The 20-epoch window is the one to use.
+
+> pair, paced by the slower arm at **148 s/epoch** → **16.4 h**
+> s3 alone afterwards, est. ~100 s/epoch (**extrapolated**; cold single-arm was
+> 112) → ~11.1 h
+> **TOTAL ≈ 28 h** — against ~35 h on the cold arms and the ~25 h I quoted from
+> the short window.

@@ -1165,3 +1165,58 @@ not guaranteed — a run that dips will archive a locally weak self that later
 checkpoints overtake — but it is achievable, and s2 achieved it.* Transitivity
 held in both cases regardless, which is the property the criterion actually
 needs.
+
+## A seat advantage in slot 0 — and what it does to the verdict
+
+Chasing the ladder clip's gap-0 panel (0.70 where a self-match should be 0.50)
+turned up a real effect, and three instruments disagreed about its size until
+the construction path was controlled for.
+
+| measurement path | slot-0 share | implied signed `d` | significance |
+|---|---:|---:|---:|
+| **mirror** (`make_current_member`, live body) | 0.63-0.66 | +0.26 to +0.32 | 9-11 SE |
+| **self-match** (tournament path, archived members) | **0.550** | **+0.100 ± 0.035** | **2.8 SE** |
+| tournament off-diagonal (i ≠ j) | 0.51-0.53 | +0.023 / +0.057 | 0.7 / 1.7 SE |
+
+The mirror figure pools ~1085 decisive episodes per arm, so it is not noise —
+but it is **path-specific**. A self-match run entirely through the tournament's
+`_install`/`_play` path gives 0.550, not 0.65. The difference is how the
+opponent is built: the mirror dumps a fresh body from the current policy while
+the learner evolves its own live, so the two sides may not be the same creature.
+**That is an unresolved defect in the mirror instrument, not in the physics.**
+
+It is also **checkpoint-dependent** — per-checkpoint `d` runs −0.040, +0.250,
++0.100, +0.090 (e0/e80/e160/e280), and one checkpoint favours slot 1. A uniform
+harness bias would not vary like that; body geometry plausibly would.
+
+### Consequence for the criterion
+
+**The `ladder` uses `ring.get()` + `_install` + `_play` — the same path as the
+self-match probe — so δ ≈ 0.05 is the correction that applies to it.**
+
+| | reported | −0.05 (self-match δ) | margin |
+|---|---:|---:|---:|
+| s1 | 0.823 ± 0.024 | **0.773** | **1.0 SE** — MET, marginal |
+| s2 | 0.863 ± 0.021 | **0.813** | **3.0 SE** — MET |
+
+Under the mirror's larger δ ≈ 0.13 both would fail (0.693, 0.733) — but that δ
+belongs to a path the ladder does not use, so applying it would be wrong.
+
+**The verdict does not rest on the ladder alone, and that is what saves it.**
+The tournament's matrix is **slot-averaged by construction** — every pair played
+in both orientations — so it is seat-neutral, and it independently shows the
+latest checkpoint beating every predecessor (s1 min 0.56, s2 min 0.57) with
+0.000 cyclic triples on 70 triples.
+
+**Revised statement of the result:** the ratchet holds, on the seat-neutral
+instrument. The ladder-based number is mildly inflated by a seat effect and s1's
+margin is ~1 SE rather than 3 once corrected. **s2's holds at 3 SE either way.**
+
+### And the second half of the user's criterion is NOT met as measured
+
+*"Basically tied against its current iteration"* — the mirror gives slot 0
+**63-66% of decisive self-matches**. Even at the seat-neutral 0.55, a
+current-vs-current match is not a tie. Part of that is the mirror's own
+construction defect, but none of it supports "tied", and the honest reading is
+that this half is **unverified** pending a mirror instrument that plays both
+orientations the way the tournament does.

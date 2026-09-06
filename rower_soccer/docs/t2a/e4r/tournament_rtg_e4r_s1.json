@@ -36,8 +36,15 @@
  "cyclic_triple_fraction": 0.0,
  "n_triples": 4,
  "NON_TRANSITIVE": false,
- "slot_asymmetry_mean": 0.19444444444444445,
- "slot_asymmetry_max": 0.6666666666666666,
+ "slot_bias": {
+  "mean_signed_d": 0.1388888888888888,
+  "se_mean": 0.11785113019775795,
+  "max_abs_d": 0.6666666666666665,
+  "n_pairs": 6,
+  "se_per_pair": 0.2886751345948129,
+  "note": "d_ij = S_ij + S_ji - 1; 0 under no slot bias, sign names the favoured slot. Compare mean_signed_d against se_mean, NOT against 0 alone."
+ },
+ "slot_asymmetry_mean_ABSOLUTE_DEPRECATED": 0.19444444444444445,
  "score_vs_older": [
   {
    "epoch": 40,

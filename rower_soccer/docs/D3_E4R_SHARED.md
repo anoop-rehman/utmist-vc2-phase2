@@ -938,3 +938,49 @@ The verdict tournament runs 20 episodes per ordered pair, where the asymmetry
 SE falls to ~0.16 — better, still coarse. **A slot bias smaller than ~0.15
 cannot be resolved at the pre-registered sample size**, which is worth knowing
 before the diagnostic is read at epoch 400.
+
+## Slot bias: the statistic was wrong, not the sample size
+
+I reported `mean |S_ij − (1 − S_ji)|` and concluded the diagnostic needed more
+episodes. **That conclusion was wrong.** The mean of an absolute value does not
+average to zero: under *no* bias at all it is a folded normal with expectation
+`σ√(2/π)`. At 6 episodes/ordered pair that floor is **0.230**; at the
+pre-registered 20 it is **0.126**. So a perfectly symmetric tournament still
+reads ~0.13, and **the readings of 0.277 and 0.195 were being compared against
+a zero the statistic can never reach**. More episodes shrink the floor but
+never remove it.
+
+**The signed per-pair quantity averages properly:**
+
+```
+d_ij = S_ij + S_ji − 1        # 0 under no slot bias; sign names the favoured slot
+```
+
+Recomputed on the two runs already taken (6 eps/pair, 6 unordered pairs):
+
+| | mean signed **d** | SE | from zero | mean \|d\| | folded floor |
+|---|---:|---:|---:|---:|---:|
+| **before** protocol fix | **+0.250** | ±0.118 | **2.1 SE** | 0.277 | 0.230 |
+| **after** protocol fix | **+0.139** | ±0.118 | 1.2 SE | 0.195 | 0.230 |
+
+The signed statistic says something the absolute one could not: the pre-fix run
+carried a **marginally significant slot-0 bias at 2.1 SE**, and after the fix it
+is **not significant**. Stated carefully — the *change* itself (0.111, SE of the
+difference 0.167) is **not** significant, so this is evidence the bias existed
+and is now undetectable, not proof the fix removed it.
+
+**At the pre-registered 20 episodes/pair with 12 checkpoints — 66 unordered
+pairs — the SE of the mean is 0.158/√66 ≈ 0.02.** That resolves slot bias to
+±0.02 with no extra compute, against the absolute statistic's 0.126 floor.
+`mean_signed_d` is now the criterion, reported with its SE and an explicit
+"consistent with NO slot bias / SLOT BIAS DETECTED (>2 SE)" verdict;
+`max |d_ij|` is kept only as an outlier check.
+
+### This closes the s2-seed oddity
+
+Logged during the warm-start probe: the s2 seed scored **goal 0.45 against loss
+0.60 while playing itself**, which should be symmetric for identical policies.
+It was **the mean-vs-stochastic protocol mismatch, not the rotation** — the
+slot-0 player acted at its mean action while the slot-1 player paid exploration
+noise and its control cost. Gate 3's rotation (exact to 0.000e+00) was never
+implicated. Third of the three tracked items, now closed.

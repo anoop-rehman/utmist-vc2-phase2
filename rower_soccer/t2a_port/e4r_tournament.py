@@ -124,6 +124,39 @@ def main():
                 continue
             M[x, y] = 0.5 * (S[x, y] + (1.0 - S[y, x]))
             asym.append(abs(S[x, y] - (1.0 - S[y, x])))
+    # SLOT BIAS: signed, not absolute.
+    #
+    # The old statistic was mean |S_ij - (1 - S_ji)|. The mean of an absolute
+    # value does not average to zero: under NO bias at all it has expectation
+    # sigma*sqrt(2/pi), a folded normal. At 20 episodes/ordered pair that floor
+    # is ~0.126, so a perfectly symmetric tournament still reads ~0.13 and the
+    # statistic can never be compared against a 0-is-fair scale. Two runs
+    # scoring 0.277 and 0.195 against a 0.230 floor said nothing at all.
+    #
+    # The signed per-pair quantity
+    #     d_ij = S_ij + S_ji - 1
+    # is 0 under no slot bias and its sign names the favoured slot, so it
+    # averages properly. With 12 checkpoints there are 66 unordered pairs, and
+    # at 20 episodes/pair the SE of the MEAN is ~0.158/sqrt(66) ~= 0.02 --
+    # resolving slot bias to +-0.02 at the sample size already pre-registered,
+    # nearly an order of magnitude better than the absolute statistic's floor,
+    # with no extra compute. max|d| is kept only as an outlier check.
+    d = []
+    for x in range(n):
+        for y in range(x + 1, n):
+            if not np.isnan(S[x, y]) and not np.isnan(S[y, x]):
+                d.append(S[x, y] + S[y, x] - 1.0)
+    d = np.asarray(d, dtype=float)
+    se_pair = float(np.sqrt(2) * np.sqrt(0.25 / a.episodes))
+    slot = dict(
+        mean_signed_d=float(d.mean()) if d.size else None,
+        se_mean=float(se_pair / np.sqrt(d.size)) if d.size else None,
+        max_abs_d=float(np.abs(d).max()) if d.size else None,
+        n_pairs=int(d.size), se_per_pair=se_pair,
+        note=("d_ij = S_ij + S_ji - 1; 0 under no slot bias, sign names the "
+              "favoured slot. Compare mean_signed_d against se_mean, NOT "
+              "against 0 alone."))
+
     beats = np.zeros((n, n), dtype=bool)
     for x in range(n):
         for y in range(n):
@@ -144,8 +177,9 @@ def main():
                                       for v in r] for r in M],
                cyclic_triple_fraction=float(frac), n_triples=int(ntri),
                NON_TRANSITIVE=bool(frac > 0.10),
-               slot_asymmetry_mean=float(np.mean(asym)) if asym else None,
-               slot_asymmetry_max=float(np.max(asym)) if asym else None,
+               slot_bias=slot,
+               slot_asymmetry_mean_ABSOLUTE_DEPRECATED=(
+                   float(np.mean(asym)) if asym else None),
                score_vs_older=rows, raw=raw)
     p = a.out or os.path.join("/workspace/utmist-vc2-phase2/rower_soccer/docs/"
                               "t2a/e4r", f"tournament_{a.cfg}.json")
@@ -155,11 +189,18 @@ def main():
           % (frac, ntri, "NON-TRANSITIVE" if frac > 0.10 else "transitive"))
     # `x or -1` turns a genuine 0.0 into the -1 sentinel, because 0.0 is falsy
     # -- so a PERFECT symmetry printed as an error value. Check for None.
-    am, ax = out["slot_asymmetry_mean"], out["slot_asymmetry_max"]
-    print("  slot asymmetry mean %s max %s (gate 3 says the rotation is exact, "
-          "so this should be ~0)"
-          % ("n/a" if am is None else "%.4f" % am,
-             "n/a" if ax is None else "%.4f" % ax))
+    sb = out["slot_bias"]
+    if sb["mean_signed_d"] is None:
+        print("  slot bias: n/a")
+    else:
+        z = abs(sb["mean_signed_d"]) / sb["se_mean"]
+        print("  SLOT BIAS  mean signed d = %+.4f +- %.4f  (%.1f SE from zero, "
+              "n=%d pairs)" % (sb["mean_signed_d"], sb["se_mean"], z,
+                               sb["n_pairs"]))
+        print("             max |d| = %.4f  [outlier check only]"
+              % sb["max_abs_d"])
+        print("             %s" % ("consistent with NO slot bias" if z < 2
+                                   else "SLOT BIAS DETECTED (>2 SE)"))
     print("  ->", p)
 
 

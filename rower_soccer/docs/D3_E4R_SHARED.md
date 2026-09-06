@@ -425,3 +425,109 @@ may write a spurious `RESTART_RECOMMENDED` at epoch 150. That costs a log line
 superseded **and computes the corrected forward-progress check independently**,
 so the right answer is reported regardless of which rule the trainer was
 launched with.
+
+## Why the creatures do not move — measured, and it is structural
+
+### 1. Not a bug: the opponent is driven
+
+Ruled out first, because an untrained opponent and an inert one are
+indistinguishable on screen. Measured on a real self-play episode with s2's
+epoch-40 ring member installed exactly as training installs it:
+
+| | value |
+|---|---:|
+| opponent **max \|torque\|** | **0.8225** |
+| opponent mean \|torque\| | 0.3786 |
+| steps with non-zero torque | **100%** |
+| opponent displacement toward its goal | 0.151 m |
+
+The opponent acts. This is not the epoch-2-stage-flag failure the E4 gate
+caught.
+
+### 2. The learner's mean action has collapsed, and exploration is net-negative
+
+Same episode, our own agent:
+
+| per step | mean action | stochastic (what PPO samples) |
+|---|---:|---:|
+| max \|action\| | **0.0009** | 0.827 |
+| forward | +0.024 | +0.159 |
+| ctrl cost | 0.000 | **0.212** |
+| survive | +1.000 | +1.000 |
+| **dense total** | **+1.024** | **+0.947** |
+
+**Exploring costs more than it earns.** The noise that could discover
+locomotion costs 0.212/step and buys 0.159 — so standing still is better by
+0.077/step, and the gradient points at shrinking the action. The mean action is
+already **0.0006**: all visible motion in the videos is exploration noise, not
+policy.
+
+This is E3's attractor reached by a different route. E3 deleted actuators to
+make `0.5*sum(a^2)` zero; here the actuators survive and the *policy output*
+goes to zero instead. `control_log_std -1.5` and the actuator floor closed the
+first route, not the second.
+
+### 3. What E3.1 had that E4B does not
+
+| at epoch 24 | E3.1 s1 | E3.1 s2 | E4B s1 | E4B s2 |
+|---|---:|---:|---:|---:|
+| `loss_rate` | **1.00** | **1.00** | 0.00 | 0.00 |
+| `ep_len` | 491 | 491 | 500 | 500 |
+| Σforward | **−169** | **−119** | +6 | +6 |
+| `R_mean` | **−685** | **−634** | +498 | +501 |
+
+E3.1's scripted opponent **marched from x=+1 to x=−4 through the agent's
+position** and was infinitely massive (its state was overwritten every step, so
+contact could not slow it). It therefore did two things E4B's opponent does
+not: it **scored in every episode**, and it **shoved the ant backwards**,
+driving Σforward to −169.
+
+E4B's two agents stand 2 m apart and never touch. Nobody scores, nobody pushes.
+**Standing still earns ~99% of the achievable return.**
+
+### 4. The alpha schedule is NOT the culprit
+
+Worth checking, and the answer is no. `alpha` weights only the **sparse** term:
+
+| epoch | alpha | parse weight | value if parse = −1000 |
+|---|---:|---:|---:|
+| 40 | 0.9846 | 0.0154 | **−15** |
+| 200 | 0.9232 | 0.0768 | −77 |
+| 400 | 0.8464 | 0.1536 | −154 |
+
+At epoch 40 the sparse term is worth **15 points even when it fires**. E3.1's
+buffer return at e24 was ≈ `0.985 × 322 − 15 ≈ +302`, so the −1000 was
+contributing 5% of it. **What actually taught E3.1 to move was the dense
+forward term at −169**, not `parse`. Re-tuning alpha would not address this:
+the missing signal is dense, and no reweighting of a term that is *identically
+zero* can supply it.
+
+### 5. Is it self-resolving? The barrier is modest but the gradient is adverse
+
+Break-even needs the forward term to exceed ctrl cost at the same action
+magnitude: **0.159 vs 0.212, i.e. ~33% more forward per unit torque**. That is
+a coordination improvement, not a large one — and a competent agent is worth
+far more than standing still (≈ 500 survive + 333 forward + parse, against
+500). So the global optimum is to move.
+
+But the *average* gradient currently points the other way, and the mean action
+is already pinned at ~0. Escape depends on PPO's noise stumbling onto a
+coordinated gait whose advantage survives the ctrl cost, with no external
+pressure helping. **E3.1 needed ~200 epochs to move with a −169 forward penalty
+pushing it; E4B has +6.**
+
+### 6. Options, not yet actioned
+
+Nothing changed on the running arms. Candidates, cheapest first:
+
+1. **Opponent curriculum** — face the *scripted* opponent early, anneal to
+   self-play once locomotion exists. Restores exactly the pressure that made
+   E3.1 work, reuses `opponent_mode: scripted` which gate 5 proves is bit-identical
+   to `run_to_goal`, and matches Bansal's exploration-curriculum logic applied
+   to the opponent rather than the reward.
+2. **Warm start from an E3.1 winner** — seed the ring's epoch-0 member from
+   `rtg_e31_s2` (4.891 m/s). **AlphaStar does not start its league from random
+   initialisation either**; it seeds from supervised policies precisely because
+   self-play from scratch does not bootstrap. We have three solved checkpoints.
+3. **Lower `CTRL_COST_COEF`** — changes the reward E3/E3.1 were measured under,
+   so every cross-rung comparison breaks. Least preferred.

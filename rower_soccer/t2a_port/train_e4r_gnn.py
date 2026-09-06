@@ -200,6 +200,13 @@ def main():
     p.add_argument("--ring-every", type=int, default=10,
                    help="archive the current self into the ring every N "
                         "epochs. 40 members over 400 epochs.")
+    p.add_argument("--ring-persist-every", type=int, default=4,
+                   help="persist every Nth ARCHIVE to disk (not every Nth "
+                        "epoch). Each policy is 148 MB, so all 41 members x 3 "
+                        "arms would be 17.8 GB. The in-memory ring still holds "
+                        "every member, so the experiment is unchanged; this "
+                        "only thins what the post-hoc tournament can read, and "
+                        "it subsamples to ~12 anyway.")
     p.add_argument("--ring-delta", type=float, default=0.0,
                    help="CompetEvo's WINDOW parameter, not a mixing "
                         "probability: the opponent is uniform on "
@@ -311,8 +318,10 @@ def main():
             return
         sd = {k: v.detach().cpu()
               for k, v in agent.policy_net.state_dict().items()}
-        nmem = ring.add(epoch, sd, body)
-        L(f"  [ring] epoch {epoch}: archived, ring now holds {nmem}")
+        keep = (epoch % (args.ring_every * max(1, args.ring_persist_every))) == 0
+        nmem = ring.add(epoch, sd, body, persist=keep)
+        L(f"  [ring] epoch {epoch}: archived, ring now holds {nmem}"
+          f"{'' if keep else ' (in memory only; not persisted)'}")
 
     # ---- pre-registered dead-controller check (PBT substitute) ---------
     # DETECTS and flags; it does NOT restart by itself. An automatic

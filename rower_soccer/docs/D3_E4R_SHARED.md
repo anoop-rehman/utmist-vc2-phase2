@@ -313,3 +313,70 @@ after 1.5 days and 14 hours, re-appending the finished runs' final rows. Both
 were bash, not CUDA clients, and were stopped. They are what made recent
 timestamps appear under `runs/d3_e31_fix/` — **not** the E5 agent, which has
 touched only its own `PLAN_D3_E5_2V2.md`.
+
+## Disk: a deadline, not tightness — and the ring was the cause
+
+Found at 93% (3.1 GB free) with ~34 h of writing still due.
+
+### The burn rate, measured
+
+**Each ring member's policy is 148 MB** — 19.4 M float64 parameters, of which
+**96 MB is three `*_ind_mlp` layers carrying a 256-slot leading dimension** from
+upstream's `use_body_ind`. One is written per archive.
+
+| | GB |
+|---|---:|
+| ring, 41 members × 3 arms to epoch 400 | **17.8** |
+| free at discovery | 3.1 |
+| **exhaustion point** | **≈ epoch 100, under 3 h away** |
+
+So: a deadline. `models/` was **not** the problem — the trainer already
+archives it to GCS with size verification and prunes locally
+(`archived+pruned`), and with `save_model_interval 100` it stays bounded. **The
+ring had no archive-and-prune path at all.**
+
+### The fix: persist a subset, keep the experiment identical
+
+`--ring-persist-every 4` writes every 4th archive to disk (11 members/arm).
+**The in-memory ring still holds every member**, so the sampler's support and
+therefore the experiment are unchanged; only what the post-hoc tournament can
+read is thinned, and it subsamples to ~12 checkpoints anyway.
+
+| persist-every | members/arm | 3 arms |
+|---|---:|---:|
+| 1 (before) | 41 | 17.82 GB |
+| 3 | 14 | 6.09 GB |
+| **4 (chosen)** | **11** | **4.78 GB** |
+
+Also fixed: the mirror match's transient "current self" was writing a **148 MB
+`policy_-001.p` on every eval**. Overwritten each time so it never grew, but it
+burned the write and held the space for nothing. Now `persist=False`.
+
+The two live arms were on the old code, so they were restarted at **epoch 13
+(3.2% in, ~26 min)** rather than having files deleted underneath them.
+
+### Space recovered, verify-then-delete
+
+Every run uploaded to GCS and **md5 compared against the stored object** before
+anything was removed; a run whose hashes did not match was kept. (The first
+attempt failed for want of `xxd` and correctly kept all three files.)
+
+Archived and pruned: `rtg_e4_s1a/b`, `rtg_e3c_s1/s2`, `rtg_e3_s1/s2/s3`,
+`rtg_e31f_s1`, `rtg_e31d_s3body`, `hopper_gpu`, `hopper_gpu_s2`,
+`rtg_gnn_s1/s2`. Deleted without archiving: `rtg_e4r_smoke` weights (a pipeline
+test whose only outputs were timings, already documented) and `rtg_e4r_s3`'s
+3-epoch residue, which its own launcher deletes before relaunch.
+
+**Kept deliberately**: `rtg_e31_s1/s2/s3` models — `gate_e4.py`'s default
+snapshot is `rtg_e31_s2/models/epoch_0400.p`, and they are the evidence base
+for the comparison set and the null. Every run's `e3_epochs.jsonl` and all of
+`runs/d3_e31_fix/census/` were kept regardless of archiving; the
+memory-versus-body-size analysis rests on those.
+
+**93% → 74% free (3.1 → 11 GB).** Projected need to completion **≈ 4.8 GB**.
+
+### Disk guard
+
+`watch_e4b.sh` now reports on crossing 6000 / 4000 / 2500 / 1200 MiB free, once
+per threshold. Disk is the one resource with a precedent for killing a run
+here — E3.1 seed 3 died at epoch 39 on a full disk.

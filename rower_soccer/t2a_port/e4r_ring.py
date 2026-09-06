@@ -76,7 +76,7 @@ class OpponentRing:
         os.makedirs(self.dir, exist_ok=True)
 
     # ------------------------------------------------------------ archive --
-    def add(self, epoch, policy_state, body_xml_str):
+    def add(self, epoch, policy_state, body_xml_str, persist=True):
         """Archive one checkpoint: its weights and the body its design head
         produces at the mean action (the MODE of the design distribution, not
         the distribution -- a distinction that has changed conclusions three
@@ -99,8 +99,25 @@ class OpponentRing:
             merged_path=merged_path, body_path=body_path,
             robot=self.robot_cls(self.cfg.robot_cfg, xml=body_path),
             policy=pol)
-        pickle.dump({"policy_dict": policy_state, "epoch": epoch},
-                    open(os.path.join(self.dir, f"policy_{epoch:04d}.p"), "wb"))
+        # Persist to disk ONLY when asked. The in-memory member above is what
+        # training uses -- every archived self stays available to the sampler
+        # regardless -- so `persist` changes nothing about the experiment. The
+        # disk copy exists solely for the post-hoc tournament, which subsamples
+        # to ~12 checkpoints anyway.
+        #
+        # This matters because each policy is 148 MB: 19.4 M float64 parameters,
+        # 96 MB of which are three `*_ind_mlp` layers carrying a 256-slot
+        # leading dimension from upstream's `use_body_ind`. At one per archive,
+        # 41 members x 3 arms is 17.8 GB -- more than the disk has. Unlike
+        # `models/`, the ring has no archive-and-prune path.
+        if persist:
+            pickle.dump({"policy_dict": policy_state, "epoch": epoch},
+                        open(os.path.join(self.dir, f"policy_{epoch:04d}.p"),
+                             "wb"))
+        else:
+            for stale in (f"body_{epoch:04d}.xml", f"scene_{epoch:04d}.xml"):
+                pass    # XMLs are ~13 KB; keeping them costs nothing and they
+                        # document every archived body, persisted or not
         return len(self.members)
 
     # ------------------------------------------------------------- sample --
@@ -200,7 +217,11 @@ def make_current_member(ring, agent, env, e3_morph, sp, epoch):
     sd = {k: v.detach().cpu() for k, v in agent.policy_net.state_dict().items()}
     key = -1                                   # reserved slot for 'current'
     ring.members.pop(key, None)
-    ring.add(key, sd, body)
+    # persist=False: this is a transient built fresh for every mirror match and
+    # discarded immediately. Writing it wrote a 148 MB policy_-001.p on EVERY
+    # eval -- overwritten each time, so it never grew, but it burned the write
+    # and held the space for nothing.
+    ring.add(key, sd, body, persist=False)
     return ring.members.pop(key)               # built, but kept out of the ring
 
 

@@ -27,6 +27,7 @@ resolve_pid() {
   [ -n "$best" ] && echo "$best"
 }
 declare -A SEEN=()
+DISKSEEN=999999
 while true; do
   for c in $CFGS; do
     pid=$(resolve_pid "$c")
@@ -91,6 +92,17 @@ if ev:
 if m: print("%s: %s"%(c,"; ".join(m)))
 PY
   done
+  # DISK. The one resource with a precedent for killing a run here: E3.1
+  # seed 3 died at epoch 39 on a full disk. Reported once per threshold
+  # crossing, not every pass.
+  freem=$(df -Pm /workspace | awk 'NR==2{print $4}')
+  for lim in 6000 4000 2500 1200; do
+    if [ "$freem" -lt "$lim" ] && [ "${DISKSEEN:-999999}" -gt "$lim" ]; then
+      echo "DISK: ${freem} MiB free on /workspace (crossed ${lim} MiB). Ring is ~1.6 GB/arm to epoch 400; E3.1 s3 died at epoch 39 on a full disk."
+      DISKSEEN=$lim
+    fi
+  done
+
   u=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)
   if [ "$u" -gt "$GPU_TRIP" ]; then
     sleep 20; u2=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)

@@ -14,8 +14,22 @@ LOCK=/tmp/e4b_s3.launched
 NEED_FREE=14000
 say(){ echo "[$(date +%H:%M:%S)] $*" >> "$LOG"; }
 [ -e "$LOCK" ] && { say "lock present"; exit 0; }
-say "armed: waiting for rtg_e4r_s1 (694927) and rtg_e4r_s2 (695070)"
-while kill -0 694927 2>/dev/null || kill -0 695070 2>/dev/null; do sleep 120; done
+# Resolve by ppid == 1 + cfg rather than caching pids at arm time. Hardcoded
+# pids go stale the moment an arm is restarted -- which happened, and left this
+# launcher watching two dead numbers while the live arms ran under new ones.
+live_arms() {
+  local out="" want p c
+  for want in rtg_e4r_s1 rtg_e4r_s2; do
+    for p in $(ps -o pid= -C python 2>/dev/null); do
+      c=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || continue
+      case "$c" in *train_e4r_gnn.py*"--cfg $want "*) ;; *) continue;; esac
+      [ "$(ps -o ppid= -p $p 2>/dev/null | tr -d ' ')" = "1" ] && out="$out $want($p)"
+    done
+  done
+  echo "$out"
+}
+say "armed: waiting for s1 and s2 to exit (resolved live: $(live_arms))"
+while [ -n "$(live_arms)" ]; do sleep 120; done
 say "s1 and s2 have exited"
 worst=999999
 for j in 1 2 3 4 5 6; do
@@ -36,14 +50,7 @@ fi
 # immediately before launching, because the loop's condition and the launch are
 # separated by a 60 s measurement window during which an arm could have been
 # relaunched by someone else.
-alive=""
-for want in rtg_e4r_s1 rtg_e4r_s2; do
-  for p in $(ps -o pid= -C python 2>/dev/null); do
-    cl=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || continue
-    case "$cl" in *train_e4r_gnn.py*"--cfg $want "*) ;; *) continue;; esac
-    [ "$(ps -o ppid= -p $p 2>/dev/null | tr -d ' ')" = "1" ] && alive="$alive $want($p)"
-  done
-done
+alive="$(live_arms)"
 if [ -n "$alive" ]; then
   say "REFUSING TO LAUNCH: s3 must never overlap another arm, and$alive is live."
   say "Nothing killed, nothing started."
@@ -56,7 +63,7 @@ say "launching rtg_e4r_s3 from a clean slate"
 cd /workspace/Transform2Act && source env-gpu.sh
 nohup .venv-gpu/bin/python \
   /workspace/utmist-vc2-phase2/rower_soccer/t2a_port/train_e4r_gnn.py \
-  --cfg rtg_e4r_s3 --ring-every 10 --ring-delta 0.0 \
+  --cfg rtg_e4r_s3 --ring-every 10 --ring-delta 0.0 --ring-persist-every 4 \
   --curriculum-steps 130208333 --eval-every 5 --eval-episodes 10 \
   --mirror-episodes 20 --ladder-episodes 10 --ladder-k 5 \
   --morph-every 1 --morph-episodes 20 \

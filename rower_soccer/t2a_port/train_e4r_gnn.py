@@ -215,11 +215,24 @@ def main():
                         "for; 0.5 = the most recent half (their dev setting).")
     p.add_argument("--snapshot-root",
                    default="/workspace/Transform2Act/results/_e4_snapshots")
-    p.add_argument("--restart-check-epoch", type=int, default=150,
-                   help="pre-registered PBT substitute: if goal rate is still "
-                        "0.00 here, this seed drew a dead controller. E3.1's "
-                        "s3 was detectable this way by epoch ~140 while its "
-                        "solvers were already climbing.")
+    p.add_argument("--restart-check-epoch", type=int, default=200,
+                   help="pre-registered PBT substitute, CORRECTED. The first "
+                        "version fired at epoch 150 on goal rate == 0.00, and "
+                        "backtesting it against E3.1 showed it would have "
+                        "fired on ALL THREE seeds -- including the two that "
+                        "finished at goal 1.00, which first scored at epochs "
+                        "194 and 199. It now checks FORWARD PROGRESS (the "
+                        "briefing's primary readout) at epoch 200, where E3.1 "
+                        "separates cleanly: over epochs 150-199 the solvers "
+                        "averaged 2.59 m and 3.42 m against the failure's "
+                        "0.68 m, and the failure's mean speed was NEGATIVE in "
+                        "every window while both solvers were positive.")
+    p.add_argument("--restart-fwd-min", type=float, default=1.5,
+                   help="window-mean max_fwd below this at the check epoch "
+                        "flags a dead controller. 1.5 m sits 1.7x below the "
+                        "nearest solver (2.59) and 2.2x above the failure "
+                        "(0.68). Calibrated on ONE negative example, so its "
+                        "false-negative rate is unknown.")
     p.add_argument("--mirror-episodes", type=int, default=20)
     p.add_argument("--ladder-episodes", type=int, default=10)
     p.add_argument("--ladder-k", type=int, default=5,
@@ -333,20 +346,31 @@ def main():
     def check_dead_controller(epoch, ev_hist):
         if restart_flagged[0] or epoch < args.restart_check_epoch:
             return
-        recent = [e["eval"]["goal_rate"] for e in ev_hist
-                  if e["epoch"] >= args.restart_check_epoch - 50]
-        if len(recent) < 3 or max(recent) > 0.0:
+        win = [e["eval"] for e in ev_hist
+               if e["epoch"] >= args.restart_check_epoch - 50]
+        if len(win) < 3:
             return
+        fwd = sum(e["max_fwd"] for e in win) / len(win)
+        spd = sum(e["speed"] for e in win) / len(win)
+        if fwd >= args.restart_fwd_min and spd >= 0.0:
+            return
+        recent = [fwd, spd]
         restart_flagged[0] = True
         marker = os.path.join(cfg.cfg_dir, "RESTART_RECOMMENDED")
         with open(marker, "w") as f:
-            json.dump(dict(cfg=args.cfg, epoch=epoch, n_evals=len(recent),
-                           max_goal_rate=max(recent),
-                           rule=("pre-registered: goal rate still 0.00 at "
-                                 "epoch %d" % args.restart_check_epoch)), f)
-        L(f"  *** RESTART RECOMMENDED: goal rate 0.00 across {len(recent)} "
-          f"evals through epoch {epoch}. Pre-registered dead-controller rule "
-          f"(D3 E4B section 6). Marker: {marker}")
+            json.dump(dict(cfg=args.cfg, epoch=epoch, n_evals=len(win),
+                           mean_fwd=fwd, mean_speed=spd,
+                           fwd_min=args.restart_fwd_min,
+                           rule=("pre-registered (corrected): window-mean "
+                                 "max_fwd %.2f m < %.2f, or mean speed %.3f "
+                                 "< 0, over epochs %d-%d"
+                                 % (fwd, args.restart_fwd_min, spd,
+                                    args.restart_check_epoch - 50,
+                                    args.restart_check_epoch))), f)
+        L(f"  *** RESTART RECOMMENDED: mean forward {fwd:.2f} m "
+          f"(< {args.restart_fwd_min}) / mean speed {spd:.3f} over "
+          f"{len(win)} evals through epoch {epoch}. Pre-registered "
+          f"dead-controller rule, corrected version. Marker: {marker}")
 
     eval_history = []
     recent_evals = []

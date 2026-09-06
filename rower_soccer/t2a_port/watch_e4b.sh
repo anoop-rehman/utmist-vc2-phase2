@@ -52,8 +52,14 @@ while true; do
       fi
       continue
     fi
-    [ -f "/workspace/Transform2Act/results/$c/RESTART_RECOMMENDED" ] && \
-      echo "$c: RESTART RECOMMENDED -- pre-registered dead-controller rule fired"
+    if [ -f "/workspace/Transform2Act/results/$c/RESTART_RECOMMENDED" ]; then
+      # The two arms launched 2026-09-06 00:11 carry the SUPERSEDED rule
+      # (goal rate == 0.00 at epoch 150), which backtesting showed fires on
+      # seeds that go on to solve -- E3.1's winners first scored at 194 and
+      # 199. Report the marker, but say it may be spurious and let the
+      # corrected check below speak for itself.
+      echo "$c: RESTART_RECOMMENDED marker present -- if this arm was launched with --restart-check-epoch 150 the marker is from the SUPERSEDED goal-rate rule and is probably a false positive; see the forward-progress check"
+    fi
     f="/workspace/Transform2Act/results/$c/e4r_epochs.jsonl"
     [ -s "$f" ] || continue
     python3 - "$c" "$f" <<'PY'
@@ -76,6 +82,17 @@ if ev:
     # window, or earlier only as a REGRESSION -- the agent once scored and has
     # now stopped moving, which is genuinely worth waking someone for.
     ever_scored = max((x["eval"]["goal_rate"] for x in ev), default=0.0) > 0.5
+    # Corrected dead-controller check, computed here independently of whatever
+    # rule the running trainer was launched with. Forward progress is the
+    # primary readout and it separates E3.1's seeds where goal rate does not:
+    # over epochs 150-199 the solvers averaged 2.59 and 3.42 m against the
+    # failure's 0.68 m, and the failure's mean speed was negative throughout.
+    if ep >= 200:
+        w=[x["eval"] for x in ev if x["epoch"] >= ep-50]
+        if len(w) >= 3:
+            fw=sum(x["max_fwd"] for x in w)/len(w); sp=sum(x["speed"] for x in w)/len(w)
+            if fw < 1.5 or sp < 0.0:
+                m.append("DEAD CONTROLLER (corrected rule): mean fwd %.2f m / speed %.3f over epochs %d-%d"%(fw,sp,ep-50,ep))
     if st is not None and st>0.5 and mi.get("fwd_mean",9)<2.5 and (ep>=200 or ever_scored):
         m.append("DEGENERATE MIRROR%s: stalemate %.2f at fwd %.2f m"%(
             " (REGRESSION -- this arm previously scored)" if ever_scored and ep<200 else "",

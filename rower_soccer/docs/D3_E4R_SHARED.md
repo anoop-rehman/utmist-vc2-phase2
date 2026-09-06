@@ -380,3 +380,48 @@ memory-versus-body-size analysis rests on those.
 `watch_e4b.sh` now reports on crossing 6000 / 4000 / 2500 / 1200 MiB free, once
 per threshold. Disk is the one resource with a precedent for killing a run
 here — E3.1 seed 3 died at epoch 39 on a full disk.
+
+## The epoch-150 restart rule was wrong — backtested and corrected
+
+Pre-registered as the PBT substitute: *"if a seed's goal rate is still 0.00 at
+epoch 150, restart that seed."* **Backtested against E3.1, it fires on all
+three seeds — including the two that finished at goal 1.00.**
+
+| | first epoch with goal > 0 | final goal | rule at 150 |
+|---|---:|---:|---|
+| `rtg_e31_s1` | **194** | 1.00 | **FIRES** (false positive) |
+| `rtg_e31_s2` | **199** | 1.00 | **FIRES** (false positive) |
+| `rtg_e31_s3` | 179 | 0.00 | fires (correct) |
+
+Applying it would have restarted both eventual winners. The error was choosing
+goal rate — which is near-zero for *everyone* at epoch 150 — instead of the
+briefing's own primary readout.
+
+**Forward progress separates them cleanly, and earlier:**
+
+| epochs 150-199 | s1 (solved) | s2 (solved) | s3 (failed) |
+|---|---:|---:|---:|
+| goal rate | 0.06 | 0.04 | 0.01 |
+| **forward (m)** | **2.59** | **3.42** | **0.68** |
+| **mean speed** | **+0.55** | **+0.53** | **−0.17** |
+
+`max_fwd > 2.0 m` is reached by s1 at epoch 164 and s2 at 119, and by s3
+**never**. s3's mean speed is **negative in every window** (−0.26, −0.17,
+−0.15, −0.18) while both solvers are positive throughout — it was travelling
+backwards.
+
+**Corrected rule**: at **epoch 200**, flag if the window-mean `max_fwd` over
+epochs 150-200 is **< 1.5 m** *or* mean speed **< 0**. On E3.1 that is 3 of 3
+correct: 1.5 m sits 1.7x below the nearest solver and 2.2x above the failure.
+
+**Stated limitation: this is calibrated on ONE negative example.** Its
+false-positive rate on E3.1 is 0/2 and its true-positive rate 1/1, but with a
+single failure to learn from the false-negative rate is unknown. It remains
+detect-and-flag; nothing restarts itself.
+
+The two arms launched 2026-09-06 00:11 still carry the superseded rule, so they
+may write a spurious `RESTART_RECOMMENDED` at epoch 150. That costs a log line
+— nothing acts on it — and the watcher now labels the marker as possibly
+superseded **and computes the corrected forward-progress check independently**,
+so the right answer is reported regardless of which rule the trainer was
+launched with.

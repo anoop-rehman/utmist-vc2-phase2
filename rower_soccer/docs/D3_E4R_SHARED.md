@@ -1040,3 +1040,82 @@ checkpoint was archived and later checkpoints recovered past it.
 **This is an interim reading, not the verdict.** The pre-registered window is
 epochs 200-400 and it has just opened — s1's last eval was e199, outside it.
 `e4r_report.py` correctly reports "no qualifying pairs yet" for both arms.
+
+# IN-WINDOW VERDICT (epochs 200-400, partial: s1 at 251, s2 at 239)
+
+## The pre-registered criterion is MET on both arms
+
+Criterion, fixed before the run: *mean win rate against selves ≥100 epochs
+older, over epochs 200-400, ≥ 0.75.*
+
+| | in-window ratchet | n pairs | SE | clear of 0.75 by | verdict |
+|---|---:|---:|---:|---:|---|
+| `rtg_e4r_s1` | **0.850** | 30 | ±0.034 | **2.9 SE** | **MET** |
+| `rtg_e4r_s2` | **0.852** | 21 | ±0.029 | **3.5 SE** | **MET** |
+
+Two independently-seeded arms agree to three decimals. Computed by
+`e4r_report.py`, which enforces the window and gap filter in its defaults —
+the same code reports "no qualifying pairs yet" outside the window and reported
+exactly that four hours ago.
+
+**The other two pre-registered criteria:**
+
+| | s1 | s2 | threshold |
+|---|---:|---:|---|
+| mirror stalemate | 0.040 | 0.000 | DEGENERATE if > 0.5 |
+| mirror forward | 4.73 m | 5.16 m | DEGENERATE if < 2.5 m |
+| mirror mutual | 0.045 | 0.086 | — |
+| cyclic triples (interim, s1) | **0.000** of 20 | — | CYCLES if > 0.10 |
+
+**Healthy on every one.** The mirror is not degenerate — both agents run the
+full course and finish — and the matrix showed no cycling.
+
+## "Beats all past iterations" holds. "Each beats the one before" does not.
+
+The user's phrasing was the former, so the criterion is satisfied. But the
+matrix exposed a distinction a scalar would have hidden, and the two must not
+be conflated.
+
+From the interim tournament, implied strength by mean slot-averaged score:
+
+```
+200 (0.730) > 160 (0.705) > 80 (0.537) > 40 (0.480) > 120 (0.465) > 0 (0.083)
+```
+
+Epoch 200 beats **every** predecessor (0.57-0.91) and everything beats epoch 0
+(0.85-0.96) — the ratchet in the sense asked for. But **checkpoint 80 beats
+checkpoint 120 at 0.70**: strength is *transitive* without being *monotone in
+training time*. The inversion tracks s1's measured dip — 120 was archived just
+before speed fell 4.054 → 2.929 with falls 0.00 → 0.20 around e134.
+
+So: no strategic cycling (the failure self-play is prone to), but training time
+is not a total order on strength, and a run can archive a locally weak self that
+later checkpoints overtake.
+
+## Speed against the baseline that applies
+
+| | last-5 mean | vs **matched** seed | vs published seed |
+|---|---:|---:|---:|
+| s1 | 4.781 m/s | 1.579 → **+203%** | 4.224 → +13% |
+| s2 | 5.731 m/s | 3.883 → **+48%** | 4.891 → +17% |
+
+The matched figures are the honest comparison: the published speeds were
+measured against E3.1's non-contesting scripted opponent, while these are
+measured against a physical racer.
+
+## What this does NOT establish
+
+1. **Not from-scratch emergence.** Both arms are warm-started from E3.1
+   winners. This shows a ratchet **from a competent baseline** — the question
+   actually asked — and says nothing about self-play bootstrapping from
+   nothing. From scratch, E4B converged on standing still: exploring cost
+   0.212/step against 0.159 of forward gain.
+2. **n = 2 arms**, and they share a lineage: s1 ← `rtg_e31_s1`, s2 ← `rtg_e31_s2`,
+   both E3.1 seeds. s3 (a deliberate replicate of s2's seed) has not run yet.
+3. **The window is partial** — s1 at 251 of 400, s2 at 239. The verdict is
+   in-window but not final; the criterion could still move.
+4. **Inherited morphology.** Design search is refining an already-evolved body,
+   not discovering one. Whether it moves from the inherited plan at all remains
+   a separate question.
+5. **No transfer claim.** A ratchet against its own history says nothing about
+   performance against an agent trained differently.

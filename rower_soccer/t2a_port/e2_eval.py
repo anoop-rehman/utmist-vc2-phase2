@@ -215,6 +215,15 @@ def best_median_worst(env, act, wrap, path, episodes=9, seed_base=777,
         # and E2.1 clip renders byte-identically to the ones already logged.
         if e["bodies_exec"] != e["bodies"]:
             tag += f"  nb={e['bodies_exec']}"
+        # How far the OPPONENT travelled. Without this the panel cannot
+        # distinguish a real match from one rendered against an inert body --
+        # which is exactly the failure that made every clip before 2026-09-06
+        # misleading. `opp_dx` near 0 means the purple side never moved.
+        odx = None
+        if e.get("opp_com_x") is not None:
+            odx = abs(float(e["opp_com_x"]) - 1.0)   # it starts at x = +1
+            tag += f"  oppdx={odx:.2f}m"
+        e["opp_dx"] = odx
         panels[pick[i]] = ([label(f, f"{pick[i]}  R={e['R']:.0f}  "
                                   f"dx={e['net_dx']:.2f}m  {e['n']}st  {tag}")
                             for f in e["frames"]], e)
@@ -238,4 +247,6 @@ def best_median_worst(env, act, wrap, path, episodes=9, seed_base=777,
             sc[f"video/{k}_dx"] = e["net_dx"]
             sc[f"video/{k}_steps"] = e["n"]
             sc[f"video/{k}_goal"] = float(e["reached"])
+            if e.get("opp_dx") is not None:
+                sc[f"video/{k}_opp_dx"] = float(e["opp_dx"])
     return path, sc

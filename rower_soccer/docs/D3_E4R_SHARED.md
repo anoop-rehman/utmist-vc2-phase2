@@ -823,3 +823,21 @@ so the opponent epoch is passed out on the env instead.
 are the same creature (false when design is live) and that the clip shows
 "whether it dodges the opponent" (false for E4B, whose opponent is a past self
 that races and collides rather than a scripted mover to be dodged).
+
+### Panels now show the opponent's displacement
+
+`video/opponent` proves an opponent was *installed*; it does not prove it
+*moved*. Each panel label now carries **`oppdx=`**, and `video/{best,median,
+worst}_opp_dx` is logged alongside, so a clip is self-verifying:
+
+| panel | goal | our dx | **opponent dx** |
+|---|---:|---:|---:|
+| best | 1 | 5.13 m | **4.91 m** |
+| median | 0 | 2.88 m | 1.49 m |
+| worst | 0 | 3.09 m | **3.50 m** |
+
+Both sides race, and in the *worst* panel the opponent travels further than the
+learner — which is what losing looks like. An inert body reads ~0.35 m (gravity
+settling alone), so the two cases are now distinguishable on the label without
+trusting the pipeline. This is what answers "which side is which and is it
+doing anything".

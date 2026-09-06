@@ -758,3 +758,68 @@ stationary one is simply run past.
 * **Optional cheap improvement**: `--ladder-episodes 20` halves the in-flight
   SE for ~60 s per eval. Worth applying at the s3 launch; not worth restarting
   the running arms for.
+
+## The wandb videos were rendering against an INERT opponent
+
+`e3_video.py` builds a fresh agent in a CPU subprocess and uses `ag.env`.
+Nothing installed the ring, so `env.ring` stayed `None`, so `reset_robot` never
+assigned `opp_policy`, so `do_simulation`'s guard
+
+```python
+if (self.opp_mode == 'policy' and self.opp_policy is not None
+        and self.stage == 'execution'):
+    ctrl += self.opp_control(self.opp_action())
+```
+
+skipped the opponent's torque entirely. The clips show a lone runner beside a
+splayed, stationary body.
+
+**Why it was silent, and it is the day's recurring pattern.** E2 and E3 used
+`opponent_mode: scripted`, which needs no policy object, so this same code
+rendered correctly for two rungs. Switching to `opponent_mode: policy` degraded
+it with no error — same code, new configuration, different behaviour.
+
+### Blast radius: the video panels only
+
+* `payload.update(d["scalars"])` **does** send `video/{best,median,worst}_{R,dx,steps,goal}`
+  to wandb, so those panels were biased.
+* The bias is **optimistic**, and the three-condition probe already quantified
+  it: inert was the *easiest* of the three conditions — stalemate 0.00, goal
+  1.00, ep_len 68 against 107 and 120.
+* **Nothing reported was affected.** The in-process eval sets
+  `env.ring_epoch = epoch` before calling `e2_eval.evaluate`, so
+  `eval_*`, `mirror` and `ladder` all draw real past selves. No `video/*`
+  scalar appears anywhere in these docs — every number quoted came from the
+  eval path.
+
+### Fix
+
+`install_ring_opponent` loads **one** past self — the most recent persisted
+ring member — and installs it. One, not the ring: each policy is 148 MB and
+this runs in a CPU subprocess. Two new scalars make the condition impossible to
+misread: **`video/opponent`** (`ring_epoch_80` or `INERT`) and
+**`video/opponent_is_inert`**.
+
+Verified by rendering `rtg_e4r_s1` at `epoch_0060`:
+
+| | goal |
+|---|---|
+| inert (every clip so far) | 1.00 across the board |
+| **corrected, vs `ring_epoch_80`** | best 1.0, **median 0.0, worst 0.0** |
+| in-process eval, same epoch | 0.60-0.70 |
+
+The corrected clip now agrees with the eval; the inert one did not.
+
+**No restart needed** — the trainer spawns `e3_video.py` as a fresh subprocess
+per render, so the running arms pick this up on their next video.
+**Clips rendered before 2026-09-06 show an inert opponent and should not be
+read as matches.**
+
+`load_gnn`'s return arity was deliberately left at four: `e3_posthoc.py` (x2),
+`e3_termination_grid.py` and `e3_blob_probe.py` all unpack exactly four values,
+so the opponent epoch is passed out on the env instead.
+
+`best_median_worst`'s docstring is also corrected: it claimed all three panels
+are the same creature (false when design is live) and that the clip shows
+"whether it dodges the opponent" (false for E4B, whose opponent is a past self
+that races and collides rather than a scripted mover to be dodged).

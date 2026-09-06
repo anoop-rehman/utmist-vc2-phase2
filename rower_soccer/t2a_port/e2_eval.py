@@ -178,10 +178,20 @@ def best_median_worst(env, act, wrap, path, episodes=9, seed_base=777,
 
     Rendering perturbs mujoco-py's rollout in the 4th decimal
     (`e0_video.py` measured it), so the ranking comes from pass 1 and every
-    panel is LABELLED with its own pass-2 numbers. With morphology frozen all
-    three panels are the SAME creature, so what the clip shows is gait and
-    tactics -- how it starts, whether it dodges the opponent, whether it
-    reaches the line -- not design variation."""
+    panel is LABELLED with its own pass-2 numbers.
+
+    What the three panels are depends on the rung, and the prose here used to
+    claim otherwise:
+
+      * With morphology FROZEN (E2, E2.1) all three are the same creature, so
+        the clip shows gait and tactics only.
+      * With the design stages LIVE (E3, E3.1, E4B) they are three DIFFERENT
+        creatures, which is why `nb=` is appended to each label.
+
+    "Whether it dodges the opponent" is also rung-specific and is FALSE for
+    E4B: E2/E3's opponent was a scripted mover that could be dodged, whereas
+    E4B's is a past self that races and collides head-on. Read an E4B clip as
+    a race, not a dodge."""
     stats = [roll(env, act, wrap, seed_base + i, max_steps=max_steps)
              for i in range(episodes)]
     stats = [s for s in stats if s is not None]

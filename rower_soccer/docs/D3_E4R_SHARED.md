@@ -899,3 +899,42 @@ falls is worth watching given s1's collision history.
 
 `rho` continues to swing between +0.87 and −0.67 across consecutive evals and
 remains uninformative; the gap-binned win rate above is the quantity to read.
+
+## Tournament validated on real data — and it caught a scoring-protocol defect
+
+First run of `e4r_tournament.py` against real persisted ring members (s1,
+checkpoints 0/40/80/120). It works, and reads **transitive**: 0.000 cyclic
+triples of 4.
+
+But the slot-asymmetry diagnostic fired at **0.278 mean / 0.500 max**, where
+gate 3 (rotation exact to 0.000e+00) says it should be ~0. The pair scores
+summed to **1.25 instead of 1.0** — whoever held slot 0 won ~62% of the time.
+
+**Cause, and it was mine.** In a scored match the learner is evaluated at its
+**mean action**, while the opponent defaults to acting **stochastically**
+(CompetEvo's `noise_rate = 1.0`). That is right for TRAINING and wrong for
+SCORING: it charges the slot-1 player exploration noise *and* its control cost
+while its opponent pays neither. Gate 6c had already hinted at it — a snapshot
+ran 4.657 m/s in slot 1 against 4.891 trained in slot 0.
+
+Fixed: `_play` now forces `opp_mean_action = True` for the duration of a scored
+match and restores it afterwards. **Training is untouched.**
+
+### What the re-run does and does not show
+
+| | before | after |
+|---|---:|---:|
+| slot asymmetry, mean | 0.278 | 0.194 |
+| mean pair-score sum (1.0 is fair) | 1.25 | 1.14 |
+| cyclic triples | 0.000 | 0.000 |
+
+**This is not evidence the fix worked.** At 6 episodes per ordered pair the SE
+on a score is ~0.204, so the SE on `|S_ij − (1 − S_ji)|` is ~0.29 — **both
+readings are consistent with zero and with each other.** The fix stands on the
+reasoning (scoring two sides under different action protocols is wrong however
+the numbers land), not on this comparison.
+
+The verdict tournament runs 20 episodes per ordered pair, where the asymmetry
+SE falls to ~0.16 — better, still coarse. **A slot bias smaller than ~0.15
+cannot be resolved at the pre-registered sample size**, which is worth knowing
+before the diagnostic is read at epoch 400.

@@ -210,9 +210,28 @@ def _outcomes(eps, goal_x):
 
 
 def _play(env, agent, e2_eval, episodes, seed_base):
-    act, wrap = e2_eval.gnn_actor(agent.policy_net, agent.running_state, True)
-    ev = e2_eval.evaluate(env, act, wrap, episodes=episodes,
-                          seed_base=seed_base, max_steps=env.max_nsteps + 5)
+    """Score a match with BOTH sides on the same action protocol.
+
+    The learner is evaluated at its mean action, but the opponent defaults to
+    acting stochastically (CompetEvo's `noise_rate = 1.0`), which is right for
+    TRAINING and wrong for SCORING: it charges the slot-1 player exploration
+    noise and its control cost while the slot-1 player's opponent pays neither.
+    Measured on a real 4-checkpoint tournament, that gave whoever held slot 0 a
+    systematic edge -- pair scores summed to 1.25 instead of 1.0, i.e. ~62% for
+    slot 0, and slot asymmetry read 0.28 mean / 0.50 max where gate 3 says the
+    rotation is exact. Gate 6c had already hinted at it: a snapshot ran 4.657
+    m/s in slot 1 against 4.891 trained in slot 0.
+
+    Training is untouched -- this only applies while a match is being scored.
+    """
+    keep = getattr(env, "opp_mean_action", False)
+    env.opp_mean_action = True
+    try:
+        act, wrap = e2_eval.gnn_actor(agent.policy_net, agent.running_state, True)
+        ev = e2_eval.evaluate(env, act, wrap, episodes=episodes,
+                              seed_base=seed_base, max_steps=env.max_nsteps + 5)
+    finally:
+        env.opp_mean_action = keep
     return _outcomes(ev.pop("episodes", []), env.goal_x)
 
 

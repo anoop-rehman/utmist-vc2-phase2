@@ -56,6 +56,7 @@ sys.path.append("/workspace/utmist-vc2-phase2")
 os.chdir("/workspace/Transform2Act")
 
 import numpy as np  # noqa: E402
+import pickle  # noqa: E402
 import torch  # noqa: E402
 
 RENDER_DIR = "/workspace/utmist-vc2-phase2/runs/d3_e3_adversarial/renders"
@@ -200,6 +201,15 @@ def main():
     p.add_argument("--ring-every", type=int, default=10,
                    help="archive the current self into the ring every N "
                         "epochs. 40 members over 400 epochs.")
+    p.add_argument("--warm-start", default=None,
+                   help="checkpoint whose policy AND value weights initialise "
+                        "this run. Both the learner and the ring's epoch-0 "
+                        "member come from it -- the ring archives the current "
+                        "policy at epoch 0, so seeding the learner seeds the "
+                        "ring automatically and the mirror match is a true tie "
+                        "from the start. Seeding ONLY the ring would hand a "
+                        "random learner an unbeatable opponent, which is "
+                        "Bansal's documented failure mode.")
     p.add_argument("--ring-persist-every", type=int, default=4,
                    help="persist every Nth ARCHIVE to disk (not every Nth "
                         "epoch). Each policy is 148 MB, so all 41 members x 3 "
@@ -274,6 +284,28 @@ def main():
                                training=True, checkpoint=start_epoch)
     L = agent.logger.info
     env = agent.env
+
+    # ---- warm start -----------------------------------------------------
+    # E4B from scratch converged on standing still: exploring cost 0.212/step
+    # against 0.159 of forward gain, so the gradient shrank the action and the
+    # mean action collapsed to 0.0006. E3.1 escaped that only because its
+    # scripted opponent scored every episode and shoved the ant backwards
+    # (Sigma_forward -169); two immobile past selves supply neither pressure.
+    if args.warm_start:
+        blob = pickle.load(open(args.warm_start, "rb"))
+        missing = agent.policy_net.load_state_dict(blob["policy_dict"],
+                                                   strict=True)
+        if "value_dict" in blob:
+            agent.value_net.load_state_dict(blob["value_dict"], strict=True)
+        import hashlib
+        h = hashlib.sha256()
+        for k in sorted(blob["policy_dict"]):
+            h.update(np.ascontiguousarray(
+                blob["policy_dict"][k].cpu().numpy()).tobytes())
+        L(f"WARM START from {args.warm_start} (source epoch "
+          f"{blob.get('epoch')}, best_rewards {blob.get('best_rewards')}); "
+          f"policy sha256[:16] {h.hexdigest()[:16]}; strict load OK "
+          f"{missing}")
     design_on = not env.env_specs.get("force_identity_design", False)
     agent.cur_alpha = alpha_at(0, args.curriculum_steps, cfg.min_batch_size)
     if args.curriculum_steps:

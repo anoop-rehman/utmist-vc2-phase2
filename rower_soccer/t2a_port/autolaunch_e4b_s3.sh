@@ -63,7 +63,9 @@ say "launching rtg_e4r_s3 from a clean slate"
 cd /workspace/Transform2Act && source env-gpu.sh
 nohup .venv-gpu/bin/python \
   /workspace/utmist-vc2-phase2/rower_soccer/t2a_port/train_e4r_gnn.py \
-  --cfg rtg_e4r_s3 --ring-every 10 --ring-delta 0.0 --ring-persist-every 4 \
+  --cfg rtg_e4r_s3 \
+  --warm-start /workspace/Transform2Act/results/rtg_e31_s2/models/epoch_0400.p \
+  --ring-every 10 --ring-delta 0.0 --ring-persist-every 4 \
   --curriculum-steps 130208333 --eval-every 5 --eval-episodes 10 \
   --mirror-episodes 20 --ladder-episodes 10 --ladder-k 5 \
   --morph-every 1 --morph-episodes 20 \

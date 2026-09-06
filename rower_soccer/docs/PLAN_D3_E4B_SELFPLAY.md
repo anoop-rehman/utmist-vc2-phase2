@@ -4,6 +4,78 @@
 
 ---
 
+## 0. WARM START — what this changes about the experiment
+
+**Added 2026-09-06, before the seeded arms ran.** E4B from scratch converged on
+standing still. Measured: exploring costs **0.212/step** in control against
+**0.159/step** of forward gain, so the gradient shrinks the action and the mean
+action collapsed to **0.0006** — all visible motion was exploration noise. E3.1
+escaped that only because its scripted opponent scored in every episode and
+**shoved the ant backwards** (Σforward **−169** against E4B's **+6**). Two
+immobile past selves supply neither pressure, so standing still earns ~99% of
+the achievable return.
+
+Both the learner **and** the ring's epoch-0 member are therefore initialised
+from a solved E3.1 checkpoint. Seeding only the ring would hand a random
+learner an unbeatable opponent — Bansal's documented failure mode verbatim.
+AlphaStar seeds its league from supervised policies for the same reason.
+
+**Three things this costs, stated here rather than in a footnote:**
+
+1. **This no longer tests from-scratch emergence.** It tests whether self-play
+   **ratchets from a competent baseline**. That is the question actually asked
+   — "each new iteration should beat all past iterations" — but it is *not* the
+   question the original E4 framing implied, and the two must not be conflated
+   later.
+2. **The morphology is inherited, not evolved by E4B.** The design search now
+   *refines an already-evolved body*. Whether it moves from the inherited plan
+   at all is itself a result worth reporting, and if it does not, E4B has
+   measured control improvement only.
+3. **The baseline moves.** E3.1's bodies are now the *starting point*, so
+   "beats the frozen ant by 2.8-3.3x" is no longer the relevant comparison.
+   **The baseline for every E4B claim is its own seed checkpoint** — 4.891 m/s
+   for s2/s3, 4.224 m/s for s1. A ratchet must beat *that*, not the ant.
+
+### Which checkpoints, and why not three identical ones
+
+Only **two** design-ON competent checkpoints exist. `rtg_e31d_s3body` reached
+goal 1.00 at 3.006 m/s but ran with **`force_identity_design: true`**, so its
+design head was never trained — it cannot seed a design-ON run.
+
+| arm | seed | speed | body |
+|---|---|---:|---|
+| `rtg_e4r_s1` | `rtg_e31_s1/models/epoch_0400.p` | 4.224 m/s | 17b/8m, topo `2b3b3b54a170` |
+| `rtg_e4r_s2` | `rtg_e31_s2/models/epoch_0400.p` | 4.891 m/s | 18b/6m, topo `50271e7f5d26` |
+| `rtg_e4r_s3` | `rtg_e31_s2/models/epoch_0400.p` | 4.891 m/s | *replicate of s2* |
+
+Two distinct morphologies plus one deliberate replicate. The replicate is not
+waste: **s2 vs s3 differ only in RNG, while s1 vs s2 differ in RNG *and*
+starting body**, so the pair decomposes seed variation into its two sources.
+Three identical seeds would have given only the first; three distinct ones were
+not available.
+
+`epoch_0400.p` is used rather than `best.p` (epoch 371) because it has a
+directly measured eval — goal 1.00, 4.891 m/s, 5.58 m — and is the checkpoint
+whose numbers are already published. Its own best eval was 5.062 m/s at epoch
+344, for which no checkpoint file exists.
+
+### Verified before running, two-sided
+
+A failed load and a fresh init both print "loaded" and both stand still, so the
+gate measures a cold agent beside a warm one:
+
+| | warm | cold |
+|---|---:|---:|
+| policy hash vs checkpoint | **identical** | differs |
+| mean \|action\| | **0.4675** | 0.000482 |
+| speed | **4.974 m/s** (2% off published) | 0.014 m/s |
+| goal rate | **1.00** | 0.00 |
+
+W4 is the negative control: the cold arm fails the speed test, so passing it is
+evidence rather than a formality.
+
+---
+
 ## 1. What was asked for
 
 > Both creatures in the 1v1 share one body and one brain, optimised by

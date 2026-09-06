@@ -62,7 +62,10 @@ def main():
     from rower_soccer.t2a_port import e2_eval, rtg_scene
     from rower_soccer.t2a_port import e4r_ring as R
 
-    cfg = Config(a.cfg, tmp=True)
+    # tmp=False: tmp=True points cfg_dir at /tmp/design_opt/<cfg>, where no ring
+    # exists. The trainer writes the ring under results/<cfg>/ring via
+    # Config(..., tmp=False), so the tournament must resolve the same path.
+    cfg = Config(a.cfg, tmp=False)
     agent = Transform2ActAgent(cfg=cfg, dtype=torch.float64,
                                device=torch.device("cpu"), seed=0,
                                num_threads=1, training=False, checkpoint=0)
@@ -150,9 +153,13 @@ def main():
     json.dump(out, open(p, "w"), indent=1)
     print("\n  cyclic triples %.3f of %d  -> %s (threshold 0.10)"
           % (frac, ntri, "NON-TRANSITIVE" if frac > 0.10 else "transitive"))
-    print("  slot asymmetry mean %.3f max %.3f (gate 3 says the rotation is "
-          "exact, so this should be small)"
-          % (out["slot_asymmetry_mean"] or -1, out["slot_asymmetry_max"] or -1))
+    # `x or -1` turns a genuine 0.0 into the -1 sentinel, because 0.0 is falsy
+    # -- so a PERFECT symmetry printed as an error value. Check for None.
+    am, ax = out["slot_asymmetry_mean"], out["slot_asymmetry_max"]
+    print("  slot asymmetry mean %s max %s (gate 3 says the rotation is exact, "
+          "so this should be ~0)"
+          % ("n/a" if am is None else "%.4f" % am,
+             "n/a" if ax is None else "%.4f" % ax))
     print("  ->", p)
 
 

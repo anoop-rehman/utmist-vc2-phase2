@@ -195,8 +195,16 @@ def _outcomes(eps, goal_x):
     return {"n": n, "win_rate": win, "loss_rate": loss,
             "mutual_rate": mutual, "stalemate_rate": stale,
             "decisive_rate": win + loss,
-            # tournament score, draws worth a half, for the matrix
-            "score": win + 0.5 * mutual,
+            # Tournament score: a draw is worth a half, and a STALEMATE IS A
+            # DRAW -- neither side reached, so neither beat the other.
+            # Counting only `mutual` as a draw made two IDENTICAL policies
+            # score 0.0 against each other in both directions, so the
+            # slot-asymmetry check |S[i][j] - (1 - S[j][i])| came out at 1.000,
+            # its maximum, for a perfectly symmetric matchup. The scores of a
+            # pair must sum to 1; with stalemates excluded they summed to 0.
+            # `stalemate_rate` is still reported separately as the degeneracy
+            # guard -- this only fixes the SCORE.
+            "score": win + 0.5 * (mutual + stale),
             "fwd_mean": float(fwd.mean()), "fwd_min": float(fwd.min()),
             "ep_len_mean": float(np.mean([e.get("n", 0) for e in eps]))}
 

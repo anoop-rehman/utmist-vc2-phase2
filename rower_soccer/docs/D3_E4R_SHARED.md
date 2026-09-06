@@ -707,3 +707,54 @@ playing *itself*. For identical policies that should be symmetric. At n=20 the
 gap is ~1.4 SE so it is probably noise, but it is exactly what the tournament's
 slot-asymmetry diagnostic exists to measure, and gate 3 says the π-z rotation
 is exact — so if it persists it is a finding rather than a nuisance.
+
+## The "slow opponent is an obstacle" hypothesis — tested and REFUTED
+
+Two consecutive ladder evals showed stalemate rising with opponent age (e69:
+0.20/0.20/0.00/0.10/0.00, e74: 0.50/0.30/0.20/0.10/0.00, oldest → youngest),
+with the mirror against a *current* self stalemating only 0.00-0.10. The
+proposed mechanism was geometric: both agents run *past* each other, so the
+crossing point is on each one's path, and a slow or fallen old self — the e0
+seed moves at 1.579 m/s and falls 40% of the time — would be parked in the lane.
+
+If true it would have inverted the pre-registered RATCHET criterion, which
+assumes win rate *rises* with age gap.
+
+**Probe: s1's current policy against the SAME e0 body under three drivers,
+20 episodes each.** Holding the morphology fixed isolates the driver.
+
+| condition | win | **stalemate** | goal | opp moved | ep_len |
+|---|---:|---:|---:|---:|---:|
+| 1 — e0 self (slow, falls, obstructs) | 0.85 | 0.15 | 0.85 | 2.65 m | 107 |
+| 2 — **stationary body**, pure obstacle | **1.00** | **0.00** | **1.00** | 0.35 m | 68 |
+| 3 — e0 body + **current** policy (fast) | 0.75 | **0.25** | 0.75 | 2.84 m | 120 |
+
+**The prediction was (1)≈(2) stalemating, (3) not. The opposite happened.** The
+pure obstacle is the *easiest* condition — zero stalemates, goal 1.00, shortest
+episodes — and it sits at x≈+1.35, squarely on the path from −1 to +4. s1 runs
+past it every time.
+
+**Stalemates track opponent MOBILITY, not obstruction**: 0.00 at 0.35 m of
+opponent movement, 0.15 at 2.65 m, 0.25 at 2.84 m. Consistent with the earlier
+collision result — a body moving at high closing speed knocks s1 off course; a
+stationary one is simply run past.
+
+### Consequences
+
+* **The criterion is not inverted.** The mechanism runs the other way: fast
+  recent selves cause more stalemates than slow old ones, so recent selves are
+  *harder*, which is the direction the criterion already assumes.
+* **The age-stalemate gradient has no supported mechanism.** A controlled
+  20-episode comparison outranks a 5-point trend built from 10-episode evals.
+  It is most likely sampling noise — which was the original read, and it was
+  elevated to a hypothesis before being tested. The lesson is the ordering:
+  test first, then elevate.
+* **No change to the measurement.** The reason to change it did not survive.
+  The pre-registered `e4r_tournament.py` already plays the **full all-pairs
+  matrix** (12 checkpoints × 20 episodes × both slot orientations), which
+  subsumes a common fixed reference set and is what detects non-transitivity.
+  The per-epoch `ladder` is a cheap in-flight indicator at n=5 × 10 episodes,
+  not the verdict instrument.
+* **Optional cheap improvement**: `--ladder-episodes 20` halves the in-flight
+  SE for ~60 s per eval. Worth applying at the s3 launch; not worth restarting
+  the running arms for.

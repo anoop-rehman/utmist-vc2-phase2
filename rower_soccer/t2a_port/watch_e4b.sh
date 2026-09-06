@@ -37,7 +37,23 @@ while true; do
       # A stop-file means we stopped it on purpose. Say so instead of crying
       # DEAD every pass -- an alarm that fires for an intended state trains
       # the reader to ignore it.
-      if [ -e "/tmp/stop_e4b_${c#rtg_e4r_}" ]; then
+      # A stop-file is not the only legitimate reason an arm is absent: s3 is
+      # DEFERRED with a detached launcher waiting for s1/s2, and its stop-file
+      # is deliberately removed so the launcher can start it. Treat "its
+      # launcher is armed" as an intentional state too, otherwise every
+      # restart makes the watcher cry DEAD about a perfectly healthy queue.
+      deferred=""
+      for lp in $(ps -o pid= -C bash 2>/dev/null); do
+        [ -r "/proc/$lp/cmdline" ] || continue
+        lc=$(tr '\0' ' ' < "/proc/$lp/cmdline" 2>/dev/null) || continue
+        case "$lc" in *autolaunch_e4b_s3*) [ "$(ps -o ppid= -p $lp 2>/dev/null | tr -d ' ')" = "1" ] && deferred="$lp";; esac
+      done
+      if [ "$c" = "rtg_e4r_s3" ] && [ -n "$deferred" ]; then
+        if [ "${SEEN[$c]:-}" != "queued" ]; then
+          echo "$c: not running -- DEFERRED, launcher armed (pid $deferred) waiting for s1/s2"
+          SEEN[$c]=queued
+        fi
+      elif [ -e "/tmp/stop_e4b_${c#rtg_e4r_}" ]; then
         # Report an intended state ONCE, not every pass. A watcher that
         # repeats an unchanged expected condition every 10 minutes is noise,
         # and noise is how a real event gets missed.

@@ -841,3 +841,61 @@ learner — which is what losing looks like. An inert body reads ~0.35 m (gravit
 settling alone), so the two cases are now distinguishable on the label without
 trusting the pipeline. This is what answers "which side is which and is it
 doing anything".
+
+## The "flat ladder" was an age-gap artifact — tested
+
+s2's ladder mean sat near 0.61 for the first ~60 epochs and then rose to ~0.70,
+which raised the question of whether a warm-started arm near its ceiling can
+ratchet at all. **A ring whose oldest member is 30 epochs back cannot show a
+ratchet**, so the mean was confounded with ring age. Tested by pooling every
+`(eval epoch, age gap, win rate)` triple and splitting by training phase at
+matched gaps:
+
+| age gap | s1 early (<70) | s1 late (≥100) | s2 early (<70) | s2 late (≥100) |
+|---|---:|---:|---:|---:|
+| 0-20 | 0.55 | 0.60 | 0.56 | 0.62 |
+| 20-50 | 0.74 | 0.44 | 0.60 | 0.65 |
+| 50-100 | 0.82 | 0.76 | 0.75 | 0.64 |
+| **100-200** | — | **0.80** | — | **0.75** |
+
+Two things fall out.
+
+**Win rate rises with age gap, in both phases and both arms** — s1 early
+0.55 → 0.74 → 0.82, s2 early 0.56 → 0.60 → 0.75, and late 0.60 → 0.76 → 0.80 /
+0.62 → 0.64 → 0.75. The direction the criterion assumes is present, and was
+present from the start.
+
+**At matched gaps, early ≈ late.** That is not evidence against a ratchet — it
+is what a *steady* ratchet predicts. If the current agent and a self from Δ
+epochs ago both improve at the same rate, the win rate at fixed Δ stays
+constant. The ladder *mean* rose from 0.61 to 0.70 only because the ring aged
+and larger gaps entered the average.
+
+**So the flat period was an artifact of coverage, not an absence of ratcheting**,
+and the "can a warm-started arm ratchet at all" question is resolved in the
+affirmative for both arms.
+
+It also vindicates the criterion's construction: **RATCHET HOLDS is defined on
+selves ≥ 100 epochs older**, which is immune to this confound. Its actual
+quantity currently reads **s1 0.80, s2 0.75** — at or above the 0.75 threshold,
+though still outside the 200-400 verdict window and on n=8 / n=6.
+
+### s1's 0.44 at e134 is the agent, not the ladder
+
+| s1 vs | e129 | e134 |
+|---|---:|---:|
+| e0 (gap ~130) | 0.80 | 0.60 |
+| e30 (gap ~100) | 0.90 | 0.70 |
+| e60 (gap ~70) | 0.80 | 0.40 |
+| e90/e100 (gap ~35) | 0.50 | 0.20 |
+| e120/e130 (gap ~5) | 1.00 | 0.30 |
+
+**Every opponent's win rate fell simultaneously** — that is the signature of
+the learner being worse, not of opponent selection or a ladder mechanism. Its
+own eval at the same epoch agrees: speed **4.054 → 2.929** and fall rate
+**0.00 → 0.20** after five clean evals. A single bad eval on a noisy series
+(speed 3.85, 3.84, 4.66, 4.05, 2.93), not a regime change — but the return of
+falls is worth watching given s1's collision history.
+
+`rho` continues to swing between +0.87 and −0.67 across consecutive evals and
+remains uninformative; the gap-binned win rate above is the quantity to read.

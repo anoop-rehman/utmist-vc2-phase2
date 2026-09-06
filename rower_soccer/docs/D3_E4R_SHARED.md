@@ -584,3 +584,56 @@ That is a morphological difference under adversarial contact — precisely what
 E4B exists to surface — and it is a result, not a fault. Whether the ratchet
 teaches s1 a collision-robust gait is now one of the more interesting things
 this run can answer.
+
+## s1 learns collision robustness — the first genuinely adversarial adaptation here
+
+Its seed falls on contact (0.40, pristine, no gradient steps). Nineteen epochs
+later it barely does, and every measure moves monotonically:
+
+| s1 | e4 | e9 | e14 | **e19** |
+|---|---:|---:|---:|---:|
+| **fall rate** | 0.90 | 0.80 | 0.60 | **0.10** |
+| goal | 0.00 | 0.10 | 0.20 | **0.80** |
+| forward (m) | 2.81 | 3.08 | 3.73 | **4.70** |
+| speed | 1.052 | 1.209 | 1.306 | **2.325** |
+| mirror decisive | 0.15 | 0.35 | 0.65 | **0.85** |
+| mirror stalemate | 0.85 | 0.65 | 0.35 | **0.15** |
+| ladder win vs past selves | 0.00 | 0.20 | 0.45 | **0.65** |
+
+**s1 is now better than its own seed at the thing the seed was never tested
+on.** The seed policy, unchanged, falls 0.40 against a physical copy of itself;
+s1 at epoch 19 falls **0.10**. E3.1 could not have produced this: its opponent's
+state was overwritten every step, so a head-on collision at 8.4 m/s closing
+speed never occurred in training.
+
+This is the ratchet doing what it was built to do — `ladder win` 0.00 → 0.65
+means the current agent now beats its own archived past selves — and the
+adaptation is to a pressure that only exists because both sides are real.
+
+s2 meanwhile is stable: **fall 0.00 throughout**, goal 0.4-0.6 against loss
+0.4-0.6 (a maintained tie), mirror **0.90-1.00 decisive with 0.00-0.05
+stalemate**, ladder win 0.55-0.80.
+
+Both are far too early for the pre-registered verdict, which is taken over
+epochs 200-400 and requires win rate ≥ 0.75 against selves ≥ 100 epochs older.
+The sign is right; the number is not yet evidence.
+
+## Budget re-derived on warm-started arms
+
+Warm arms terminate episodes on goals rather than the 500-step cap, which
+changes the rate materially:
+
+| | cold arms | warm arms, recent 7 epochs |
+|---|---:|---:|
+| `ep_len` | 500 (timeout) | 76-241 |
+| s/epoch | 189 | **s1 119.7, s2 127.9** |
+
+At ~124 s/epoch the concurrent pair finishes 400 epochs in **13.8 h**. s3 alone
+afterwards should be faster still with no contention — the cold single-arm rate
+was 112 s/epoch, so ~100 s warm is plausible, giving **~11 h**, though that
+figure is extrapolated rather than measured.
+
+> **Revised total ≈ 25 h**, against the ~35 h carried over from the cold arms.
+
+The rate may drift as bodies grow or episodes lengthen; s1's episodes (174-241)
+are already longer than s2's (76-132), so the pair is paced by s1.

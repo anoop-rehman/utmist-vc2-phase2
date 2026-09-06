@@ -984,3 +984,59 @@ It was **the mean-vs-stochastic protocol mismatch, not the rotation** — the
 slot-0 player acted at its mean action while the slot-1 player paid exploration
 noise and its control cost. Gate 3's rotation (exact to 0.000e+00) was never
 implicated. Third of the three tracked items, now closed.
+
+## Interim tournament at epoch 200 — transitive, and a ratchet with one inversion
+
+`rtg_e4r_s1`, 6 persisted checkpoints, **20 episodes per ordered pair** (the
+pre-registered rate), both slot orientations averaged. 600 episodes, `nice`d so
+the training arms kept priority.
+
+Slot-averaged score, row beats column:
+
+| | 0 | 40 | 80 | 120 | 160 | 200 |
+|---|---:|---:|---:|---:|---:|---:|
+| **0** | — | 0.06 | 0.15 | 0.07 | 0.04 | 0.09 |
+| **40** | 0.94 | — | 0.36 | 0.42 | 0.36 | 0.31 |
+| **80** | 0.85 | 0.64 | — | **0.70** | 0.30 | 0.20 |
+| **120** | 0.93 | 0.57 | 0.30 | — | 0.20 | 0.32 |
+| **160** | 0.96 | 0.64 | 0.70 | 0.80 | — | 0.42 |
+| **200** | 0.91 | 0.69 | 0.80 | 0.68 | 0.57 | — |
+
+**Three findings.**
+
+**1. Transitive.** `cyclic triples 0.000 of 20`, against a 0.10 threshold whose
+noise ceiling under a transitive null is 0.055. **The failure mode self-play is
+specifically prone to — 30 beats 20, 20 beats 10, 10 beats 30 — is absent.**
+This is the reading the whole matrix exists to produce, and it is now measured
+at the pre-registered sample size rather than on a synthetic ring.
+
+**2. No detectable slot bias.** `mean signed d = +0.0667 ± 0.0408` — **1.6 SE
+from zero, consistent with none.** The signed statistic over 15 pairs resolves
+to ±0.041, against ±0.118 from the 6-episode trial, so this is a real
+measurement rather than a shrug. Combined with the earlier finding that the
+pre-fix run sat at 2.1 SE, the protocol fix looks to have done its job — though
+the two runs differ in episode count as well, so this is consistent evidence
+rather than a controlled before/after.
+
+**3. The latest checkpoint beats every past self — but strength is NOT monotone
+in training time.** Epoch 200's row is 0.91 / 0.69 / 0.80 / 0.68 / 0.57: it
+beats all five predecessors. Every checkpoint beats epoch 0 (0.85-0.96). But
+the implied ranking is
+
+```
+200 (0.730) > 160 (0.705) > 80 (0.537) > 40 (0.480) > 120 (0.465) > 0 (0.083)
+```
+
+with one inversion: **checkpoint 80 beats checkpoint 120 at 0.70.** Transitivity
+and monotonicity are different properties, and only the first holds. Training
+time is not a total order on strength here — which matters because a criterion
+phrased as "beats all past iterations" is satisfied by epoch 200 while "each
+iteration beats the one before" is not.
+
+The inversion is not mysterious: epoch 120 sits just before s1's measured dip
+(speed 4.054 → 2.929 and falls 0.00 → 0.20 around e134), so a locally weak
+checkpoint was archived and later checkpoints recovered past it.
+
+**This is an interim reading, not the verdict.** The pre-registered window is
+epochs 200-400 and it has just opened — s1's last eval was e199, outside it.
+`e4r_report.py` correctly reports "no qualifying pairs yet" for both arms.
